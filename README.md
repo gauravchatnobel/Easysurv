@@ -1,6 +1,6 @@
 # EASYSURV: Interactive Survival Analysis Tool
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://survival-analysis-tool.streamlit.app)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://easysurv.streamlit.app/)
 
 A web-based tool for performing comprehensive survival analysis (Kaplan-Meier, Cox Proportional Hazards) on clinical datasets without writing code.
 
@@ -14,7 +14,7 @@ A web-based tool for performing comprehensive survival analysis (Kaplan-Meier, C
     *   Clean designs with "Journal" (Nature, Cell, Blood) and Fun themes.
     *   Aligning Risk Tables.
     *   Censoring marks and 95% Confidence Intervals.
-    *   **Download plots at 300 DPI**.
+    *   **Download plots at 300 & 600 DPI**.
 
 ### 📉 Statistical Analysis
 *   **Univariable Analysis**: Log-rank tests and Median Survival (Time-to-Event).
@@ -22,6 +22,10 @@ A web-based tool for performing comprehensive survival analysis (Kaplan-Meier, C
     *   Adjust for multiple covariates (Age, Sex, etc.).
     *   Results table with Hazard Ratios (HR), 95% CI, and p-values.
     *   **Forest Plots** for visualizing regression results.
+*   **Competing Risks Analysis (New!)**:
+    *   **Aalen-Johansen Estimator**: Accurate CIF plots (Cumulative Incidence Function).
+    *   **Fine-Gray Regression**: Subdistribution Hazard Ratios for competing events.
+    *   **Gray's Test**: Compare cumulative incidence between groups.
 
 ### 🛠️ Easy to Use
 *   **No Code Required**: Just upload your CSV or Excel file.
@@ -33,7 +37,7 @@ A web-based tool for performing comprehensive survival analysis (Kaplan-Meier, C
 
 ### Option 1: Web (Streamlit Cloud)
 Access the tool directly via the web link (if deployed):
-> **[Use the App Here](https://survival-analysis-tool.streamlit.app)** *(Update this link after deployment)*
+> **[Use the App Here](https://easysurv.streamlit.app/)**
 
 ### Option 2: Run Locally (Python)
 If you prefer to run it on your own machine:
