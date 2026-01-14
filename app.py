@@ -858,6 +858,49 @@ if uploaded_file:
                 fig_cif.savefig(buf_cif, format="png", dpi=300, bbox_inches='tight', facecolor=fig_cif.get_facecolor(), edgecolor='none')
                 buf_cif.seek(0)
                 st.download_button("💾 Download CIF Plot", buf_cif, "cif_plot.png", "image/png")
+                
+                # Point-in-Time Cumulative Incidence Estimates
+                st.subheader("Point-in-Time Cumulative Incidence")
+                st.write("Calculate cumulative incidence probability at a specific time.")
+            
+                cif_target_time = st.number_input("Enter Time Point (e.g., 24 months)", min_value=0.0, value=24.0, step=6.0, key="cif_time_input")
+            
+                cif_est_data = []
+                for ajf, label in zip(cif_fitters, cif_labels):
+                     
+                     # Cumulative Incidence at t
+                     # ajf.cumulative_density_ is a DataFrame with index as timeline
+                     cif_line = ajf.cumulative_density_
+                     
+                     # CI at t
+                     ci_df = ajf.confidence_interval_
+                     
+                     # Interpolation Logic
+                     # Append target_time to index, sort, ffill, then loc
+                     combined_index = cif_line.index.union([cif_target_time]).sort_values()
+                     
+                     cif_line_interp = cif_line.reindex(combined_index).ffill()
+                     ci_df_interp = ci_df.reindex(combined_index).ffill()
+                     
+                     try:
+                        # Extract CIP
+                        cip_val = cif_line_interp.loc[cif_target_time].iloc[0]
+                        
+                        # Extract CI (Lower, Upper)
+                        lower = ci_df_interp.loc[cif_target_time].iloc[0]
+                        upper = ci_df_interp.loc[cif_target_time].iloc[1]
+                     except:
+                        cip_val = 0
+                        lower = 0
+                        upper = 0
+                 
+                     cif_est_data.append({
+                         "Group": label,
+                         f"Cumulative Incidence at {cif_target_time}": f"{cip_val:.1%}",
+                         "95% CI": f"({lower:.1%} - {upper:.1%})"
+                     })
+            
+                st.table(pd.DataFrame(cif_est_data))
 else:
     st.info("Please upload a CSV or Excel file to begin analysis.")
     st.write("Demostration with Dummy Data:")
