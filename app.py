@@ -331,6 +331,7 @@ if uploaded_file:
             
             # Calculate P-value for Plot if requested
             hr_text = ""
+            p_value_text = None # Initialize to avoid NameError
             if show_p_val_plot and group_col != "None" and len(df_clean[group_col].unique()) >= 2:
                 try:
                     cox_df = df_clean[[time_col, event_col, group_col]].dropna()
