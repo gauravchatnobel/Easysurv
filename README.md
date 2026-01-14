@@ -41,8 +41,8 @@ If you prefer to run it on your own machine:
 
 1.  **Clone the repository**:
     ```bash
-    git clone https://github.com/YOUR_USERNAME/survival-analysis-tool.git
-    cd survival-analysis-tool
+    git clone https://github.com/gauravchatnobel/Easysurv.git
+    cd Easysurv
     ```
 
 2.  **Install Requirements**:
