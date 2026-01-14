@@ -713,9 +713,19 @@ if uploaded_file:
 
             # Plot CIF
             if cif_df is not None: # Triggered either by default mode or button in 2-col mode
-                fig_cif, ax_cif = plt.subplots(figsize=(plot_width, plot_height))
                 
                 # Check groupings
+                cif_fitters = []
+                cif_colors = []
+                cif_labels = []
+                
+                # Force Font Update
+                plt.rcParams['font.family'] = selected_font
+                fig_cif, ax_cif = plt.subplots(figsize=(plot_width, plot_height))
+                
+                # Layout adjustments for Risk Table
+                plt.subplots_adjust(left=0.2, right=0.95, top=0.95, bottom=0.2)
+                
                 if group_col != "None" and group_col in cif_df.columns:
                     groups = sorted(cif_df[group_col].unique())
                     for i, group in enumerate(groups):
@@ -728,16 +738,37 @@ if uploaded_file:
                         elif selected_theme in all_themes:
                              palette = all_themes[selected_theme]
                              color = palette[i % len(palette)]
+                        
+                        if color is None:
+                            color = f"C{i}"
+                        
+                        cif_colors.append(color)
+                        
+                        # Resolve Label
+                        # Note: group_labels dictionary keys are from the ORIGINAL dataframe
+                        # If Two-Column mode preserved the group values, this works.
+                        label = group_labels.get(group, str(group))
+                        cif_labels.append(label)
                             
                         # Fit Aalen-Johansen
                         ajf = AalenJohansenFitter(calculate_variance=True)
-                        ajf.fit(cif_df[cif_time_col][mask], cif_df[cif_event_col][mask], event_of_interest=cif_event_of_interest, label=str(group))
-                        ajf.plot(ax=ax_cif, ci_show=show_ci, color=color)
+                        ajf.fit(cif_df[cif_time_col][mask], cif_df[cif_event_col][mask], event_of_interest=cif_event_of_interest, label=label)
+                        ajf.plot(ax=ax_cif, ci_show=show_ci, show_censors=show_censored, color=color)
+                        cif_fitters.append(ajf)
                 else:
                     # Single Group
+                     color = None
+                     if selected_theme in all_themes and len(all_themes[selected_theme]) > 0:
+                         color = all_themes[selected_theme][0]
+                     elif selected_theme == "Custom":
+                         color = st.sidebar.color_picker("Color for All Patients (CIF)", "#1f77b4")
+                     
                      ajf = AalenJohansenFitter(calculate_variance=True)
                      ajf.fit(cif_df[cif_time_col], cif_df[cif_event_col], event_of_interest=cif_event_of_interest, label="All Patients")
-                     ajf.plot(ax=ax_cif, ci_show=show_ci)
+                     ajf.plot(ax=ax_cif, ci_show=show_ci, show_censors=show_censored, color=color)
+                     cif_fitters.append(ajf)
+                     cif_colors.append(color)
+                     cif_labels.append("All Patients")
                      
                 ax_cif.set_title(f"Cumulative Incidence (Event {cif_event_of_interest})")
                 ax_cif.set_xlabel(x_label)
@@ -745,9 +776,12 @@ if uploaded_file:
                 ax_cif.set_ylim(0, 1.05)
                 
                 # Style adjustments
-                plt.rcParams['font.family'] = selected_font
                 fig_cif.patch.set_facecolor(plot_bgcolor)
                 ax_cif.set_facecolor(plot_bgcolor)
+                
+                # Add Risk Table
+                if show_risk_table:
+                    add_at_risk_counts(*cif_fitters, ax=ax_cif, y_shift=table_height, colors=cif_colors, labels=cif_labels)
 
                 st.pyplot(fig_cif)
                 
