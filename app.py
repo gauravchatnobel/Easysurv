@@ -4,7 +4,11 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from lifelines import KaplanMeierFitter, CoxPHFitter, AalenJohansenFitter
 from lifelines.statistics import multivariate_logrank_test, logrank_test
-from survival_analysis.fine_gray_utils import compute_fine_gray_weights
+try:
+    from fine_gray_utils import compute_fine_gray_weights
+except ImportError:
+    # Fallback for standard running (if module struct is different)
+    from survival_analysis.fine_gray_utils import compute_fine_gray_weights
 import numpy as np
 import io
 
