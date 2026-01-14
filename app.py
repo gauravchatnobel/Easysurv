@@ -581,4 +581,6 @@ if uploaded_file:
 else:
     st.info("Please upload a CSV or Excel file to begin analysis.")
     st.write("Demostration with Dummy Data:")
-    st.write("You can find `dummy_clinical_data.csv` in the `survival_analysis` folder to test this app.")
+    st.write("You can download the demo dataset `dummy_clinical_data.csv` from the repository:")
+    st.markdown("[📂 View Repository & Download Data](https://github.com/YOUR_USERNAME/survival-analysis-tool)")
+    st.caption("Right-click the link and open in a new tab to find the CSV file.")
