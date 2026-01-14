@@ -822,19 +822,30 @@ if uploaded_file:
                 fg_summary = None
                 
                 if group_col != "None" and group_col in cif_df.columns:
-                     unique_grps = cif_df[group_col].dropna().unique()
+                     unique_grps = sorted(cif_df[group_col].dropna().unique())
                      if len(unique_grps) >= 2:
-                         try:
-                             with st.spinner("Calculating Fine-Gray Statistics..."):
-                                 # 1. Prepare Weighted Data
-                                 fg_data = compute_fine_gray_weights(cif_df, cif_time_col, cif_event_col, cif_event_of_interest)
-                                 
-                                 # 2. Encode Group Variable (One-Hot)
-                                 fg_data_encoded = pd.get_dummies(fg_data, columns=[group_col], drop_first=True)
-                                 
-                                 # Select columns: 'start', 'stop', event(status), weights, id, and the new dummy columns
-                                 dummy_cols = [c for c in fg_data_encoded.columns if c.startswith(f"{group_col}_")]
-                                 cols_to_fit = ['start', 'stop', 'status', 'weight', 'id'] + dummy_cols
+                          try:
+                              # Select Reference Group (Baseline)
+                              st.write("**Fine-Gray Reference Group (Baseline)**")
+                              fg_ref_group = st.selectbox("Select Baseline Group for Subdistribution HR", unique_grps, index=0, key="fg_ref_group")
+                              
+                              with st.spinner("Calculating Fine-Gray Statistics..."):
+                                  # 1. Prepare Weighted Data
+                                  fg_data = compute_fine_gray_weights(cif_df, cif_time_col, cif_event_col, cif_event_of_interest)
+                                  
+                                  # 2. Encode Group Variable (One-Hot) with Custom Reference
+                                  # To set a specific reference, we can use pd.get_dummies and drop the reference column
+                                  fg_data_encoded = pd.get_dummies(fg_data, columns=[group_col], drop_first=False) # Keep all initially
+                                  
+                                  # Drop the reference group column
+                                  ref_col_name = f"{group_col}_{fg_ref_group}"
+                                  if ref_col_name in fg_data_encoded.columns:
+                                      fg_data_encoded = fg_data_encoded.drop(columns=[ref_col_name])
+                                  
+                                  # Select columns: 'start', 'stop', event(status), weights, id, and the new dummy columns
+                                  # The remaining dummy columns are the comparisons vs reference
+                                  dummy_cols = [c for c in fg_data_encoded.columns if c.startswith(f"{group_col}_")]
+                                  cols_to_fit = ['start', 'stop', 'status', 'weight', 'id'] + dummy_cols
                                  
                                  # 3. Fit Fine-Gray Model (Weighted Cox)
                                  # IMPORTANT: The weighted dataframe from compute_fine_gray_weights is in counting process format (start, stop).
