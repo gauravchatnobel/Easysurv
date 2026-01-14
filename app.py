@@ -125,16 +125,7 @@ if uploaded_file:
     # Fonts
     font_options = ["sans-serif", "serif", "monospace", "Arial", "Helvetica", "Times New Roman", "Courier New", "Verdana", "Comic Sans MS"]
     selected_font = st.sidebar.selectbox("Plot Font", font_options, index=0)
-    
-    # Update global font params
-    if selected_font in ["sans-serif", "serif", "monospace"]:
-        plt.rcParams['font.family'] = selected_font
-    else:
-        # For specific fonts, we try to set them as the first preference in their respective family
-        plt.rcParams['font.sans-serif'] = [selected_font] + plt.rcParams['font.sans-serif']
-        plt.rcParams['font.family'] = 'sans-serif' # Default family fallthrough
-        # Also try setting family directly in case it is installed as a family
-        # plt.rcParams['font.family'] = selected_font
+    plt.rcParams['font.family'] = selected_font
     
     # Axes & Layout
     st.sidebar.subheader("Axes & Layout")
