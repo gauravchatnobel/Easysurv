@@ -198,9 +198,7 @@ if uploaded_file:
     plt.rcParams['font.family'] = selected_font
     
     axes_fontsize = st.sidebar.number_input("Axes/Tick Font Size", min_value=1, value=12, step=1)
-    table_fontsize = st.sidebar.number_input("At-Risk Table Font Size", min_value=1, value=10, step=1)
     legend_fontsize = st.sidebar.number_input("Legend Font Size", min_value=1, value=10, step=1)
-    p_val_fontsize = st.sidebar.number_input("P-value Font Size", min_value=1, value=12, step=1)
 
     # Axes & Layout
     st.sidebar.subheader("Axes & Layout")
@@ -436,8 +434,9 @@ if uploaded_file:
                 ax.tick_params(axis='both', which='major', labelsize=axes_fontsize)
                 
                 # P-value and Legend if applicable (Single group usually no legend needed unless CI)
+                # P-value and Legend if applicable (Single group usually no legend needed unless CI)
                 if show_p_val_plot:
-                     ax.text(0.95, 0.05, p_value_text, transform=ax.transAxes, ha='right', va='bottom', fontsize=p_val_fontsize, bbox=dict(facecolor='white', alpha=0.5))
+                     ax.text(0.95, 0.05, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=dict(facecolor='white', alpha=0.5))
 
                 # DOWNLOAD BUTTON
                 buf = io.BytesIO()
@@ -585,7 +584,7 @@ if uploaded_file:
                     plot_colors = [color] if color else None
                     plot_labels = ["All Patients"]
                     # from lifelines.plotting import add_at_risk_counts (REMOVED due to bug)
-                    add_at_risk_counts([kmf_all], ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels, fontsize=table_fontsize)
+                    add_at_risk_counts([kmf_all], ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels)
             
                 # Apply Custom Label
                 ax.set_xlabel(x_label, fontsize=axes_fontsize)
@@ -1031,8 +1030,9 @@ if uploaded_file:
                 ax_cif.set_facecolor(plot_bgcolor)
                 
                 # Add Risk Table
+                # Add Risk Table
                 if show_risk_table:
-                    add_at_risk_counts(cif_fitters, ax=ax_cif, y_shift=table_height, colors=cif_colors, labels=cif_labels, fontsize=table_fontsize)
+                    add_at_risk_counts(cif_fitters, ax=ax_cif, y_shift=table_height, colors=cif_colors, labels=cif_labels)
                 
                 ax_cif.set_xlabel(x_label, fontsize=axes_fontsize)
                 if y_label:
@@ -1040,8 +1040,7 @@ if uploaded_file:
                 ax_cif.tick_params(axis='both', which='major', labelsize=axes_fontsize)
                 ax_cif.legend(fontsize=legend_fontsize)
 
-                if show_p_val_plot and fg_p_value_text:
-                     ax_cif.text(0.95, 0.2, fg_p_value_text, transform=ax_cif.transAxes, ha='right', va='bottom', fontsize=p_val_fontsize, bbox=dict(facecolor='white', alpha=0.5))
+
 
                 st.pyplot(fig_cif)
                 
