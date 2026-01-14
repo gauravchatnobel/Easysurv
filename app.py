@@ -726,6 +726,33 @@ if uploaded_file:
                 # Layout adjustments for Risk Table
                 plt.subplots_adjust(left=0.2, right=0.95, top=0.95, bottom=0.2)
                 
+                # Determine Ticks (Uniform with Main Plot)
+                cif_max_time = cif_df[cif_time_col].max()
+                if tick_interval:
+                    cif_custom_ticks = np.arange(0, cif_max_time + tick_interval, tick_interval)
+                    ax_cif.set_xticks(cif_custom_ticks)
+                    ax_cif.set_xlim(0, cif_custom_ticks[-1]) # Strict x-limits for table alignment
+                else:
+                     ax_cif.set_xlim(left=0) # At least start at 0
+                
+                # Cause-Specific Log-Rank Test (Approximation for P-value)
+                cif_p_value_text = ""
+                if group_col != "None" and group_col in cif_df.columns:
+                     unique_grps = cif_df[group_col].dropna().unique()
+                     if len(unique_grps) >= 2:
+                         try:
+                             # Create binary event for specific cause (1 vs others)
+                             # Treat competing risks (2) as censored (0) -> Cause-Specific Hazard
+                             temp_evt = (cif_df[cif_event_col] == cif_event_of_interest).astype(int)
+                             res_cif = multivariate_logrank_test(cif_df[cif_time_col], cif_df[group_col], temp_evt)
+                             cif_p_value_text = f"Cause-Specific Log-Rank p = {res_cif.p_value:.4f}"
+                         except:
+                             pass
+                
+                if cif_p_value_text:
+                    ax_cif.text(0.7, 0.9, cif_p_value_text, transform=ax_cif.transAxes, fontsize=10, 
+                            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.5))
+
                 if group_col != "None" and group_col in cif_df.columns:
                     groups = sorted(cif_df[group_col].unique())
                     for i, group in enumerate(groups):
