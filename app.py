@@ -202,6 +202,18 @@ if uploaded_file:
     legend_fontsize = st.sidebar.number_input("Legend Font Size", min_value=1, value=10, step=1)
     p_val_fontsize = st.sidebar.number_input("P-value Font Size", min_value=1, value=12, step=1)
 
+    # Axes & Layout
+    st.sidebar.subheader("Axes & Layout")
+    x_label = st.sidebar.text_input("X-Axis Label", value="Time (Months)")
+    y_label = st.sidebar.text_input("Y-Axis Label", value="Survival Probability")
+    tick_interval = st.sidebar.number_input("X-Axis Tick Interval", min_value=1, value=12, help="Set to 12 for yearly ticks if data is in months.")
+    
+    y_tick_interval = st.sidebar.number_input("Y-Axis Tick Interval", min_value=0.01, value=0.1, step=0.05)
+    y_min = st.sidebar.number_input("Y-Axis Min", value=0.0, step=0.1)
+    y_max = st.sidebar.number_input("Y-Axis Max", value=1.0, step=0.1)
+    
+    plot_height = st.sidebar.slider("Plot Height", 4, 12, 6)
+    plot_width = st.sidebar.slider("Plot Width", 6, 15, 10)
     # Theme Selection
     st.sidebar.subheader("Aesthetics & Themes")
 
