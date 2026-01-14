@@ -709,10 +709,18 @@ if uploaded_file:
 
                     temp_df['Composite_Status'] = temp_df.apply(get_status, axis=1)
                     
-                    cif_df = temp_df
-                    cif_time_col = 'Composite_Time'
-                    cif_event_col = 'Composite_Status'
-                    cif_event_of_interest = 1
+                    # Persist in Session State
+                    st.session_state['two_col_cif_df'] = temp_df
+                    st.session_state['two_col_cif_time'] = 'Composite_Time'
+                    st.session_state['two_col_cif_event'] = 'Composite_Status'
+                    st.session_state['two_col_cif_interest'] = 1
+                
+                # Retrieve from Session State if available
+                if 'two_col_cif_df' in st.session_state:
+                    cif_df = st.session_state['two_col_cif_df']
+                    cif_time_col = st.session_state['two_col_cif_time']
+                    cif_event_col = st.session_state['two_col_cif_event']
+                    cif_event_of_interest = st.session_state['two_col_cif_interest']
                     
                     st.success(f"Constructed composite endpoint. Found {sum(cif_df['Composite_Status']==1)} primary events and {sum(cif_df['Composite_Status']==2)} competing events.")
 
