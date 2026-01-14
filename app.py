@@ -753,8 +753,32 @@ if uploaded_file:
                         # Fit Aalen-Johansen
                         ajf = AalenJohansenFitter(calculate_variance=True)
                         ajf.fit(cif_df[cif_time_col][mask], cif_df[cif_event_col][mask], event_of_interest=cif_event_of_interest, label=label)
-                        ajf.plot(ax=ax_cif, ci_show=show_ci, show_censors=show_censored, color=color)
+                        ajf.plot(ax=ax_cif, ci_show=show_ci, show_censors=False, color=color) # Disable built-in to avoid error
                         cif_fitters.append(ajf)
+                        
+                        # Manual Censoring Ticks
+                        if show_censored:
+                            # 1. Identify censored times for this group
+                            # In our logic (Composite or Single), 0 usually means censored
+                            censored_mask = (cif_df[cif_event_col][mask] == 0)
+                            censored_times = cif_df[cif_time_col][mask][censored_mask].values
+                            
+                            if len(censored_times) > 0:
+                                # 2. Get CIF values at these times
+                                # Reindex the CIF dict to find the value at or before the censored time (step function)
+                                cif_line = ajf.cumulative_density_
+                                # We need to handle step function behavior: forward fill
+                                # Add censored times to the index, sort, ffill
+                                combined_index = cif_line.index.union(censored_times).unique().sort_values()
+                                cif_interp = cif_line.reindex(combined_index).ffill()
+                                
+                                # Extract y-values
+                                # cif_interp is a DataFrame with one column (usually label name or unique ID)
+                                y_values = cif_interp.loc[censored_times].iloc[:, 0].values
+                                
+                                # 3. Plot ticks
+                                ax_cif.plot(censored_times, y_values, '|', color=color, markersize=10, markeredgewidth=1)
+
                 else:
                     # Single Group
                      color = None
@@ -765,10 +789,22 @@ if uploaded_file:
                      
                      ajf = AalenJohansenFitter(calculate_variance=True)
                      ajf.fit(cif_df[cif_time_col], cif_df[cif_event_col], event_of_interest=cif_event_of_interest, label="All Patients")
-                     ajf.plot(ax=ax_cif, ci_show=show_ci, show_censors=show_censored, color=color)
+                     ajf.plot(ax=ax_cif, ci_show=show_ci, show_censors=False, color=color) # Disable built-in
+                     
                      cif_fitters.append(ajf)
                      cif_colors.append(color)
                      cif_labels.append("All Patients")
+                     
+                     # Manual Censoring Ticks (Single Group)
+                     if show_censored:
+                        censored_mask = (cif_df[cif_event_col] == 0)
+                        censored_times = cif_df[cif_time_col][censored_mask].values
+                        if len(censored_times) > 0:
+                            cif_line = ajf.cumulative_density_
+                            combined_index = cif_line.index.union(censored_times).unique().sort_values()
+                            cif_interp = cif_line.reindex(combined_index).ffill()
+                            y_values = cif_interp.loc[censored_times].iloc[:, 0].values
+                            ax_cif.plot(censored_times, y_values, '|', color=color, markersize=10, markeredgewidth=1)
                      
                 ax_cif.set_title(f"Cumulative Incidence (Event {cif_event_of_interest})")
                 ax_cif.set_xlabel(x_label)
