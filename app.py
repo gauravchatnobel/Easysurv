@@ -176,6 +176,11 @@ if uploaded_file:
         "Game of Thrones": ["#808080", "#FFD700", "#B22222", "#000000", "#228B22"],
         "The Darjeeling Limited": ["#FF0000", "#00A08A", "#F2AD00", "#F98400", "#5BBCD6"],
         "The Grand Budapest Hotel": ["#F1BB7B", "#FD6467", "#5B1A18", "#D67236"],
+        "The Dark Knight": ["#0C2340", "#282D3C", "#808080", "#000000", "#710193", "#32CD32", "#B3B3B3"],
+        "Gangs of Wasseypur": ["#212121", "#B71C1C", "#FFC107", "#5D4037", "#00C853", "#E65100"],
+        "Ran (Kurosawa)": ["#FFD700", "#DC143C", "#0000CD", "#DAA520", "#000000", "#FFFFFF"],
+        "Pather Panchali (Ray)": ["#1A1A1A", "#4D4D4D", "#808080", "#B3B3B3", "#E6E6E6", "#F0EAD6"], 
+        "Studio Ghibli": ["#8CBF88", "#E53935", "#607D8B", "#FFA500", "#D2E3EF", "#FF6347"],
     }
     
     all_themes = {**journal_themes, **fun_themes}
@@ -745,7 +750,7 @@ if uploaded_file:
                              # Treat competing risks (2) as censored (0) -> Cause-Specific Hazard
                              temp_evt = (cif_df[cif_event_col] == cif_event_of_interest).astype(int)
                              res_cif = multivariate_logrank_test(cif_df[cif_time_col], cif_df[group_col], temp_evt)
-                             cif_p_value_text = f"Cause-Specific Log-Rank p = {res_cif.p_value:.4f}"
+                             cif_p_value_text = f"p = {res_cif.p_value:.4f}"
                          except:
                              pass
                 
