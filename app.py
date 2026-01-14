@@ -138,7 +138,7 @@ def add_at_risk_counts(fitters, ax=None, y_shift=-0.25, colors=None, labels=None
             
             # Plot the number
             ax.text(t, y_pos, str(val), transform=trans_data_axes, 
-                    ha='center', va='center', color=color, fontsize=fontsize)
+                    ha='center', va='center', color=color, fontsize=fontsize, weight='bold')
     
     # Adjust layout to make room for the table and labels
     # Table height approx = row_height * len(fitters)
