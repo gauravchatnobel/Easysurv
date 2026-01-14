@@ -250,6 +250,13 @@ if uploaded_file:
         "Feudal Colors": ["#FFD700", "#DC143C", "#0000CD", "#DAA520", "#000000", "#FFFFFF"],
         "Classic Monochrome": ["#1A1A1A", "#4D4D4D", "#808080", "#B3B3B3", "#E6E6E6", "#F0EAD6"], 
         "Anime Fantasy": ["#8CBF88", "#E53935", "#607D8B", "#FFA500", "#D2E3EF", "#FF6347"],
+        
+        # Literary Themes
+        "Saint Petersburg 1866": ["#3E2723", "#BF360C", "#F9A825", "#424242", "#ECEFF1"], # Crime & Punishment: Squalor, blood, feverish yellow, stone grey, pale sky
+        "The Law Clerk": ["#263238", "#546E7A", "#78909C", "#D7CCC8", "#8D6E63", "#212121"], # The Trial: Bureaucracy, paper, ink, oppressive grey
+        "Stream of Life": ["#D81B60", "#F48FB1", "#4A148C", "#FFF176", "#00BCD4"], # Agua Viva/G.H.: Visceral pink, organic purple, blinding yellow, fluid blue
+        "Cosmic Ocean": ["#311B92", "#7C4DFF", "#00E676", "#3E2723", "#FF6F00"], # Solaris/Stalker: Deep space purple, irradiated green, rust, amber
+        "The Playwright": ["#607D8B", "#8D6E63", "#CFD8DC", "#A1887F", "#546E7A"], # Chekhov: Muted, melancholic, realistic earth tones
     }
     
     all_themes = {**journal_themes, **fun_themes}
