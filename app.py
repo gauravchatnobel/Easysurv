@@ -265,6 +265,8 @@ if uploaded_file:
 
         
             # 1. Plotting
+            # Force Font Update
+            plt.rcParams['font.family'] = selected_font
             fig, ax = plt.subplots(figsize=(plot_width, plot_height))
         
             # Set Background Color
