@@ -832,14 +832,16 @@ if uploaded_file:
                                  # 2. Encode Group Variable (One-Hot)
                                  fg_data_encoded = pd.get_dummies(fg_data, columns=[group_col], drop_first=True)
                                  
-                                 # Select columns: duration, event(status), weights, id, and the new dummy columns
+                                 # Select columns: 'start', 'stop', event(status), weights, id, and the new dummy columns
                                  dummy_cols = [c for c in fg_data_encoded.columns if c.startswith(f"{group_col}_")]
-                                 cols_to_fit = [cif_time_col, 'status', 'weight', 'id'] + dummy_cols
+                                 cols_to_fit = ['start', 'stop', 'status', 'weight', 'id'] + dummy_cols
                                  
                                  # 3. Fit Fine-Gray Model (Weighted Cox)
+                                 # IMPORTANT: The weighted dataframe from compute_fine_gray_weights is in counting process format (start, stop).
+                                 # We must NOT use duration_col=cif_time_col.
                                  cph_fg = CoxPHFitter()
                                  cph_fg.fit(fg_data_encoded[cols_to_fit], 
-                                            duration_col=cif_time_col, event_col='status', weights_col='weight', 
+                                            duration_col='stop', entry_col='start', event_col='status', weights_col='weight', 
                                             cluster_col='id', robust=True)
                                  
                                  # 4. Extract P-value (Gray's Test Equivalent)
