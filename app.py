@@ -433,6 +433,9 @@ if uploaded_file:
                     ax.set_ylabel(y_label, fontsize=axes_fontsize)
                 ax.tick_params(axis='both', which='major', labelsize=axes_fontsize)
                 
+                # Legend Font Size
+                ax.legend(fontsize=legend_fontsize)
+                
                 # P-value and Legend if applicable (Single group usually no legend needed unless CI)
                 # P-value and Legend if applicable (Single group usually no legend needed unless CI)
                 if show_p_val_plot:
