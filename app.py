@@ -433,12 +433,24 @@ if uploaded_file:
                 buf = io.BytesIO()
                 fig.savefig(buf, format="png", dpi=300, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
                 buf.seek(0)
-                st.download_button(
-                    label="💾 Download High-Res Plot (300 DPI)",
-                    data=buf,
-                    file_name="survival_plot.png",
-                    mime="image/png"
-                )
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.download_button(
+                        label="💾 Download Plot (300 DPI)",
+                        data=buf,
+                        file_name="survival_plot_300dpi.png",
+                        mime="image/png"
+                    )
+                with col2:
+                    buf_hi = io.BytesIO()
+                    fig.savefig(buf_hi, format="png", dpi=600, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
+                    buf_hi.seek(0)
+                    st.download_button(
+                        label="💾 Download High-Res Plot (600 DPI)",
+                        data=buf_hi,
+                        file_name="survival_plot_600dpi.png",
+                        mime="image/png"
+                    )
 
                 # 2. Statistics (Cox PH / Logrank)
                 st.divider()
@@ -571,12 +583,24 @@ if uploaded_file:
                 buf = io.BytesIO()
                 fig.savefig(buf, format="png", dpi=300, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
                 buf.seek(0)
-                st.download_button(
-                    label="💾 Download High-Res Plot (300 DPI)",
-                    data=buf,
-                    file_name="survival_plot.png",
-                    mime="image/png"
-                )
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.download_button(
+                        label="💾 Download Plot (300 DPI)",
+                        data=buf,
+                        file_name="survival_plot_300dpi.png",
+                        mime="image/png"
+                    )
+                with col2:
+                    buf_hi = io.BytesIO()
+                    fig.savefig(buf_hi, format="png", dpi=600, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
+                    buf_hi.seek(0)
+                    st.download_button(
+                        label="💾 Download High-Res Plot (600 DPI)",
+                        data=buf_hi,
+                        file_name="survival_plot_600dpi.png",
+                        mime="image/png"
+                    )
 
 
         with tab2:
@@ -681,7 +705,15 @@ if uploaded_file:
                             buf_forest = io.BytesIO()
                             fig_forest.savefig(buf_forest, format="png", dpi=300, bbox_inches='tight')
                             buf_forest.seek(0)
-                            st.download_button("💾 Download Forest Plot", buf_forest, "forest_plot.png", "image/png")
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.download_button("💾 Download Forest Plot (300 DPI)", buf_forest, "forest_plot_300dpi.png", "image/png")
+                            with col2:
+                                buf_forest_hi = io.BytesIO()
+                                fig_forest.savefig(buf_forest_hi, format="png", dpi=600, bbox_inches='tight')
+                                buf_forest_hi.seek(0)
+                                st.download_button("💾 Download High-Res Forest Plot (600 DPI)", buf_forest_hi, "forest_plot_600dpi.png", "image/png")
                             
                         except Exception as e:
                             st.error(f"Error running model: {e}")
@@ -983,11 +1015,19 @@ if uploaded_file:
 
                 st.pyplot(fig_cif)
                 
-                 # Download
+                # Download
                 buf_cif = io.BytesIO()
                 fig_cif.savefig(buf_cif, format="png", dpi=300, bbox_inches='tight', facecolor=fig_cif.get_facecolor(), edgecolor='none')
                 buf_cif.seek(0)
-                st.download_button("💾 Download CIF Plot", buf_cif, "cif_plot.png", "image/png")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.download_button("💾 Download CIF Plot (300 DPI)", buf_cif, "cif_plot_300dpi.png", "image/png")
+                with col2:
+                    buf_cif_hi = io.BytesIO()
+                    fig_cif.savefig(buf_cif_hi, format="png", dpi=600, bbox_inches='tight', facecolor=fig_cif.get_facecolor(), edgecolor='none')
+                    buf_cif_hi.seek(0)
+                    st.download_button("💾 Download High-Res CIF Plot (600 DPI)", buf_cif_hi, "cif_plot_600dpi.png", "image/png")
                 
                 # Display Fine-Gray Table
                 if fg_summary is not None:
