@@ -1,4 +1,4 @@
-# Interactive Survival Analysis Tool
+# EASYSURV: Interactive Survival Analysis Tool
 
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://survival-analysis-tool.streamlit.app)
 

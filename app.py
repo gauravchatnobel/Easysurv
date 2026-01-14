@@ -81,7 +81,7 @@ def add_at_risk_counts(*fitters, ax=None, y_shift=-0.25, colors=None, labels=Non
 
 st.set_page_config(page_title="Survival Analysis Tool", layout="wide")
 
-st.title("Interactive Survival Analysis Tool")
+st.title("EASYSURV: Interactive Survival Analysis Tool")
 
 # Sidebar - Configuration
 st.sidebar.header("Data Upload & Configuration")
