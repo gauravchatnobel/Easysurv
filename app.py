@@ -4,6 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from lifelines import KaplanMeierFitter, CoxPHFitter, AalenJohansenFitter
 from lifelines.statistics import multivariate_logrank_test, logrank_test
+from survival_analysis.fine_gray_utils import compute_fine_gray_weights
 import numpy as np
 import io
 
@@ -748,22 +749,55 @@ if uploaded_file:
                 else:
                      ax_cif.set_xlim(left=0) # At least start at 0
                 
-                # Cause-Specific Log-Rank Test (Approximation for P-value)
-                cif_p_value_text = ""
-                if show_p_val_plot and group_col != "None" and group_col in cif_df.columns:
+                # Fine-Gray Analysis (for P-value and Table)
+                fg_p_value_text = ""
+                fg_summary = None
+                
+                if group_col != "None" and group_col in cif_df.columns:
                      unique_grps = cif_df[group_col].dropna().unique()
                      if len(unique_grps) >= 2:
                          try:
-                             # Create binary event for specific cause (1 vs others)
-                             # Treat competing risks (2) as censored (0) -> Cause-Specific Hazard
-                             temp_evt = (cif_df[cif_event_col] == cif_event_of_interest).astype(int)
-                             res_cif = multivariate_logrank_test(cif_df[cif_time_col], cif_df[group_col], temp_evt)
-                             cif_p_value_text = f"p = {res_cif.p_value:.4f}"
-                         except:
-                             pass
+                             with st.spinner("Calculating Fine-Gray Statistics..."):
+                                 # 1. Prepare Weighted Data
+                                 fg_data = compute_fine_gray_weights(cif_df, cif_time_col, cif_event_col, cif_event_of_interest)
+                                 
+                                 # 2. Encode Group Variable (One-Hot)
+                                 fg_data_encoded = pd.get_dummies(fg_data, columns=[group_col], drop_first=True)
+                                 
+                                 # Select columns: duration, event(status), weights, id, and the new dummy columns
+                                 dummy_cols = [c for c in fg_data_encoded.columns if c.startswith(f"{group_col}_")]
+                                 cols_to_fit = [cif_time_col, 'status', 'weight', 'id'] + dummy_cols
+                                 
+                                 # 3. Fit Fine-Gray Model (Weighted Cox)
+                                 cph_fg = CoxPHFitter()
+                                 cph_fg.fit(fg_data_encoded[cols_to_fit], 
+                                            duration_col=cif_time_col, event_col='status', weights_col='weight', 
+                                            cluster_col='id', robust=True)
+                                 
+                                 # 4. Extract P-value (Gray's Test Equivalent)
+                                 # Log-Likelihood Ratio Test against null model
+                                 res_fg = cph_fg.log_likelihood_ratio_test()
+                                 if show_p_val_plot:
+                                     fg_p_value_text = f"Gray's p = {res_fg.p_value:.4f}"
+                                 
+                                 # 5. Extract HR Table
+                                 fg_summary = cph_fg.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']]
+                                 fg_summary.columns = ['Subdist HR', 'Lower 95%', 'Upper 95%', 'p-value']
+                                 
+                         except Exception as e:
+                             st.error(f"Fine-Gray Analysis Failed: {e}")
+                             # Fallback to simple Cause-Specific Log-Rank for simple plot label if FG fails
+                             try:
+                                 temp_evt = (cif_df[cif_event_col] == cif_event_of_interest).astype(int)
+                                 res_cif = multivariate_logrank_test(cif_df[cif_time_col], cif_df[group_col], temp_evt)
+                                 if show_p_val_plot:
+                                    fg_p_value_text = f"CS-LogRank p = {res_cif.p_value:.4f}"
+                             except:
+                                 pass
                 
-                if cif_p_value_text:
-                    ax_cif.text(0.7, 0.9, cif_p_value_text, transform=ax_cif.transAxes, fontsize=10, 
+                # Display P-value on Plot
+                if fg_p_value_text:
+                    ax_cif.text(0.7, 0.9, fg_p_value_text, transform=ax_cif.transAxes, fontsize=10, 
                             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.5))
 
                 if group_col != "None" and group_col in cif_df.columns:
@@ -866,6 +900,12 @@ if uploaded_file:
                 fig_cif.savefig(buf_cif, format="png", dpi=300, bbox_inches='tight', facecolor=fig_cif.get_facecolor(), edgecolor='none')
                 buf_cif.seek(0)
                 st.download_button("💾 Download CIF Plot", buf_cif, "cif_plot.png", "image/png")
+                
+                # Display Fine-Gray Table
+                if fg_summary is not None:
+                    st.write("### Subdistribution Hazard Ratios (Fine-Gray)")
+                    st.write("Covariate effect on the cumulative incidence of the event of interest, accounting for competing risks.")
+                    st.dataframe(fg_summary.style.format("{:.3f}"))
                 
                 # Point-in-Time Cumulative Incidence Estimates
                 st.subheader("Point-in-Time Cumulative Incidence")
