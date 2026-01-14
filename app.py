@@ -194,14 +194,20 @@ if uploaded_file:
             st.error(f"Data type conversion error: {e}")
             st.stop()
             
-    # Legend Renaming
+    # Legend Renaming & Custom Colors
     group_labels = {}
     if group_col != "None" and df_clean is not None:
-        with st.sidebar.expander("📝 Rename Legend Labels"):
+        with st.sidebar.expander("🎨 Custom Colors & Labels", expanded=(selected_theme == "Custom")):
             unique_groups = sorted(df_clean[group_col].dropna().unique())
             for grp in unique_groups:
-                new_label = st.text_input(f"Label for {grp}", value=str(grp))
-                group_labels[grp] = new_label
+                col1, col2 = st.columns([1, 1])
+                with col1:
+                    new_label = st.text_input(f"Label for {grp}", value=str(grp), key=f"label_{grp}")
+                    group_labels[grp] = new_label
+                with col2:
+                    if selected_theme == "Custom":
+                        color = st.color_picker(f"Color for {grp}", key=f"color_{grp}")
+                        custom_colors[grp] = color
 
     # Analysis
     if time_col and event_col and df_clean is not None:
@@ -437,12 +443,9 @@ if uploaded_file:
             else:
                 # Single group
                 color = None
-                if selected_theme in all_themes:
+                if selected_theme in all_themes and len(all_themes[selected_theme]) > 0:
                      color = all_themes[selected_theme][0]
                 elif selected_theme == "Custom":
-                     color = st.sidebar.color_picker("Color for All Patients", "#1f77b4")
-
-                if selected_theme == "Custom":
                      color = st.sidebar.color_picker("Color for All Patients", "#1f77b4")
 
                 kmf_all = KaplanMeierFitter()
