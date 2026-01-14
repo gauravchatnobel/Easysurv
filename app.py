@@ -2,7 +2,7 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-from lifelines import KaplanMeierFitter, CoxPHFitter
+from lifelines import KaplanMeierFitter, CoxPHFitter, AalenJohansenFitter
 from lifelines.statistics import multivariate_logrank_test, logrank_test
 import numpy as np
 import io
@@ -231,7 +231,7 @@ if uploaded_file:
         st.divider()
         st.header("Survival Analysis")
 
-        tab1, tab2 = st.tabs(["Univariable Analysis (Kaplan-Meier)", "Multivariable Analysis (Cox PH)"])
+        tab1, tab2, tab3 = st.tabs(["Univariable Analysis (Kaplan-Meier)", "Multivariable Analysis (Cox PH)", "Competing Risks (CIF)"])
 
         with tab1:
         
@@ -608,6 +608,67 @@ if uploaded_file:
 
             else:
                 st.info("Select at least one covariate variable (e.g., Age, Gender, Mutations) to begin.")
+
+        with tab3:
+            st.subheader("Competing Risks Analysis (Cumulative Incidence)")
+            st.write("Calculate Cumulative Incidence Function (CIF) considering competing events (e.g., Relapse vs Death).")
+            
+            st.info(f"Target Time Column: **{time_col}**")
+            st.info(f"Target Event Column: **{event_col}** (Must contain codes for different event types)")
+            
+            # Identify Event Codes
+            unique_events = sorted(df_clean[event_col].unique())
+            st.write(f"**Observed Event Codes in Data:** {unique_events}")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                event_of_interest = st.selectbox("Select Event of Interest (e.g., Relapse)", unique_events, index=1 if len(unique_events) > 1 else 0)
+            
+            # Plot CIF
+            if st.button("Calculate Cumulative Incidence"):
+                fig_cif, ax_cif = plt.subplots(figsize=(plot_width, plot_height))
+                
+                # Check groupings
+                if group_col != "None":
+                    groups = sorted(df_clean[group_col].unique())
+                    for i, group in enumerate(groups):
+                        mask = df_clean[group_col] == group
+                        
+                        # Resolve Color
+                        color = None
+                        if selected_theme == "Custom":
+                            color = custom_colors.get(group)
+                        elif selected_theme in all_themes:
+                             palette = all_themes[selected_theme]
+                             color = palette[i % len(palette)]
+                            
+                        # Fit Aalen-Johansen
+                        ajf = AalenJohansenFitter(calculate_variance=True)
+                        ajf.fit(df_clean[time_col][mask], df_clean[event_col][mask], event_of_interest=event_of_interest, label=str(group))
+                        ajf.plot(ax=ax_cif, ci_show=show_ci, color=color)
+                else:
+                    # Single Group
+                     ajf = AalenJohansenFitter(calculate_variance=True)
+                     ajf.fit(df_clean[time_col], df_clean[event_col], event_of_interest=event_of_interest, label="All Patients")
+                     ajf.plot(ax=ax_cif, ci_show=show_ci)
+                     
+                ax_cif.set_title(f"Cumulative Incidence of Event {event_of_interest}")
+                ax_cif.set_xlabel(x_label)
+                ax_cif.set_ylabel("Cumulative Incidence Probability")
+                ax_cif.set_ylim(0, 1.05)
+                
+                # Style adjustments
+                plt.rcParams['font.family'] = selected_font
+                fig_cif.patch.set_facecolor(plot_bgcolor)
+                ax_cif.set_facecolor(plot_bgcolor)
+
+                st.pyplot(fig_cif)
+                
+                 # Download
+                buf_cif = io.BytesIO()
+                fig_cif.savefig(buf_cif, format="png", dpi=300, bbox_inches='tight', facecolor=fig_cif.get_facecolor(), edgecolor='none')
+                buf_cif.seek(0)
+                st.download_button("💾 Download CIF Plot", buf_cif, "cif_plot.png", "image/png")
 else:
     st.info("Please upload a CSV or Excel file to begin analysis.")
     st.write("Demostration with Dummy Data:")
