@@ -425,7 +425,7 @@ if uploaded_file:
                     # Custom add_at_risk_counts integration
                     # We need fitters for all to use add_at_risk_counts
                     # fitters list already populated above
-                    add_at_risk_counts(fitters, ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels, fontsize=table_fontsize)
+                    add_at_risk_counts(fitters, ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels)
                 
                 # Apply Custom Label
                 ax.set_xlabel(x_label, fontsize=axes_fontsize)
