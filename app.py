@@ -130,6 +130,7 @@ if uploaded_file:
     # Axes & Layout
     st.sidebar.subheader("Axes & Layout")
     x_label = st.sidebar.text_input("X-Axis Label", value="Time (Months)")
+    y_label = st.sidebar.text_input("Y-Axis Label", value="Survival Probability")
     tick_interval = st.sidebar.number_input("X-Axis Tick Interval", min_value=1, value=12, help="Set to 12 for yearly ticks if data is in months.")
     
     y_tick_interval = st.sidebar.number_input("Y-Axis Tick Interval", min_value=0.01, value=0.1, step=0.05)
@@ -206,6 +207,10 @@ if uploaded_file:
             st.error(f"Data type conversion error: {e}")
             st.stop()
             
+    
+    # Plot Background Color
+    plot_bgcolor = st.sidebar.color_picker("Plot Background Color", "#FFFFFF")
+    
     # Legend Renaming & Custom Colors
     group_labels = {}
     if group_col != "None" and df_clean is not None:
@@ -262,6 +267,10 @@ if uploaded_file:
             # 1. Plotting
             fig, ax = plt.subplots(figsize=(plot_width, plot_height))
         
+            # Set Background Color
+            fig.patch.set_facecolor(plot_bgcolor)
+            ax.set_facecolor(plot_bgcolor)
+
             # Adjust Margins to accommodate Risk Table Labels (on the left) and Table (below)
             # We push the left margin to 0.2 (20%) to ensure labels like "Risk" or Group Names don't get cut off.
             # We push the bottom up to make room for the table (though bbox_inches='tight' helps, explicit layout is safer for alignment)
@@ -333,11 +342,13 @@ if uploaded_file:
 
                 # Apply Custom Label
                 ax.set_xlabel(x_label)
+                if y_label:
+                    ax.set_ylabel(y_label)
                 st.pyplot(fig)
 
                 # DOWNLOAD BUTTON
                 buf = io.BytesIO()
-                fig.savefig(buf, format="png", dpi=300, bbox_inches='tight')
+                fig.savefig(buf, format="png", dpi=300, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
                 buf.seek(0)
                 st.download_button(
                     label="💾 Download High-Res Plot (300 DPI)",
@@ -469,11 +480,13 @@ if uploaded_file:
             
                 # Apply Custom Label
                 ax.set_xlabel(x_label)
+                if y_label:
+                    ax.set_ylabel(y_label)
                 st.pyplot(fig)
 
                 # DOWNLOAD BUTTON
                 buf = io.BytesIO()
-                fig.savefig(buf, format="png", dpi=300, bbox_inches='tight')
+                fig.savefig(buf, format="png", dpi=300, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
                 buf.seek(0)
                 st.download_button(
                     label="💾 Download High-Res Plot (300 DPI)",
