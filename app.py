@@ -199,6 +199,7 @@ if uploaded_file:
     
     axes_fontsize = st.sidebar.number_input("Axes/Tick Font Size", min_value=1, value=12, step=1)
     legend_fontsize = st.sidebar.number_input("Legend Font Size", min_value=1, value=10, step=1)
+    line_width = st.sidebar.slider("Line Width (Boldness)", 0.5, 5.0, 1.5, 0.5)
 
     # Axes & Layout
     st.sidebar.subheader("Axes & Layout")
@@ -413,7 +414,7 @@ if uploaded_file:
 
                     kmf_group = KaplanMeierFitter()
                     kmf_group.fit(df_clean[time_col][mask], df_clean[event_col][mask], label=label)
-                    kmf_group.plot_survival_function(ax=ax, ci_show=show_ci, show_censors=show_censored, color=color)
+                    kmf_group.plot_survival_function(ax=ax, ci_show=show_ci, show_censors=show_censored, color=color, linewidth=line_width)
                     fitters.append(kmf_group)
             
                 if hr_text:
@@ -582,7 +583,7 @@ if uploaded_file:
 
                 kmf_all = KaplanMeierFitter()
                 kmf_all.fit(df_clean[time_col], df_clean[event_col], label="All Patients")
-                kmf_all.plot_survival_function(ax=ax, ci_show=show_ci, show_censors=show_censored, color=color)
+                kmf_all.plot_survival_function(ax=ax, ci_show=show_ci, show_censors=show_censored, color=color, linewidth=line_width)
                 
                 if show_risk_table:
                     # Define lists for single group to match function variable names
@@ -972,7 +973,7 @@ if uploaded_file:
                         # Fit Aalen-Johansen
                         ajf = AalenJohansenFitter(calculate_variance=True)
                         ajf.fit(cif_df[cif_time_col][mask], cif_df[cif_event_col][mask], event_of_interest=cif_event_of_interest, label=label)
-                        ajf.plot(ax=ax_cif, ci_show=show_ci, show_censors=False, color=color) # Disable built-in to avoid error
+                        ajf.plot(ax=ax_cif, ci_show=show_ci, show_censors=False, color=color, linewidth=line_width) # Disable built-in to avoid error
                         cif_fitters.append(ajf)
                         
                         # Manual Censoring Ticks
@@ -1008,7 +1009,7 @@ if uploaded_file:
                      
                      ajf = AalenJohansenFitter(calculate_variance=True)
                      ajf.fit(cif_df[cif_time_col], cif_df[cif_event_col], event_of_interest=cif_event_of_interest, label="All Patients")
-                     ajf.plot(ax=ax_cif, ci_show=show_ci, show_censors=False, color=color) # Disable built-in
+                     ajf.plot(ax=ax_cif, ci_show=show_ci, show_censors=False, color=color, linewidth=line_width) # Disable built-in
                      
                      cif_fitters.append(ajf)
                      cif_colors.append(color)
