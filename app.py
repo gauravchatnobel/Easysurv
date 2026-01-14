@@ -438,6 +438,8 @@ if uploaded_file:
                 if show_p_val_plot:
                      ax.text(0.95, 0.05, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=dict(facecolor='white', alpha=0.5))
 
+                st.pyplot(fig)
+
                 # DOWNLOAD BUTTON
                 buf = io.BytesIO()
                 fig.savefig(buf, format="png", dpi=300, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
@@ -595,7 +597,7 @@ if uploaded_file:
                 ax.legend(fontsize=legend_fontsize)
                 
                 if show_p_val_plot and p_value_text:
-                     ax.text(0.95, 0.2, p_value_text, transform=ax.transAxes, ha='right', va='bottom', fontsize=p_val_fontsize, bbox=dict(facecolor='white', alpha=0.5))
+                     ax.text(0.95, 0.2, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=dict(facecolor='white', alpha=0.5))
                 
                 st.pyplot(fig)
 
