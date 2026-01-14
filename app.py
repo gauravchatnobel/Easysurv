@@ -76,7 +76,7 @@ def compute_fine_gray_weights(df, time_col, event_col, event_of_interest=1):
 
     return pd.DataFrame(new_rows)
 
-def add_at_risk_counts(*fitters, ax=None, y_shift=-0.25, colors=None, labels=None):
+def add_at_risk_counts(fitters, ax=None, y_shift=-0.25, colors=None, labels=None, fontsize=10):
     """
     Add a table of at-risk counts below the plot.
     Re-implemented using ax.text for perfect alignment with X-axis ticks.
@@ -114,7 +114,7 @@ def add_at_risk_counts(*fitters, ax=None, y_shift=-0.25, colors=None, labels=Non
             color = colors[i]
             
         ax.text(-0.03, y_pos, lbl, transform=ax.transAxes, 
-                ha='right', va='center', weight='bold', color=color, fontsize=10)
+                ha='right', va='center', weight='bold', color=color, fontsize=fontsize)
         
         # 2. Plot Counts at each tick
         for t in valid_ticks:
@@ -138,7 +138,7 @@ def add_at_risk_counts(*fitters, ax=None, y_shift=-0.25, colors=None, labels=Non
             
             # Plot the number
             ax.text(t, y_pos, str(val), transform=trans_data_axes, 
-                    ha='center', va='center', color=color, fontsize=10)
+                    ha='center', va='center', color=color, fontsize=fontsize)
     
     # Adjust layout to make room for the table and labels
     # Table height approx = row_height * len(fitters)
@@ -191,24 +191,17 @@ if uploaded_file:
     show_ci = st.sidebar.checkbox("Show 95% CI Shading", value=True)
     show_p_val_plot = st.sidebar.checkbox("Show p-value on Plot", value=False)
     
-    # Fonts
+    # Fonts & Typography
+    st.sidebar.subheader("Typography & Font Sizes")
     font_options = ["sans-serif", "serif", "monospace", "Arial", "Helvetica", "Times New Roman", "Courier New", "Verdana", "Comic Sans MS"]
     selected_font = st.sidebar.selectbox("Plot Font", font_options, index=0)
     plt.rcParams['font.family'] = selected_font
     
-    # Axes & Layout
-    st.sidebar.subheader("Axes & Layout")
-    x_label = st.sidebar.text_input("X-Axis Label", value="Time (Months)")
-    y_label = st.sidebar.text_input("Y-Axis Label", value="Survival Probability")
-    tick_interval = st.sidebar.number_input("X-Axis Tick Interval", min_value=1, value=12, help="Set to 12 for yearly ticks if data is in months.")
-    
-    y_tick_interval = st.sidebar.number_input("Y-Axis Tick Interval", min_value=0.01, value=0.1, step=0.05)
-    y_min = st.sidebar.number_input("Y-Axis Min", value=0.0, step=0.1)
-    y_max = st.sidebar.number_input("Y-Axis Max", value=1.0, step=0.1)
-    
-    plot_height = st.sidebar.slider("Plot Height", 4, 12, 6)
-    plot_width = st.sidebar.slider("Plot Width", 6, 15, 10)
-    
+    axes_fontsize = st.sidebar.number_input("Axes/Tick Font Size", min_value=1, value=12, step=1)
+    table_fontsize = st.sidebar.number_input("At-Risk Table Font Size", min_value=1, value=10, step=1)
+    legend_fontsize = st.sidebar.number_input("Legend Font Size", min_value=1, value=10, step=1)
+    p_val_fontsize = st.sidebar.number_input("P-value Font Size", min_value=1, value=12, step=1)
+
     # Theme Selection
     st.sidebar.subheader("Aesthetics & Themes")
 
@@ -421,13 +414,17 @@ if uploaded_file:
                     # Custom add_at_risk_counts integration
                     # We need fitters for all to use add_at_risk_counts
                     # fitters list already populated above
-                    add_at_risk_counts(*fitters, ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels)
-
+                    add_at_risk_counts(fitters, ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels, fontsize=table_fontsize)
+                
                 # Apply Custom Label
-                ax.set_xlabel(x_label)
+                ax.set_xlabel(x_label, fontsize=axes_fontsize)
                 if y_label:
-                    ax.set_ylabel(y_label)
-                st.pyplot(fig)
+                    ax.set_ylabel(y_label, fontsize=axes_fontsize)
+                ax.tick_params(axis='both', which='major', labelsize=axes_fontsize)
+                
+                # P-value and Legend if applicable (Single group usually no legend needed unless CI)
+                if show_p_val_plot:
+                     ax.text(0.95, 0.05, p_value_text, transform=ax.transAxes, ha='right', va='bottom', fontsize=p_val_fontsize, bbox=dict(facecolor='white', alpha=0.5))
 
                 # DOWNLOAD BUTTON
                 buf = io.BytesIO()
@@ -571,12 +568,19 @@ if uploaded_file:
                 kmf_all.plot_survival_function(ax=ax, ci_show=show_ci, show_censors=show_censored, color=color)
                 if show_risk_table:
                     # from lifelines.plotting import add_at_risk_counts (REMOVED due to bug)
-                    add_at_risk_counts(kmf_all, ax=ax)
+                    add_at_risk_counts(kmf_all, ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels, fontsize=table_fontsize)
             
                 # Apply Custom Label
-                ax.set_xlabel(x_label)
+                ax.set_xlabel(x_label, fontsize=axes_fontsize)
                 if y_label:
-                    ax.set_ylabel(y_label)
+                    ax.set_ylabel(y_label, fontsize=axes_fontsize)
+                ax.tick_params(axis='both', which='major', labelsize=axes_fontsize)
+                
+                ax.legend(fontsize=legend_fontsize)
+                
+                if show_p_val_plot and p_value_text:
+                     ax.text(0.95, 0.2, p_value_text, transform=ax.transAxes, ha='right', va='bottom', fontsize=p_val_fontsize, bbox=dict(facecolor='white', alpha=0.5))
+                
                 st.pyplot(fig)
 
                 # DOWNLOAD BUTTON
@@ -1011,7 +1015,16 @@ if uploaded_file:
                 
                 # Add Risk Table
                 if show_risk_table:
-                    add_at_risk_counts(*cif_fitters, ax=ax_cif, y_shift=table_height, colors=cif_colors, labels=cif_labels)
+                    add_at_risk_counts(cif_fitters, ax=ax_cif, y_shift=table_height, colors=cif_colors, labels=cif_labels, fontsize=table_fontsize)
+                
+                ax_cif.set_xlabel(x_label, fontsize=axes_fontsize)
+                if y_label:
+                    ax_cif.set_ylabel("Cumulative Incidence", fontsize=axes_fontsize)
+                ax_cif.tick_params(axis='both', which='major', labelsize=axes_fontsize)
+                ax_cif.legend(fontsize=legend_fontsize)
+
+                if show_p_val_plot and fg_p_value_text:
+                     ax_cif.text(0.95, 0.2, fg_p_value_text, transform=ax_cif.transAxes, ha='right', va='bottom', fontsize=p_val_fontsize, bbox=dict(facecolor='white', alpha=0.5))
 
                 st.pyplot(fig_cif)
                 
