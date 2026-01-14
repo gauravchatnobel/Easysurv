@@ -120,7 +120,7 @@ if uploaded_file:
     table_height = st.sidebar.slider("Risk Table Offset (Move Down)", -0.5, -0.1, -0.25, 0.05) if show_risk_table else -0.25
     show_censored = st.sidebar.checkbox("Show Censored Ticks", value=True)
     show_ci = st.sidebar.checkbox("Show 95% CI Shading", value=True)
-    show_hr_plot = st.sidebar.checkbox("Show Hazard Ratio (HR) on Plot", value=False)
+    show_p_val_plot = st.sidebar.checkbox("Show p-value on Plot", value=False)
     
     # Fonts
     font_options = ["sans-serif", "serif", "monospace", "Arial", "Helvetica", "Times New Roman", "Courier New", "Verdana", "Comic Sans MS"]
@@ -243,9 +243,9 @@ if uploaded_file:
                     missing_stats = df[cols_to_check].isna().sum()
                     st.dataframe(missing_stats[missing_stats > 0])
             
-            # Calculate HR for Plot if requested
+            # Calculate P-value for Plot if requested
             hr_text = ""
-            if show_hr_plot and group_col != "None" and len(df_clean[group_col].unique()) >= 2:
+            if show_p_val_plot and group_col != "None" and len(df_clean[group_col].unique()) >= 2:
                 try:
                     cox_df = df_clean[[time_col, event_col, group_col]].dropna()
                     cox_data_encoded = pd.get_dummies(cox_df, columns=[group_col], drop_first=True)
@@ -737,7 +737,7 @@ if uploaded_file:
                 
                 # Cause-Specific Log-Rank Test (Approximation for P-value)
                 cif_p_value_text = ""
-                if group_col != "None" and group_col in cif_df.columns:
+                if show_p_val_plot and group_col != "None" and group_col in cif_df.columns:
                      unique_grps = cif_df[group_col].dropna().unique()
                      if len(unique_grps) >= 2:
                          try:
