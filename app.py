@@ -847,23 +847,23 @@ if uploaded_file:
                                   dummy_cols = [c for c in fg_data_encoded.columns if c.startswith(f"{group_col}_")]
                                   cols_to_fit = ['start', 'stop', 'status', 'weight', 'id'] + dummy_cols
                                  
-                                 # 3. Fit Fine-Gray Model (Weighted Cox)
-                                 # IMPORTANT: The weighted dataframe from compute_fine_gray_weights is in counting process format (start, stop).
-                                 # We must NOT use duration_col=cif_time_col.
-                                 cph_fg = CoxPHFitter()
-                                 cph_fg.fit(fg_data_encoded[cols_to_fit], 
-                                            duration_col='stop', entry_col='start', event_col='status', weights_col='weight', 
-                                            cluster_col='id', robust=True)
-                                 
-                                 # 4. Extract P-value (Gray's Test Equivalent)
-                                 # Log-Likelihood Ratio Test against null model
-                                 res_fg = cph_fg.log_likelihood_ratio_test()
-                                 if show_p_val_plot:
-                                     fg_p_value_text = f"Gray's p = {res_fg.p_value:.4f}"
-                                 
-                                 # 5. Extract HR Table
-                                 fg_summary = cph_fg.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']]
-                                 fg_summary.columns = ['Subdist HR', 'Lower 95%', 'Upper 95%', 'p-value']
+                                  # 3. Fit Fine-Gray Model (Weighted Cox)
+                                  # IMPORTANT: The weighted dataframe from compute_fine_gray_weights is in counting process format (start, stop).
+                                  # We must NOT use duration_col=cif_time_col.
+                                  cph_fg = CoxPHFitter()
+                                  cph_fg.fit(fg_data_encoded[cols_to_fit], 
+                                             duration_col='stop', entry_col='start', event_col='status', weights_col='weight', 
+                                             cluster_col='id', robust=True)
+                                  
+                                  # 4. Extract P-value (Gray's Test Equivalent)
+                                  # Log-Likelihood Ratio Test against null model
+                                  res_fg = cph_fg.log_likelihood_ratio_test()
+                                  if show_p_val_plot:
+                                      fg_p_value_text = f"Gray's p = {res_fg.p_value:.4f}"
+                                  
+                                  # 5. Extract HR Table
+                                  fg_summary = cph_fg.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']]
+                                  fg_summary.columns = ['Subdist HR', 'Lower 95%', 'Upper 95%', 'p-value']
                                  
                          except Exception as e:
                              st.error(f"Fine-Gray Analysis Failed: {e}")
