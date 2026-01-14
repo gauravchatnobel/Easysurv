@@ -146,15 +146,15 @@ if uploaded_file:
     st.sidebar.subheader("Aesthetics & Themes")
     
     # Define Palettes
+    # Define Palettes (Source: ggsci)
     journal_themes = {
-        "Nature": ["#E64B35", "#4DBBD5", "#00A087", "#3C5488", "#F39B7F", "#8491B4", "#91D1C2", "#DC0000"],
-        "Cell": ["#C0392B", "#2980B9", "#27AE60", "#F1C40F", "#8E44AD", "#7F8C8D", "#D35400"],
-        "Science": ["#0C7BDC", "#E66100", "#5D3A9B", "#1A85FF", "#D41159", "#FFC20A"],
-        "Blood": ["#882E72", "#B178A6", "#D6C1DE", "#1965B0", "#5289C7", "#7BAFDE", "#4EB265", "#CAE0AB"],
-        "Journal of Clinical Oncology": ["#00468B", "#ED0000", "#42B540", "#0099B4", "#925E9F", "#FDAF91", "#AD002A", "#ADB6B6"],
-        "Lancet": ["#00539C", "#EE352E", "#FF9933", "#009392", "#3fa68a", "#90e4c1"],
-        "Leukemia": ["#377EB8", "#E41A1C", "#4DAF4A", "#984EA3", "#FF7F00", "#FFFF33", "#A65628", "#F781BF"],
-        "Cancer Discovery": ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7"],
+        "Nature (NPG)": ["#E64B35", "#4DBBD5", "#00A087", "#3C5488", "#F39B7F", "#8491B4", "#91D1C2", "#DC0000", "#7E6148", "#B09C85"],
+        "JCO": ["#0073C2", "#EFC000", "#868686", "#CD534C", "#7AA6DC", "#003C67", "#8F7700", "#3B3B3B", "#A73030", "#4A6990"],
+        "Lancet": ["#00468B", "#ED0000", "#42B540", "#0099B4", "#925E9F", "#FDAF91", "#AD002A", "#ADB6B6", "#1B1919"],
+        "NEJM": ["#BC3C29", "#0072B5", "#E18727", "#20854E", "#7876B1", "#6F99AD", "#FFDC91", "#EE4C97"],
+        "Science (AAAS)": ["#3B4992", "#EE0000", "#008B45", "#631879", "#008280", "#BB0021", "#5F559B", "#A20056", "#808180", "#1B1919"],
+        "Jama": ["#374E55", "#DF8F44", "#00A1D5", "#B24745", "#79AF97", "#6A6599", "#80796B"],
+        "Tron": ["#2F5061", "#4291C7", "#D57FBE", "#E45D5C", "#FFAE91", "#F9DB57", "#FFFFD0"],
     }
     
     fun_themes = {
