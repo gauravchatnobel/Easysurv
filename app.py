@@ -123,7 +123,7 @@ if uploaded_file:
     show_hr_plot = st.sidebar.checkbox("Show Hazard Ratio (HR) on Plot", value=False)
     
     # Fonts
-    font_options = ["sans-serif", "serif", "monospace", "Arial", "Times New Roman", "Courier New", "Verdana"]
+    font_options = ["sans-serif", "serif", "monospace", "Arial", "Helvetica", "Calibri", "Aptos", "Times New Roman", "Courier New", "Verdana", "Comic Sans MS"]
     selected_font = st.sidebar.selectbox("Plot Font", font_options, index=0)
     plt.rcParams['font.family'] = selected_font
     
