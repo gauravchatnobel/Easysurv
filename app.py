@@ -613,26 +613,113 @@ if uploaded_file:
             st.subheader("Competing Risks Analysis (Cumulative Incidence)")
             st.write("Calculate Cumulative Incidence Function (CIF) considering competing events (e.g., Relapse vs Death).")
             
-            st.info(f"Target Time Column: **{time_col}**")
-            st.info(f"Target Event Column: **{event_col}** (Must contain codes for different event types)")
+            # Logic Selection: Single Composite Column vs Two Separate Columns
+            cif_mode = st.radio("Data Format:", ["Single 'Status' Column (with multiple codes)", "Two Separate Columns (e.g., Relapse & OS)"], index=1)
             
-            # Identify Event Codes
-            unique_events = sorted(df_clean[event_col].unique())
-            st.write(f"**Observed Event Codes in Data:** {unique_events}")
+            cif_df = None
+            cif_time_col = None
+            cif_event_col = None
+            cif_event_of_interest = None
             
-            col1, col2 = st.columns(2)
-            with col1:
-                event_of_interest = st.selectbox("Select Event of Interest (e.g., Relapse)", unique_events, index=1 if len(unique_events) > 1 else 0)
-            
+            if cif_mode == "Single 'Status' Column (with multiple codes)":
+                st.info(f"Using Target Time Column: **{time_col}**")
+                st.info(f"Using Target Event Column: **{event_col}**")
+                
+                # Identify Event Codes
+                unique_events = sorted(df_clean[event_col].unique())
+                st.write(f"**Observed Event Codes:** {unique_events}")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    event_of_interest = st.selectbox("Select Event of Interest", unique_events, index=1 if len(unique_events) > 1 else 0)
+                
+                cif_df = df_clean.copy()
+                cif_time_col = time_col
+                cif_event_col = event_col
+                cif_event_of_interest = event_of_interest
+                
+            else:
+                # Two Column Logic
+                st.write("Construct a Competing Risk endpoint from two separate events (e.g., Relapse vs Death).")
+                st.markdown("""
+                **Logic:**
+                *   **Event 1 (Interest)**: Only counts if it happens *first*.
+                *   **Event 2 (Competing)**: Counts if it happens *first* (and prevents Event 1).
+                *   **Censored**: If neither happens.
+                """)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("#### Event 1 (e.g., Relapse)")
+                    rfs_time_col = st.selectbox("Time Column", columns, index=columns.index("RFS_Days") if "RFS_Days" in columns else 0, key="rfs_time")
+                    rfs_stat_col = st.selectbox("Status Column (1=Event)", columns, index=columns.index("RFS_Status") if "RFS_Status" in columns else 0, key="rfs_stat")
+                    
+                with col2:
+                    st.markdown("#### Event 2 (Competing, e.g., OS)")
+                    os_time_col = st.selectbox("Time Column", columns, index=columns.index("OS_Days") if "OS_Days" in columns else 0, key="os_time")
+                    os_stat_col = st.selectbox("Status Column (1=Event)", columns, index=columns.index("OS_Status") if "OS_Status" in columns else 0, key="os_stat")
+
+                if st.button("Construct & Analyze"):
+                    # Data Wrangling
+                    temp_df = df[[rfs_time_col, rfs_stat_col, os_time_col, os_stat_col]].copy()
+                    if group_col != "None":
+                        temp_df[group_col] = df[group_col]
+                    
+                    temp_df = temp_df.dropna()
+                    
+                    # Create Composite Columns
+                    temp_df['Composite_Time'] = temp_df[[rfs_time_col, os_time_col]].min(axis=1)
+                    
+                    # Status Logic:
+                    # 0 = Censored (Both 0)
+                    # 1 = Event 1 (RFS happened AND (OS didn't happen OR RFS happened before/at same time as OS))
+                    # 2 = Event 2 (OS happened AND (RFS didn't happen OR OS happened before RFS))
+                    
+                    def get_status(row):
+                        t_rfs = row[rfs_time_col]
+                        s_rfs = row[rfs_stat_col]
+                        t_os = row[os_time_col]
+                        s_os = row[os_stat_col]
+                        
+                        # If both censored
+                        if s_rfs == 0 and s_os == 0:
+                            return 0 # Censored
+                        
+                        # If only RFS event
+                        if s_rfs == 1 and s_os == 0:
+                            return 1 # Relapse
+                            
+                        # If only OS event
+                        if s_rfs == 0 and s_os == 1:
+                            return 2 # Death
+                            
+                        # If BOTH events (Competing risk scenario logic)
+                        if s_rfs == 1 and s_os == 1:
+                            if t_rfs <= t_os:
+                                return 1 # Relapse first
+                            else:
+                                return 2 # Death first (unlikely for RFS but possible for other events)
+                        
+                        return 0
+
+                    temp_df['Composite_Status'] = temp_df.apply(get_status, axis=1)
+                    
+                    cif_df = temp_df
+                    cif_time_col = 'Composite_Time'
+                    cif_event_col = 'Composite_Status'
+                    cif_event_of_interest = 1
+                    
+                    st.success(f"Constructed composite endpoint. Found {sum(cif_df['Composite_Status']==1)} primary events and {sum(cif_df['Composite_Status']==2)} competing events.")
+
             # Plot CIF
-            if st.button("Calculate Cumulative Incidence"):
+            if cif_df is not None: # Triggered either by default mode or button in 2-col mode
                 fig_cif, ax_cif = plt.subplots(figsize=(plot_width, plot_height))
                 
                 # Check groupings
-                if group_col != "None":
-                    groups = sorted(df_clean[group_col].unique())
+                if group_col != "None" and group_col in cif_df.columns:
+                    groups = sorted(cif_df[group_col].unique())
                     for i, group in enumerate(groups):
-                        mask = df_clean[group_col] == group
+                        mask = cif_df[group_col] == group
                         
                         # Resolve Color
                         color = None
@@ -644,15 +731,15 @@ if uploaded_file:
                             
                         # Fit Aalen-Johansen
                         ajf = AalenJohansenFitter(calculate_variance=True)
-                        ajf.fit(df_clean[time_col][mask], df_clean[event_col][mask], event_of_interest=event_of_interest, label=str(group))
+                        ajf.fit(cif_df[cif_time_col][mask], cif_df[cif_event_col][mask], event_of_interest=cif_event_of_interest, label=str(group))
                         ajf.plot(ax=ax_cif, ci_show=show_ci, color=color)
                 else:
                     # Single Group
                      ajf = AalenJohansenFitter(calculate_variance=True)
-                     ajf.fit(df_clean[time_col], df_clean[event_col], event_of_interest=event_of_interest, label="All Patients")
+                     ajf.fit(cif_df[cif_time_col], cif_df[cif_event_col], event_of_interest=cif_event_of_interest, label="All Patients")
                      ajf.plot(ax=ax_cif, ci_show=show_ci)
                      
-                ax_cif.set_title(f"Cumulative Incidence of Event {event_of_interest}")
+                ax_cif.set_title(f"Cumulative Incidence (Event {cif_event_of_interest})")
                 ax_cif.set_xlabel(x_label)
                 ax_cif.set_ylabel("Cumulative Incidence Probability")
                 ax_cif.set_ylim(0, 1.05)
