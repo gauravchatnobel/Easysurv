@@ -578,9 +578,13 @@ if uploaded_file:
                 kmf_all = KaplanMeierFitter()
                 kmf_all.fit(df_clean[time_col], df_clean[event_col], label="All Patients")
                 kmf_all.plot_survival_function(ax=ax, ci_show=show_ci, show_censors=show_censored, color=color)
+                
                 if show_risk_table:
+                    # Define lists for single group to match function variable names
+                    plot_colors = [color] if color else None
+                    plot_labels = ["All Patients"]
                     # from lifelines.plotting import add_at_risk_counts (REMOVED due to bug)
-                    add_at_risk_counts(kmf_all, ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels, fontsize=table_fontsize)
+                    add_at_risk_counts([kmf_all], ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels, fontsize=table_fontsize)
             
                 # Apply Custom Label
                 ax.set_xlabel(x_label, fontsize=axes_fontsize)
