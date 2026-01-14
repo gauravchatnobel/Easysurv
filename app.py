@@ -865,7 +865,7 @@ if uploaded_file:
                                   fg_summary = cph_fg.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']]
                                   fg_summary.columns = ['Subdist HR', 'Lower 95%', 'Upper 95%', 'p-value']
                                  
-                         except Exception as e:
+                          except Exception as e:
                              st.error(f"Fine-Gray Analysis Failed: {e}")
                              # Fallback to simple Cause-Specific Log-Rank for simple plot label if FG fails
                              try:
