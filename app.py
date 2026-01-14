@@ -4,13 +4,77 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from lifelines import KaplanMeierFitter, CoxPHFitter, AalenJohansenFitter
 from lifelines.statistics import multivariate_logrank_test, logrank_test
-try:
-    from fine_gray_utils import compute_fine_gray_weights
-except ImportError:
-    # Fallback for standard running (if module struct is different)
-    from survival_analysis.fine_gray_utils import compute_fine_gray_weights
 import numpy as np
 import io
+
+def compute_fine_gray_weights(df, time_col, event_col, event_of_interest=1):
+    """
+    Prepares a dataset for Fine-Gray regression using Inverse Probability of Censoring Weighting (IPCW).
+    Ref: Fine JP, Gray RJ. A proportional hazards model for the subdistribution of a competing risk. 
+    J Am Stat Assoc. 1999;94(446):496–509.
+    """
+    df = df.copy()
+    df = df.sort_values(time_col)
+    
+    # 1. Estimate Censoring Distribution G(t)
+    censoring_df = df.copy()
+    censoring_df['cens_event'] = (censoring_df[event_col] == 0).astype(int)
+    
+    kmf_c = KaplanMeierFitter()
+    kmf_c.fit(censoring_df[time_col], censoring_df['cens_event'])
+    
+    def get_G(t):
+        probs = kmf_c.survival_function_at_times(t).values
+        return probs if np.isscalar(probs) else probs.flatten()
+
+    # 2. Identify Event Times of Interest
+    event_times = df[df[event_col] == event_of_interest][time_col].unique()
+    event_times = np.sort(event_times)
+    
+    # 3. Build Expanded Dataset
+    new_rows = []
+    if 'id' not in df.columns:
+        df['id'] = range(len(df))
+    
+    for _, row in df.iterrows():
+        t = row[time_col]
+        e = row[event_col]
+        pid = row['id']
+        
+        # Case A: Event or Censored - contribute normally
+        if e == event_of_interest or e == 0:
+            new_rows.append({
+                'id': pid, 'start': 0, 'stop': t,
+                'status': 1 if e == event_of_interest else 0,
+                'weight': 1.0,
+                **{c: row[c] for c in df.columns if c not in [time_col, event_col, 'id']}
+            })
+            
+        # Case B: Competing Event - remain in risk set with decaying weights
+        elif e != event_of_interest and e > 0:
+            # Interval [0, Ti]
+            new_rows.append({
+                'id': pid, 'start': 0, 'stop': t,
+                'status': 0, 'weight': 1.0,
+                **{c: row[c] for c in df.columns if c not in [time_col, event_col, 'id']}
+            })
+            
+            # Extension [Ti, tk]
+            relevant_times = event_times[event_times > t]
+            if len(relevant_times) > 0:
+                G_Ti = max(get_G(t), 1e-5)
+                current_start = t
+                for rt in relevant_times:
+                    weight = get_G(rt) / G_Ti
+                    new_rows.append({
+                        'id': pid, 'start': current_start, 'stop': rt,
+                        'status': 0, 'weight': weight,
+                        **{c: row[c] for c in df.columns if c not in [time_col, event_col, 'id']}
+                    })
+                    current_start = rt
+                    if weight < 1e-4: break
+
+    return pd.DataFrame(new_rows)
 
 def add_at_risk_counts(*fitters, ax=None, y_shift=-0.25, colors=None, labels=None):
     """
