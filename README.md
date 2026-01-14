@@ -4,8 +4,7 @@
 
 A web-based tool for performing comprehensive survival analysis (Kaplan-Meier, Cox Proportional Hazards) on clinical datasets without writing code.
 
-![App Screenshot](https://via.placeholder.com/800x400?text=App+Screenshot+Here)
-*(Replace this with a real screenshot of your app)*
+![App Screenshot](app_screenshot.png)
 
 ## Features
 
