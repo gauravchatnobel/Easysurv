@@ -1326,7 +1326,47 @@ if uploaded_file:
                          "95% CI": f"({lower:.1%} - {upper:.1%})"
                      })
             
-                st.table(pd.DataFrame(cif_est_data))
+                cif_est_df = pd.DataFrame(cif_est_data)
+                st.table(cif_est_df)
+                
+                # Download Point-in-Time Table
+                csv_cif_pit = cif_est_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label=f"💾 Download Inc. Estimates at {cif_target_time}",
+                    data=csv_cif_pit,
+                    file_name=f"cif_estimates_at_{cif_target_time}.csv",
+                    mime="text/csv"
+                )
+                
+                # --- MEDIAN TIME TO INCIDENCE ---
+                st.subheader("Median Time to Incidence (50% Event Prob.)")
+                
+                cif_median_data = []
+                for ajf, label in zip(cif_fitters, cif_labels):
+                    cif_line = ajf.cumulative_density_
+                    series = cif_line.iloc[:, 0]
+                    
+                    if series.max() >= 0.5:
+                        median_time = series[series >= 0.5].index[0]
+                        med_str = f"{median_time:.1f}"
+                    else:
+                        med_str = "NR" 
+                        
+                    cif_median_data.append({
+                        "Group": label,
+                        "Median Time to Incidence": med_str
+                    })
+                
+                cif_median_df = pd.DataFrame(cif_median_data)
+                st.table(cif_median_df)
+                
+                csv_cif_med = cif_median_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="💾 Download Median Incidence Table",
+                    data=csv_cif_med,
+                    file_name="median_incidence_table.csv",
+                    mime="text/csv"
+                )
 else:
     st.info("Please upload a CSV or Excel file to begin analysis.")
     st.write("Demostration with Dummy Data:")
