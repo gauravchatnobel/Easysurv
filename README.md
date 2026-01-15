@@ -8,6 +8,7 @@ A comprehensive, code-free platform for performing publication-ready survival an
 ## 🌟 Key Features
 
 ### 1. 🔍 Data Discovery & Cleanup
+*   **Demo Mode**: New to the tool? Click **"Load Demo Data"** on the welcome screen to instantly explore all features with a pre-loaded clinical dataset.
 *   **Variable Generation**: 
     *   Create **Combination Variables** (e.g., `TP53_Mut` + `Complex_Karyotype` → 4 groups).
     *   Create **Custom Logic** groups (e.g., `Age > 60` AND `Risk == "High"`).

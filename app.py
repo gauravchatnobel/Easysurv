@@ -177,19 +177,88 @@ uploaded_file = st.sidebar.file_uploader("Upload Clinical Data (CSV/Excel)", typ
 @st.cache_data
 def load_data(file):
     try:
-        if file.name.endswith('.csv'):
-            return pd.read_csv(file)
+        # Check if it's a file-like object or a string path
+        if isinstance(file, str):
+            if file.endswith('.csv'):
+                return pd.read_csv(file)
+            else:
+                return pd.read_excel(file)
         else:
-            return pd.read_excel(file)
+            if file.name.endswith('.csv'):
+                return pd.read_csv(file)
+            else:
+                return pd.read_excel(file)
     except Exception as e:
         return None
 
+df = None
+
 if uploaded_file:
-    # Load Data (Cached)
     df = load_data(uploaded_file)
-    if df is None:
-        st.error("Error loading file. Please ensure it is a valid CSV or Excel file.")
-        st.stop()
+else:
+    # --- LANDING PAGE ---
+    st.markdown("""
+    <style>
+    .hero-box {
+        padding: 2rem;
+        background-color: #f0f2f6; 
+        border-radius: 10px;
+        margin-bottom: 2rem;
+        text-align: center;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    st.markdown('<div class="hero-box">', unsafe_allow_html=True)
+    st.markdown("## 👋 Welcome to EasySurv")
+    st.markdown("### The Clinician-Friendly Survival Analysis Tool")
+    st.markdown("Perform publication-quality Kaplan-Meier, Cox Regression, and Competing Risks analysis in seconds without writing a single line of code.")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.info("**📊 Interactive Plots**\n\nCreate Nature-quality curves with aligned risk tables and custom themes.")
+    with col2:
+        st.success("**🤖 AI Narrator**\n\nGet instant natural language summaries of your P-values and Hazard Ratios.")
+    with col3:
+        st.warning("**🧬 Biomarker Discovery**\n\nAutomatically find optimal cutoffs and visualize correlations.")
+
+    st.divider()
+    
+    col_demo, col_blank = st.columns([1, 4])
+    with col_demo:
+         if st.button("🚀 Load Demo Data", type="primary", use_container_width=True):
+             df = load_data("Survival Analysis/dummy_clinical_data.csv") # Try relative path first
+             # Ideally use absolute path or handle different CWD
+             if df is None:
+                 try:
+                     df = load_data("dummy_clinical_data.csv")
+                 except:
+                     pass
+             
+             if df is not None:
+                 st.session_state['demo_loaded'] = True
+                 st.rerun()
+
+    # Check session state for demo persistence
+    if st.session_state.get('demo_loaded', False):
+        try:
+             # Try determining path dynamically or fallback
+             import os
+             possible_paths = ["dummy_clinical_data.csv", "survival_analysis/dummy_clinical_data.csv", "survival_analysis/dummy_clinical_data.csv"]
+             for p in possible_paths:
+                 if os.path.exists(p):
+                     df = load_data(p)
+                     break
+             if df is None:
+                  # Hard fallback for this specific environment 
+                  df = load_data("/Users/kajariva/duke-progress-monitor/survival_analysis/dummy_clinical_data.csv")
+        except:
+             pass
+
+if df is not None:
+
+
         
 
 
