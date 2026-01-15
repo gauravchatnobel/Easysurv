@@ -26,7 +26,16 @@ A web-based tool for performing comprehensive survival analysis (Kaplan-Meier, C
     *   **Aalen-Johansen Estimator**: Accurate CIF plots (Cumulative Incidence Function).
     *   **Fine-Gray Regression**: Subdistribution Hazard Ratios for competing events.
     *   **Gray's Test**: Compare cumulative incidence between groups.
+    *   **Gray's Test**: Compare cumulative incidence between groups.
+    *   **Point-in-Time Tables**: CIF estimates at 12, 18, 24 months.
 
+### 🧬 Biomarker Discovery & Optimization
+*   **Variable Generation**: 
+    *   Combine categorical variables (e.g., `LSC` + `NGS` -> 4 groups).
+    *   Create custom boolean logic groups (e.g., Age > 60 AND High Risk).
+*   **Cutoff Finder**: Automatically find the optimal cutoff for continuous variables using Log-Rank maximization.
+*   **Time-Dependent ROC**: Calculate AUC and optimal cutoffs for predicting events at specific time points.
+*   **Data Export**: Download the enhanced dataset with all new custom variables included.
 ### 🛠️ Easy to Use
 *   **No Code Required**: Just upload your CSV or Excel file.
 *   **Secure**: Data is processed in memory; no data is stored permanently if running locally or on ephemeral cloud instances.
