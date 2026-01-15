@@ -172,6 +172,23 @@ if uploaded_file:
         st.error(f"Error loading file: {e}")
         st.stop()
 
+    # --- SESSION STATE & CUSTOM VARIABLES ---
+    if 'custom_cutoffs' not in st.session_state:
+        st.session_state.custom_cutoffs = []
+        
+    # Apply valid custom cutoffs to df
+    if st.session_state.custom_cutoffs:
+        for cutoff_def in st.session_state.custom_cutoffs:
+             src = cutoff_def['source']
+             val = cutoff_def['value']
+             name = cutoff_def['name']
+             
+             if src in df.columns:
+                 # Create categorical column
+                 # "High" if > val, "Low" if <= val
+                 df[name] = np.where(df[src] > val, f"High (> {val:.2f})", f"Low (<= {val:.2f})")
+    
+    # --- DATA FILTRATION ---
     # --- DATA FILTRATION ---
     with st.expander("🔍 Step 1: Filter Data (Optional)", expanded=True):
         st.write("Select subset of data based on categorical variables (e.g., specific ELN Risk groups).")
@@ -411,7 +428,7 @@ if uploaded_file:
         st.divider()
         st.header("Survival Analysis")
 
-        tab1, tab2, tab3 = st.tabs(["Univariable Analysis (Kaplan-Meier)", "Multivariable Analysis (Cox PH)", "Competing Risks (CIF)"])
+        tab1, tab2, tab3, tab4 = st.tabs(["Univariable Analysis (Kaplan-Meier)", "Multivariable Analysis (Cox PH)", "Competing Risks (CIF)", "🧬 Biomarker Discovery"])
 
         with tab1:
         
@@ -1408,3 +1425,134 @@ else:
     st.write("You can download the demo dataset `dummy_clinical_data.csv` from the repository:")
     st.markdown("[📂 View Repository & Download Data](https://github.com/gauravchatnobel/Easysurv)")
     st.caption("Right-click the link and open in a new tab to find the CSV file.")
+
+    # --- TAB 4: BIOMARKER DISCOVERY ---
+    if 'tab4' in locals() and df_clean is not None:
+         with tab4:
+             st.header("Biomarker Cutoff Optimization")
+             st.write("Evaluate valid continuous variables (e.g., Gene Expression, Lab Values) and find the optimal cutoff for survival stratification.")
+             
+             # Identify continuous columns (numeric & > 10 unique values)
+             cont_cols = [c for c in df_clean.columns if pd.api.types.is_numeric_dtype(df_clean[c]) and df_clean[c].nunique() > 10]
+             # Exclude time/event/id columns if possible
+             exclude = [time_col, event_col, "id", "ID", "patient_id"]
+             cont_cols = [c for c in cont_cols if c not in exclude]
+             
+             if not cont_cols:
+                 st.warning("No continuous variables found (columns with >10 unique numeric values).")
+             else:
+                 bio_col = st.selectbox("Select Biomarker (Continuous Variable)", cont_cols)
+                 
+                 col1, col2 = st.columns(2)
+                 
+                 with col1:
+                     st.subheader("1. Continuous Association")
+                     # Run Univariable Cox PH
+                     try:
+                         # normalize for better convergence
+                         cox_df = df_clean[[time_col, event_col, bio_col]].replace([np.inf, -np.inf], np.nan).dropna()
+                         
+                         cph_cont = CoxPHFitter()
+                         cph_cont.fit(cox_df, duration_col=time_col, event_col=event_col)
+                         
+                         summ = cph_cont.summary.loc[bio_col]
+                         hr = summ['exp(coef)']
+                         p_val = summ['p']
+                         
+                         st.metric("Hazard Ratio (Continuous)", f"{hr:.3f}", delta=None)
+                         st.metric("P-value (Wald Test)", f"{p_val:.4f}", delta_color="inverse" if p_val < 0.05 else "normal")
+                         
+                         if p_val < 0.05:
+                             st.success(f"**{bio_col}** is significantly associated with outcome as a continuous variable.")
+                         else:
+                             st.info(f"**{bio_col}** is NOT strictly associated as a linear continuous variable. A threshold effect might still exist.")
+                             
+                     except Exception as e:
+                         st.error(f"Cox PH Analysis failed: {e}")
+                 
+                 with col2:
+                     st.subheader("2. Cutoff Finder")
+                     st.write("Test multiple cutoffs to maximize the Log-Rank difference (Lowest P-value).")
+                     
+                     if st.button(f"Find Optimal Cutoff for {bio_col}"):
+                         # Calculate optimal cutoff
+                         # Grid search between 10th and 90th percentile
+                         values = cox_df[bio_col].sort_values()
+                         low_p = np.percentile(values, 10)
+                         high_p = np.percentile(values, 90)
+                         
+                         # Check 20 quantile steps
+                         candidates = np.linspace(low_p, high_p, 50)
+                         best_p = 1.0
+                         best_cut = None
+                         best_stats = None
+                         
+                         p_values = []
+                         stats = []
+                         
+                         progress_bar = st.progress(0)
+                         
+                         for idx, cut in enumerate(candidates):
+                             # Create temporary group
+                             group_temp = (cox_df[bio_col] > cut).astype(int)
+                             # Only test if we have events in both groups
+                             if group_temp.sum() > 5 and (len(group_temp) - group_temp.sum()) > 5:
+                                 res = multivariate_logrank_test(cox_df[time_col], group_temp, cox_df[event_col])
+                                 p = res.p_value
+                                 p_values.append(p)
+                                 stats.append(res.test_statistic)
+                                 
+                                 if p < best_p:
+                                     best_p = p
+                                     best_cut = cut
+                             else:
+                                 p_values.append(np.nan)
+                             
+                             progress_bar.progress((idx + 1) / len(candidates))
+                             
+                         progress_bar.empty()
+                         
+                         if best_cut is not None:
+                             st.success(f"**Optimal Cutoff Found:** {best_cut:.2f} (p = {best_p:.5f})")
+                             
+                             # Store in session state for plotting and saving
+                             st.session_state.optimal_cut = {
+                                 'col': bio_col,
+                                 'cut': best_cut,
+                                 'p': best_p
+                             }
+                             
+                             # Plot P-value landscape
+                             fig_p, ax_p = plt.subplots(figsize=(6, 4))
+                             ax_p.plot(candidates, -np.log10(p_values), color='purple')
+                             ax_p.set_ylabel("-Log10(P-value)")
+                             ax_p.set_xlabel(f"{bio_col} Value")
+                             ax_p.axvline(best_cut, color='red', linestyle='--', label=f"Best: {best_cut:.2f}")
+                             ax_p.axhline(-np.log10(0.05), color='gray', linestyle=':', label="p=0.05")
+                             ax_p.legend()
+                             ax_p.set_title("Cutoff Optimization Landscape")
+                             st.pyplot(fig_p)
+                             
+                 # 3. Action Section
+                 st.divider()
+                 st.subheader("3. Create Categorical Variable")
+                 
+                 # Default to optimal if found, else median
+                 default_cut = df_clean[bio_col].median()
+                 if 'optimal_cut' in st.session_state and st.session_state.optimal_cut['col'] == bio_col:
+                     default_cut = st.session_state.optimal_cut['cut']
+                     st.info(f"Optimal cutoff {default_cut:.2f} pre-filled from analysis above.")
+                 
+                 final_cut = st.number_input("Selected Cutoff Value", value=float(default_cut))
+                 new_var_name = st.text_input("New Variable Name", value=f"{bio_col}_Cat")
+                 
+                 if st.button("Create & Add to Dataset"):
+                     # Add to custom_cutoffs session state
+                     new_def = {
+                         'source': bio_col,
+                         'value': final_cut,
+                         'name': new_var_name
+                     }
+                     st.session_state.custom_cutoffs.append(new_def)
+                     st.success(f"Variable **{new_var_name}** created! It is now available in the Main and CIF tabs.")
+                     st.experimental_rerun()
