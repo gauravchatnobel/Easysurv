@@ -1072,6 +1072,9 @@ if uploaded_file:
                             st.write("### Regression Results")
                             st.dataframe(summary_mv.style.format("{:.3f}"))
                             
+                            # Save to Session State specifically for Narrator or Persistence
+                            st.session_state['mv_summary_df'] = summary_mv
+
                             # Forest Plot
                             st.write("### Forest Plot")
                             
@@ -1142,11 +1145,15 @@ if uploaded_file:
                                 # --- AI NARRATOR (Multivariable) ---
                                 st.divider()
                                 st.write("### 🤖 AI Result Narrator")
+                                
+                                # Use session state DF if available (handles button consistency if needed)
+                                mv_df_for_narrator = st.session_state.get('mv_summary_df', summary_mv)
+                                
                                 if st.button("Generate Summary Text (Multivariable)"):
                                     mv_summary = "In the multivariable Cox regression model adjusted for relevant covariates, the following associations were observed:\n\n"
                                     
                                     # Iterate over rows
-                                    for idx, row in summary_mv.iterrows():
+                                    for idx, row in mv_df_for_narrator.iterrows():
                                         hr = row['Hazard Ratio (HR)']
                                         p = row['p-value']
                                         ci_low = row['Lower 95% CI']
@@ -1656,10 +1663,11 @@ if uploaded_file:
                      if fg_summary is not None:
                          cif_summary += "\n**Fine-Gray Regression Results** (accounting for competing risks):\n"
                          for idx, row in fg_summary.iterrows():
-                             hr = row['exp(coef)']
-                             p = row['p']
-                             low = row['exp(coef) lower 95%']
-                             high = row['exp(coef) upper 95%']
+                             # Columns were renamed to ['Subdist HR', 'Lower 95%', 'Upper 95%', 'p-value']
+                             hr = row['Subdist HR']
+                             p = row['p-value']
+                             low = row['Lower 95%']
+                             high = row['Upper 95%']
                              sig_txt = "significantly associated" if p < 0.05 else "not significantly associated"
                              cif_summary += f"* **{idx}**: {sig_txt} with the cumulative incidence of the event (SHR={hr:.2f}, 95% CI {low:.2f}-{high:.2f}, p={p:.4f}).\n"
                      
