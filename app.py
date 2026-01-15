@@ -1126,8 +1126,8 @@ if uploaded_file:
                     ax_cif.set_ylabel("Cumulative Incidence", fontsize=axes_fontsize)
                 ax_cif.tick_params(axis='both', which='major', labelsize=axes_fontsize)
                 
-                if show_legend:
-                     ax_cif.legend(fontsize=legend_fontsize, loc=(leg_x_cif, leg_y_cif), frameon=show_legend_box)
+                if show_legend_cif:
+                     ax_cif.legend(fontsize=legend_fontsize, loc=(leg_x_cif, leg_y_cif), frameon=show_legend_box_cif)
                 else:
                      if ax_cif.get_legend():
                          ax_cif.get_legend().remove()
