@@ -171,6 +171,19 @@ if uploaded_file:
     except Exception as e:
         st.error(f"Error loading file: {e}")
         st.stop()
+        
+    # --- DOWNLOAD MODIFIED DATA ---
+    with st.sidebar:
+        st.divider()
+        csv_buffer = df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="💾 Download Enhanced Data (CSV)",
+            data=csv_buffer,
+            file_name="easysurv_enhanced_data.csv",
+            mime="text/csv",
+            help="Download the dataset including all new variables created in this session."
+        )
+        st.divider()
 
     # --- SESSION STATE & CUSTOM VARIABLES ---
     if 'custom_cutoffs' not in st.session_state:
