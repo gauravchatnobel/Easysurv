@@ -377,11 +377,35 @@ if df is not None:
     st.sidebar.subheader("Variable Selection")
     
     # Time and Event columns
-    time_col = st.sidebar.selectbox("Time Column (Duration)", columns, index=columns.index("OS_Days") if "OS_Days" in columns else 0)
-    event_col = st.sidebar.selectbox("Event Column (Status: 1=Event, 0=Censored)", columns, index=columns.index("OS_Status") if "OS_Status" in columns else 0)
+    # Time and Event columns
+    # Smart Defaults for Demo
+    default_time_idx = 0
+    default_event_idx = 0
+    default_group_idx = 0
+    
+    if st.session_state.get('demo_loaded', False):
+        if "OS_Months" in columns:
+            default_time_idx = columns.index("OS_Months")
+        if "Event_Occurred" in columns:
+            default_event_idx = columns.index("Event_Occurred")
+        if "Treatment_Arm" in columns:
+            # +1 because "None" is at index 0
+            default_group_idx = columns.index("Treatment_Arm") + 1
+    else:
+        # Standard intelligent defaults
+        if "OS_Days" in columns: default_time_idx = columns.index("OS_Days")
+        elif "Time" in columns: default_time_idx = columns.index("Time")
+        
+        if "OS_Status" in columns: default_event_idx = columns.index("OS_Status")
+        elif "Status" in columns: default_event_idx = columns.index("Status")
+        
+        if "MRD_Status" in columns: default_group_idx = columns.index("MRD_Status") + 1
+
+    time_col = st.sidebar.selectbox("Time Column (Duration)", columns, index=default_time_idx)
+    event_col = st.sidebar.selectbox("Event Column (Status: 1=Event, 0=Censored)", columns, index=default_event_idx)
     
     # Grouping Variable
-    group_col = st.sidebar.selectbox("Grouping Variable (e.g., MRD Status)", ["None"] + columns, index=columns.index("MRD_Status") + 1 if "MRD_Status" in columns else 0)
+    group_col = st.sidebar.selectbox("Grouping Variable (e.g., MRD Status)", ["None"] + columns, index=default_group_idx)
 
     # --- SIDEBAR CONFIGURATION ---
     st.sidebar.header("Configuration")
