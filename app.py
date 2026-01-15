@@ -217,11 +217,11 @@ else:
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.info("**📊 Interactive Plots**\n\nCreate Nature-quality curves with aligned risk tables and custom themes.")
+        st.info("**📊 Interactive Plots**\n\nCreate publication-quality curves with aligned risk tables and custom themes.")
     with col2:
         st.success("**🤖 AI Narrator**\n\nGet instant natural language summaries of your P-values and Hazard Ratios.")
     with col3:
-        st.warning("**🧬 Biomarker Discovery**\n\nAutomatically find optimal cutoffs and visualize correlations.")
+        st.warning("**🧬 Biomarker Optimum Threshold**\n\nAutomatically find optimal cutoffs and visualize correlations.")
 
     st.divider()
     
