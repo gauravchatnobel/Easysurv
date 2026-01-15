@@ -468,7 +468,7 @@ if uploaded_file:
             
                 # P-value and Legend if applicable (Single group usually no legend needed unless CI)
                 if show_p_val_plot and p_value_text:
-                     bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box else None
+                     bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box_main else None
                      ax.text(pval_x_main, pval_y_main, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
 
                 # Risk Table logic (basic implementation using lifelines built-in if possible, or custom)
