@@ -25,7 +25,11 @@ def compute_fine_gray_weights(df, time_col, event_col, event_of_interest=1):
     
     def get_G(t):
         probs = kmf_c.survival_function_at_times(t).values
-        return probs if np.isscalar(probs) else probs.flatten()
+        # Ensure we return a scalar float
+        if np.isscalar(probs):
+             return float(probs)
+        else:
+             return float(probs.item()) if probs.size == 1 else float(probs[0])
 
     # 2. Identify Event Times of Interest
     event_times = df[df[event_col] == event_of_interest][time_col].unique()
@@ -203,6 +207,13 @@ if uploaded_file:
     legend_fontsize = st.sidebar.number_input("Legend Font Size", min_value=6, value=10)
     line_width = st.sidebar.slider("Line Width", 0.5, 5.0, 1.5)
     
+    # Global Plot Configuration (Elements affecting all plots)
+    st.sidebar.subheader("Global Plot Configuration")
+    show_risk_table = st.sidebar.checkbox("Show At-Risk Table", value=True)
+    table_height = st.sidebar.slider("Table Offset", -0.5, -0.1, -0.25, 0.05) if show_risk_table else -0.25
+    show_censored = st.sidebar.checkbox("Show Censored Ticks", value=True)
+    show_ci = st.sidebar.checkbox("Show 95% CI", value=True)
+    
     # 2. Main Plot Settings (Kaplan-Meier)
     with st.sidebar.expander("Main Plot Settings (KM)", expanded=False):
         st.markdown("### Layout & Axes")
@@ -221,11 +232,7 @@ if uploaded_file:
         plot_height = st.slider("Plot Height", 4, 12, 6)
         plot_width = st.slider("Plot Width", 6, 15, 10)
         
-        st.markdown("### Elements")
-        show_risk_table = st.checkbox("Show At-Risk Table", value=True)
-        table_height = st.slider("Table Offset", -0.5, -0.1, -0.25, 0.05) if show_risk_table else -0.25
-        show_censored = st.checkbox("Show Censored Ticks", value=True)
-        show_ci = st.checkbox("Show 95% CI", value=True)
+        # Elements (Moved to Global)
         
         st.markdown("### Legend")
         show_legend_main = st.checkbox("Show Legend (Main)", value=True)
@@ -259,7 +266,7 @@ if uploaded_file:
         leg_y_cif = st.slider("Legend Y (CIF)", 0.0, 1.0, 0.8)
         
         st.markdown("### P-value")
-        # CIF p-value toggle logic is handled by calculating it if enabled
+        show_p_val_plot_cif = st.checkbox("Show P-value (CIF)", value=False)
         show_p_val_box_cif = st.checkbox("Box P-value (CIF)", value=True)
         pval_x_cif = st.slider("P-val X (CIF)", 0.0, 1.0, 0.95)
         pval_y_cif = st.slider("P-val Y (CIF)", 0.0, 1.0, 0.2)
@@ -981,7 +988,9 @@ if uploaded_file:
                                   # 4. Extract P-value (Gray's Test Equivalent)
                                   # Log-Likelihood Ratio Test against null model
                                   res_fg = cph_fg.log_likelihood_ratio_test()
-                                  if show_p_val_plot:
+                                  # Log-Likelihood Ratio Test against null model
+                                  res_fg = cph_fg.log_likelihood_ratio_test()
+                                  if show_p_val_plot_cif:
                                       fg_p_value_text = f"Gray's p = {res_fg.p_value:.4f}"
                                   
                                   # 5. Extract HR Table
@@ -992,9 +1001,9 @@ if uploaded_file:
                              st.error(f"Fine-Gray Analysis Failed: {e}")
                              # Fallback to simple Cause-Specific Log-Rank for simple plot label if FG fails
                              try:
-                                 temp_evt = (cif_df[cif_event_col] == cif_event_of_interest).astype(int)
-                                 res_cif = multivariate_logrank_test(cif_df[cif_time_col], cif_df[group_col], temp_evt)
-                                 if show_p_val_plot:
+                                  temp_evt = (cif_df[cif_event_col] == cif_event_of_interest).astype(int)
+                                  res_cif = multivariate_logrank_test(cif_df[cif_time_col], cif_df[group_col], temp_evt)
+                                  if show_p_val_plot_cif:
                                     fg_p_value_text = f"CS-LogRank p = {res_cif.p_value:.4f}"
                              except:
                                  pass
