@@ -1351,10 +1351,45 @@ if uploaded_file:
                         med_str = f"{median_time:.1f}"
                     else:
                         med_str = "NR" 
-                        
+                    
+                    # 95% CI for Median Time
+                    # Logic: Time range where 95% CI of Probability contains 0.5
+                    # Lower Time Bound comes from Upper Probability Bound crossing 0.5
+                    # Upper Time Bound comes from Lower Probability Bound crossing 0.5
+                    try:
+                         ci_df = ajf.confidence_interval_
+                         # Columns: [label]_lower_0.95, [label]_upper_0.95 (order may vary, but lower is first)
+                         # Usually in lifelines, CI columns are {label}_lower_0.95 and {label}_upper_0.95
+                         # We can select by position: 0=Lower Prob, 1=Upper Prob
+                         
+                         prob_lower = ci_df.iloc[:, 0]
+                         prob_upper = ci_df.iloc[:, 1]
+                         
+                         # Time Lower Limit = Time when Prob UPPER bound >= 0.5
+                         if prob_upper.max() >= 0.5:
+                              time_lower = prob_upper[prob_upper >= 0.5].index[0]
+                              time_lower_str = f"{time_lower:.1f}"
+                         else:
+                              time_lower_str = "NR"
+                              
+                         # Time Upper Limit = Time when Prob LOWER bound >= 0.5
+                         if prob_lower.max() >= 0.5:
+                              time_upper = prob_lower[prob_lower >= 0.5].index[0]
+                              time_upper_str = f"{time_upper:.1f}"
+                         else:
+                              time_upper_str = "NR"
+                         
+                         if time_lower_str == "NR" and time_upper_str == "NR":
+                              ci_str = "(NR - NR)"
+                         else:
+                              ci_str = f"({time_lower_str} - {time_upper_str})"
+                    except:
+                         ci_str = "(NR - NR)"
+
                     cif_median_data.append({
                         "Group": label,
-                        "Median Time to Incidence": med_str
+                        "Median Time to Incidence": med_str,
+                        "95% CI (Median)": ci_str
                     })
                 
                 cif_median_df = pd.DataFrame(cif_median_data)
