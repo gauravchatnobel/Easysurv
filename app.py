@@ -188,6 +188,54 @@ if uploaded_file:
                  # "High" if > val, "Low" if <= val
                  df[name] = np.where(df[src] > val, f"High (> {val:.2f})", f"Low (<= {val:.2f})")
     
+    # NEW: Apply custom variable combinations (Interactions)
+    if 'custom_combinations' not in st.session_state:
+        st.session_state.custom_combinations = []
+        
+    if st.session_state.custom_combinations:
+        for combo_def in st.session_state.custom_combinations:
+            if 'type' not in combo_def or combo_def['type'] == 'interaction':
+                var1 = combo_def['var1']
+                var2 = combo_def['var2']
+                new_name = combo_def['name']
+                
+                if var1 in df.columns and var2 in df.columns:
+                     # Concatenate values with a separator
+                     df[new_name] = df[var1].astype(str) + " / " + df[var2].astype(str)
+            
+            elif combo_def['type'] == 'boolean':
+                try:
+                    # Boolean Logic
+                    c1 = combo_def['c1']
+                    logic = combo_def['logic']
+                    c2 = combo_def['c2']
+                    name = combo_def['name']
+                    
+                    # Helper to get mask
+                    def get_mask(col, op, val):
+                        if op == ">": return df[col] > val
+                        if op == "<": return df[col] < val
+                        if op == ">=": return df[col] >= val
+                        if op == "<=": return df[col] <= val
+                        if op == "==": return df[col] == val
+                        if op == "!=": return df[col] != val
+                        return pd.Series([False]*len(df))
+                    
+                    mask1 = get_mask(c1['var'], c1['op'], c1['val'])
+                    
+                    if c2:
+                        mask2 = get_mask(c2['var'], c2['op'], c2['val'])
+                        if logic == "AND":
+                            final_mask = mask1 & mask2
+                        else:
+                            final_mask = mask1 | mask2
+                    else:
+                        final_mask = mask1
+                        
+                    df[name] = np.where(final_mask, "Target Group", "Other")
+                except Exception as e:
+                    st.error(f"Failed to create boolean variable {combo_def['name']}: {e}")
+    
     # --- DATA FILTRATION ---
     # --- DATA FILTRATION ---
     with st.expander("🔍 Step 1: Filter Data (Optional)", expanded=True):
@@ -428,7 +476,7 @@ if uploaded_file:
         st.divider()
         st.header("Survival Analysis")
 
-        tab1, tab2, tab3, tab4 = st.tabs(["Univariable Analysis (Kaplan-Meier)", "Multivariable Analysis (Cox PH)", "Competing Risks (CIF)", "🧬 Biomarker Discovery"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["Univariable (KM)", "Multivariable (Cox)", "Competing Risks (CIF)", "🧬 Biomarker Discovery", "🧪 Variable Generation"])
 
         with tab1:
         
@@ -1669,15 +1717,130 @@ if uploaded_file:
                  final_cut = st.number_input("Selected Cutoff Value", value=float(default_cut))
                  new_var_name = st.text_input("New Variable Name", value=f"{bio_col}_Cat")
                  
-                 if st.button("Create & Add to Dataset"):
-                     # Add to custom_cutoffs session state
-                     new_def = {
-                         'source': bio_col,
-                         'value': final_cut,
-                         'name': new_var_name
-                     }
-                     st.session_state.custom_cutoffs.append(new_def)
                      st.success(f"Variable **{new_var_name}** created! It is now available in the Main and CIF tabs.")
+                     if hasattr(st, "rerun"):
+                         st.rerun()
+                     else:
+                         st.experimental_rerun()
+
+    # --- TAB 5: VARIABLE GENERATION ---
+    if 'tab5' in locals() and df_clean is not None:
+         with tab5:
+             st.header("🧪 Variable Generation")
+             st.write("Create advanced variables by combining existing columns or applying logical rules.")
+             
+             tab5_meth1, tab5_meth2 = st.tabs(["Method 1: Interaction Combiner", "Method 2: Boolean Logic"])
+             
+             # --- METHOD 1: INTERACTION COMBINER ---
+             with tab5_meth1:
+                 st.subheader("Combine Two Variables (Interaction)")
+                 st.caption("Create unique groups for every combination of Variable A and Variable B (e.g., LSC+ & NGS+ -> 'LSC+_NGS+').")
+                 
+                 cols_avail = df_clean.columns.tolist()
+                 # Exclude Time/Event if possible to keep lists clean, but user might want them.
+                 
+                 col1_gen, col2_gen = st.columns(2)
+                 with col1_gen:
+                     var_a = st.selectbox("Select Variable A", cols_avail, key="gen_var_a")
+                 with col2_gen:
+                     var_b = st.selectbox("Select Variable B", cols_avail, index=1 if len(cols_avail)>1 else 0, key="gen_var_b")
+                 
+                 if var_a == var_b:
+                     st.warning("Please select two different variables.")
+                 else:
+                     # Preview
+                     unique_a = df_clean[var_a].nunique()
+                     unique_b = df_clean[var_b].nunique()
+                     est_groups = unique_a * unique_b
+                     
+                     st.info(f"Variable A has **{unique_a}** levels. Variable B has **{unique_b}** levels. Result will have up to **{est_groups}** combined groups.")
+                     
+                     preview_name = st.text_input("New Variable Name (Method 1)", value=f"{var_a}_{var_b}_Combo")
+                     
+                     if st.button("Generate Combination Variable"):
+                         # Add definition to session state
+                         new_combo = {
+                             'var1': var_a,
+                             'var2': var_b,
+                             'name': preview_name,
+                             'type': 'interaction'
+                         }
+                         
+                         if 'custom_combinations' not in st.session_state:
+                             st.session_state.custom_combinations = []
+                         
+                         st.session_state.custom_combinations.append(new_combo)
+                         st.success(f"Interaction variable **{preview_name}** created! It is now available in the sidebar.")
+                         if hasattr(st, "rerun"):
+                             st.rerun()
+                         else:
+                             st.experimental_rerun()
+                             
+             # --- METHOD 2: BOOLEAN LOGIC ---
+             with tab5_meth2:
+                 st.subheader("Create Group by Logic (Target vs Other)")
+                 st.caption("Create a binary variable (Target / Other) based on specific conditions (e.g. Age > 60 AND LSC = Positive).")
+                 
+                 # Condition 1
+                 c1_col1, c1_col2, c1_col3 = st.columns([2, 1, 2])
+                 with c1_col1:
+                     cond1_var = st.selectbox("Condition 1: Variable", cols_avail, key="blob_c1_var")
+                 with c1_col2:
+                     cond1_op = st.selectbox("Operator", [">", "<", ">=", "<=", "==", "!="], key="blob_c1_op")
+                 with c1_col3:
+                     # Try to detect type for input
+                     if pd.api.types.is_numeric_dtype(df_clean[cond1_var]):
+                         cond1_val = st.number_input("Value", value=0.0, key="blob_c1_val_num")
+                     else:
+                         vals_c1 = df_clean[cond1_var].unique()
+                         cond1_val = st.selectbox("Value", vals_c1, key="blob_c1_val_str")
+                         
+                 # Logic Operator
+                 logic_op = st.radio("Logic Operator", ["AND", "OR"], horizontal=True, key="blob_logic")
+                 
+                 # Condition 2
+                 c2_col1, c2_col2, c2_col3 = st.columns([2, 1, 2])
+                 with c2_col1:
+                     cond2_var = st.selectbox("Condition 2: Variable", ["(None)"] + cols_avail, key="blob_c2_var")
+                 
+                 cond2_val = None
+                 cond2_op = None
+                 
+                 if cond2_var != "(None)":
+                     with c2_col2:
+                         cond2_op = st.selectbox("Operator", [">", "<", ">=", "<=", "==", "!="], key="blob_c2_op")
+                     with c2_col3:
+                          if pd.api.types.is_numeric_dtype(df_clean[cond2_var]):
+                             cond2_val = st.number_input("Value", value=0.0, key="blob_c2_val_num")
+                          else:
+                             vals_c2 = df_clean[cond2_var].unique()
+                             cond2_val = st.selectbox("Value", vals_c2, key="blob_c2_val_str")
+                             
+                 new_bool_name = st.text_input("New Variable Name (Method 2)", value="Custom_Group")
+                 
+                 if st.button("Generate Boolean Variable"):
+                     # We need to construct a definition that can be re-applied or applied now.
+                     # Since boolean logic is complex to store purely as metadata without a parser, 
+                     # we will execute it now and store the RESULTING COLUMN directly in the dataframe.
+                     # However, to persist it, we need to re-run it every time?
+                     # Ideally yes. For now, let's just modify the CURRENT df and rely on st.cache or session state persistence of the whole DF? 
+                     # No, df is reloaded. We need to store the logic.
+                     
+                     bool_def = {
+                         'type': 'boolean',
+                         'name': new_bool_name,
+                         'c1': {'var': cond1_var, 'op': cond1_op, 'val': cond1_val},
+                         'logic': logic_op,
+                         'c2': {'var': cond2_var, 'op': cond2_op, 'val': cond2_val} if cond2_var != "(None)" else None
+                     }
+                     
+                     if 'custom_combinations' not in st.session_state:
+                         st.session_state.custom_combinations = []
+                     
+                     st.session_state.custom_combinations.append(bool_def)
+                     
+                     # Force reload to apply logic in the main app loop (we need to update that loop too!)
+                     st.success(f"Logic Variable **{new_bool_name}** created!")
                      if hasattr(st, "rerun"):
                          st.rerun()
                      else:
