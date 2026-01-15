@@ -181,13 +181,25 @@ if uploaded_file:
         if filter_cols:
             df_filtered = df.copy()
             for col in filter_cols:
-                # Get unique values (drop NaNs for the selector)
-                unique_vals = sorted(df[col].dropna().unique())
-                selected_vals = st.multiselect(f"Select values to KEEP for '{col}'", unique_vals, default=unique_vals)
-                
-                # Apply filter
-                if selected_vals:
-                    df_filtered = df_filtered[df_filtered[col].isin(selected_vals)]
+                # Check for numeric columns (to show slider vs multiselect)
+                if pd.api.types.is_numeric_dtype(df[col]) and len(df[col].unique()) > 10:
+                     min_val = float(df[col].min())
+                     max_val = float(df[col].max())
+                     step = (max_val - min_val) / 100.0 if max_val != min_val else 0.1
+                     
+                     st.markdown(f"**Filter '{col}' (Numeric Range)**")
+                     rng = st.slider(f"Select Range: {col}", min_val, max_val, (min_val, max_val), step=step, key=f"filt_{col}")
+                     
+                     # Apply Filter
+                     df_filtered = df_filtered[df_filtered[col].between(rng[0], rng[1])]
+                else:
+                    # Categorical / Low-cardinality Numeric
+                    unique_vals = sorted(df[col].dropna().unique())
+                    selected_vals = st.multiselect(f"Select values to KEEP for '{col}'", unique_vals, default=unique_vals, key=f"filt_{col}")
+                    
+                    # Apply filter
+                    if selected_vals:
+                        df_filtered = df_filtered[df_filtered[col].isin(selected_vals)]
             
             # Show stats
             n_before = len(df)
