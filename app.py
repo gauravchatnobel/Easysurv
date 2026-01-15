@@ -202,6 +202,10 @@ if uploaded_file:
                 if var1 in df.columns and var2 in df.columns:
                      # Concatenate values with a separator
                      df[new_name] = df[var1].astype(str) + " / " + df[var2].astype(str)
+                     
+                     # NEW: Set to NaN if either source is NaN (don't create string "nan / ...")
+                     mask_nan = df[var1].isna() | df[var2].isna()
+                     df.loc[mask_nan, new_name] = np.nan
             
             elif combo_def['type'] == 'boolean':
                 try:
