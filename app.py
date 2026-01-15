@@ -1001,7 +1001,7 @@ if uploaded_file:
                 
                 # Display P-value on Plot
                 if show_p_val_plot and fg_p_value_text:
-                     bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box else None
+                     bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box_cif else None
                      ax_cif.text(pval_x_cif, pval_y_cif, fg_p_value_text, transform=ax_cif.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
 
                 if group_col != "None" and group_col in cif_df.columns:
