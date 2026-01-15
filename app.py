@@ -177,17 +177,10 @@ uploaded_file = st.sidebar.file_uploader("Upload Clinical Data (CSV/Excel)", typ
 @st.cache_data
 def load_data(file):
     try:
-        # Check if it's a file-like object or a string path
-        if isinstance(file, str):
-            if file.endswith('.csv'):
-                return pd.read_csv(file)
-            else:
-                return pd.read_excel(file)
+        if file.name.endswith('.csv'):
+            return pd.read_csv(file)
         else:
-            if file.name.endswith('.csv'):
-                return pd.read_csv(file)
-            else:
-                return pd.read_excel(file)
+            return pd.read_excel(file)
     except Exception as e:
         return None
 
@@ -228,13 +221,24 @@ else:
     col_demo, col_blank = st.columns([1, 4])
     with col_demo:
          if st.button("🚀 Load Demo Data", type="primary", use_container_width=True):
-             df = load_data("Survival Analysis/dummy_clinical_data.csv") # Try relative path first
-             # Ideally use absolute path or handle different CWD
-             if df is None:
-                 try:
-                     df = load_data("dummy_clinical_data.csv")
-                 except:
-                     pass
+             # Load directly without cache to identify file changes
+             try:
+                 # Check multiple locations
+                 import os
+                 possible_paths = ["dummy_clinical_data.csv", "survival_analysis/dummy_clinical_data.csv"]
+                 found_path = None
+                 for p in possible_paths:
+                     if os.path.exists(p):
+                         found_path = p
+                         break
+                 
+                 if found_path:
+                     df = pd.read_csv(found_path) # Direct read, no cache
+                 else:
+                     st.error("Demo file not found.")
+                     
+             except Exception as e:
+                 st.error(f"Error loading demo: {e}")
              
              if df is not None:
                  st.session_state['demo_loaded'] = True
@@ -243,16 +247,12 @@ else:
     # Check session state for demo persistence
     if st.session_state.get('demo_loaded', False):
         try:
-             # Try determining path dynamically or fallback
              import os
-             possible_paths = ["dummy_clinical_data.csv", "survival_analysis/dummy_clinical_data.csv", "survival_analysis/dummy_clinical_data.csv"]
+             possible_paths = ["dummy_clinical_data.csv", "survival_analysis/dummy_clinical_data.csv"]
              for p in possible_paths:
                  if os.path.exists(p):
-                     df = load_data(p)
+                     df = pd.read_csv(p) # Direct read
                      break
-             if df is None:
-                  # Hard fallback for this specific environment 
-                  df = load_data("/Users/kajariva/duke-progress-monitor/survival_analysis/dummy_clinical_data.csv")
         except:
              pass
 
