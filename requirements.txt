@@ -3,3 +3,5 @@ pandas
 lifelines
 matplotlib
 openpyxl
+scikit-learn
+seaborn

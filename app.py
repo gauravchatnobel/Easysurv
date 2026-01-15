@@ -2089,9 +2089,15 @@ if uploaded_file:
                  corr_matrix = corr_df.corr(method=corr_method)
                  
                  # Plot
-                 fig_corr, ax_corr = plt.subplots(figsize=(10, 8))
-                 sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm", center=0, ax=ax_corr, square=True)
-                 st.pyplot(fig_corr)
+                fig_corr, ax_corr = plt.subplots(figsize=(10, 8))
+                
+                if sns is not None:
+                    sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm", center=0, ax=ax_corr, square=True)
+                    st.pyplot(fig_corr)
+                else:
+                    st.error("Error: The 'seaborn' library could not be loaded.")
+                    st.warning("The system attempted to auto-install it but failed. Please try restarting the app or installing 'seaborn' manually in your environment.")
+                    st.code("pip install seaborn")
              
 
 
