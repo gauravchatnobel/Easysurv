@@ -1498,8 +1498,16 @@ if uploaded_file:
                             fpr = np.r_[0, fpr]
                             thresholds = np.r_[y_score[0] + 1, y_score[threshold_idxs]]
                             
-                            # AUC using Trapezoidal rule
-                            roc_auc = np.trapz(tpr, fpr)
+                            
+                            # AUC using Trapezoidal rule (Version Agnostic for NumPy 1.x and 2.x)
+                            # np.trapz was removed in NumPy 2.0
+                            # Formula: sum( (y[i] + y[i-1]) * (x[i] - x[i-1]) ) / 2
+                            # Note: fpr is increasing.
+                            direction = 1
+                            if fpr[0] > fpr[-1]:
+                                direction = -1
+                                
+                            roc_auc = direction * np.sum((tpr[1:] + tpr[:-1]) * np.diff(fpr)) / 2
                             
                             return fpr, tpr, thresholds, roc_auc
 
