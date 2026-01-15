@@ -1419,12 +1419,6 @@ if uploaded_file:
                     file_name="median_incidence_table.csv",
                     mime="text/csv"
                 )
-else:
-    st.info("Please upload a CSV or Excel file to begin analysis.")
-    st.write("Demostration with Dummy Data:")
-    st.write("You can download the demo dataset `dummy_clinical_data.csv` from the repository:")
-    st.markdown("[📂 View Repository & Download Data](https://github.com/gauravchatnobel/Easysurv)")
-    st.caption("Right-click the link and open in a new tab to find the CSV file.")
 
     # --- TAB 4: BIOMARKER DISCOVERY ---
     if 'tab4' in locals() and df_clean is not None:
@@ -1556,3 +1550,11 @@ else:
                      st.session_state.custom_cutoffs.append(new_def)
                      st.success(f"Variable **{new_var_name}** created! It is now available in the Main and CIF tabs.")
                      st.experimental_rerun()
+
+else:
+    st.info("Please upload a CSV or Excel file to begin analysis.")
+    st.write("Demostration with Dummy Data:")
+    st.write("You can download the demo dataset `dummy_clinical_data.csv` from the repository:")
+    st.markdown("[📂 View Repository & Download Data](https://github.com/gauravchatnobel/Easysurv)")
+    st.caption("Right-click the link and open in a new tab to find the CSV file.")
+
