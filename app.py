@@ -1717,6 +1717,14 @@ if uploaded_file:
                  final_cut = st.number_input("Selected Cutoff Value", value=float(default_cut))
                  new_var_name = st.text_input("New Variable Name", value=f"{bio_col}_Cat")
                  
+                 if st.button("Create & Add to Dataset"):
+                     # Add to custom_cutoffs session state
+                     new_def = {
+                         'source': bio_col,
+                         'value': final_cut,
+                         'name': new_var_name
+                     }
+                     st.session_state.custom_cutoffs.append(new_def)
                      st.success(f"Variable **{new_var_name}** created! It is now available in the Main and CIF tabs.")
                      if hasattr(st, "rerun"):
                          st.rerun()
