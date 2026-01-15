@@ -224,18 +224,25 @@ if uploaded_file:
         leg_y_main = st.slider("Legend Y (Main)", 0.0, 1.0, 0.9, 0.05)
         
     with st.sidebar.expander("CIF Plot Legend Position"):
-        leg_x_cif = st.slider("Legend X (CIF)", 0.0, 1.0, 0.8, 0.05)
-        leg_y_cif = st.slider("Legend Y (CIF)", 0.0, 1.0, 0.8, 0.05)
-
-    # Axes & Layout
     st.sidebar.subheader("Axes & Layout")
-    x_label = st.sidebar.text_input("X-Axis Label", value="Time (Months)")
-    y_label = st.sidebar.text_input("Y-Axis Label", value="Survival Probability")
-    tick_interval = st.sidebar.number_input("X-Axis Tick Interval", min_value=1, value=12, help="Set to 12 for yearly ticks if data is in months.")
     
-    y_tick_interval = st.sidebar.number_input("Y-Axis Tick Interval", min_value=0.01, value=0.1, step=0.05)
-    y_min = st.sidebar.number_input("Y-Axis Min", value=0.0, step=0.1)
-    y_max = st.sidebar.number_input("Y-Axis Max", value=1.0, step=0.1)
+    with st.sidebar.expander("Main Plot Settings (Axes & Title)", expanded=True):
+        main_title = st.sidebar.text_input("Main Plot Title", value="Survival")
+        x_label = st.sidebar.text_input("X-Axis Label", value="Time (Months)")
+        y_label = st.sidebar.text_input("Y-Axis Label", value="Survival Probability")
+        
+        tick_interval = st.sidebar.number_input("X-Axis Tick Interval", min_value=0.0, value=12.0, step=1.0)
+        y_tick_interval = st.sidebar.number_input("Y-Axis Tick Interval (e.g. 0.1)", min_value=0.01, value=0.1, step=0.05)
+        y_min = st.sidebar.number_input("Y-Axis Min", value=0.0, step=0.1)
+        y_max = st.sidebar.number_input("Y-Axis Max", value=1.0, step=0.1)
+        
+    with st.sidebar.expander("CIF Plot Settings (Axes & Title)"):
+        cif_title = st.sidebar.text_input("CIF Plot Title", value="Cumulative Incidence")
+        cif_y_label = st.sidebar.text_input("CIF Y-Axis Label", value="Cumulative Incidence Probability")
+        
+        cif_y_tick_interval = st.sidebar.number_input("CIF Y-Axis Tick Interval", min_value=0.01, value=0.1, step=0.05)
+        cif_y_min = st.sidebar.number_input("CIF Y-Axis Min", value=0.0, step=0.1)
+        cif_y_max = st.sidebar.number_input("CIF Y-Axis Max", value=1.05, step=0.1)
     
     plot_height = st.sidebar.slider("Plot Height", 4, 12, 6)
     plot_width = st.sidebar.slider("Plot Width", 6, 15, 10)
@@ -456,6 +463,7 @@ if uploaded_file:
                     add_at_risk_counts(fitters, ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels)
                 
                 # Apply Custom Label
+                ax.set_title(main_title, fontsize=axes_fontsize+2, weight='bold')
                 ax.set_xlabel(x_label, fontsize=axes_fontsize)
                 if y_label:
                     ax.set_ylabel(y_label, fontsize=axes_fontsize)
@@ -619,6 +627,7 @@ if uploaded_file:
                     add_at_risk_counts([kmf_all], ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels)
             
                 # Apply Custom Label
+                ax.set_title(main_title, fontsize=axes_fontsize+2, weight='bold')
                 ax.set_xlabel(x_label, fontsize=axes_fontsize)
                 if y_label:
                     ax.set_ylabel(y_label, fontsize=axes_fontsize)
@@ -1057,10 +1066,14 @@ if uploaded_file:
                             y_values = cif_interp.loc[censored_times].iloc[:, 0].values
                             ax_cif.plot(censored_times, y_values, '|', color=color, markersize=10, markeredgewidth=1)
                      
-                ax_cif.set_title(f"Cumulative Incidence (Event {cif_event_of_interest})")
-                ax_cif.set_xlabel(x_label)
-                ax_cif.set_ylabel("Cumulative Incidence Probability")
-                ax_cif.set_ylim(0, 1.05)
+                ax_cif.set_title(cif_title, fontsize=axes_fontsize+2, weight='bold')
+                ax_cif.set_xlabel(x_label, fontsize=axes_fontsize)
+                ax_cif.set_ylabel(cif_y_label, fontsize=axes_fontsize)
+                
+                # CIF Y-Axis Customization
+                if cif_y_tick_interval:
+                     ax_cif.set_yticks(np.arange(cif_y_min, cif_y_max + cif_y_tick_interval/10, cif_y_tick_interval))
+                ax_cif.set_ylim(cif_y_min, cif_y_max)
                 
                 # Style adjustments
                 fig_cif.patch.set_facecolor(plot_bgcolor)
