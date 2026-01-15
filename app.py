@@ -618,6 +618,15 @@ if uploaded_file:
                     })
                 
                     st.dataframe(summary_df.style.format("{:.3f}"))
+                    
+                    # Download Cox Table
+                    csv_cox = summary_df.to_csv().encode('utf-8')
+                    st.download_button(
+                        label="💾 Download Cox HR Table",
+                        data=csv_cox,
+                        file_name="cox_ph_table.csv",
+                        mime="text/csv"
+                    )
                     st.caption(f"Reference Group: **{reference_group}** (All HRs are relative to this group)")
 
                 except Exception as e:
@@ -626,6 +635,51 @@ if uploaded_file:
                 
                 except Exception as e:
                     st.warning(f"Could not run Cox PH model: {e}")
+                
+                # --- MEDIAN SURVIVAL TABLE ---
+                st.subheader("Median Survival Time")
+                from lifelines.utils import median_survival_times
+                
+                median_data = []
+                for group in groups:
+                    mask = df_clean[group_col] == group
+                    kmf_med = KaplanMeierFitter()
+                    kmf_med.fit(df_clean[time_col][mask], df_clean[event_col][mask], label=str(group))
+                    
+                    median_os = kmf_med.median_survival_time_
+                    
+                    # 95% CI for Median
+                    try:
+                        median_ci_df = median_survival_times(kmf_med.confidence_interval_)
+                        # The dataframe columns are usually named {label}_lower_0.95, {label}_upper_0.95
+                        # But simpler is to index 0 if it's single row
+                        lower = median_ci_df.iloc[0, 0]
+                        upper = median_ci_df.iloc[0, 1]
+                        ci_str = f"({lower:.1f} - {upper:.1f})"
+                    except:
+                        ci_str = "(NR - NR)"
+                    
+                    # Formatting text
+                    med_str = f"{median_os:.1f}" if not np.isinf(median_os) else "NR" # NR = Not Reached
+                    
+                    label = group_labels.get(group, str(group))
+                    median_data.append({
+                        "Group": label,
+                        "Median Survival": med_str,
+                        "95% CI (Median)": ci_str
+                    })
+                
+                median_df = pd.DataFrame(median_data)
+                st.table(median_df.style.format())
+                
+                # Download Median Table
+                csv_med = median_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="💾 Download Median Survival Table",
+                    data=csv_med,
+                    file_name="median_survival_table.csv",
+                    mime="text/csv"
+                )
 
                 # Point-in-Time Survival Estimates
                 st.subheader("Point-in-Time Survival Estimates")
@@ -667,7 +721,45 @@ if uploaded_file:
                          "95% CI": f"({lower:.1%} - {upper:.1%})"
                      })
             
-                st.table(pd.DataFrame(est_data))
+                est_df = pd.DataFrame(est_data)
+                st.table(est_df)
+                
+                # Download Point-in-Time Table
+                csv_pit = est_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label=f"💾 Download Survival Estimates at {target_time}",
+                    data=csv_pit,
+                    file_name=f"survival_at_{target_time}.csv",
+                    mime="text/csv"
+                )
+                
+                # --- PAIRWISE COMPARISONS ---
+                st.subheader("Pairwise Log-Rank Comparisons")
+                from lifelines.statistics import pairwise_logrank_test
+                
+                if len(groups) > 2:
+                    st.write("Comparison between specific pairs of groups (p-values).")
+                    
+                    # Run Pairwise Test
+                    results = pairwise_logrank_test(df_clean[time_col], df_clean[group_col], df_clean[event_col])
+                    
+                    # The results summary is a rich dataframe, but we want a matrix or list
+                    # summary_df contains p-values
+                    pairwise_df = results.summary
+                    
+                    # Formatting for display
+                    st.dataframe(pairwise_df.style.format({"p": "{:.4f}"}))
+                    
+                    # Download Pairwise Table
+                    csv_pair = pairwise_df.to_csv().encode('utf-8')
+                    st.download_button(
+                        label="💾 Download Pairwise Comparison Table",
+                        data=csv_pair,
+                        file_name="pairwise_logrank.csv",
+                        mime="text/csv"
+                    )
+                elif len(groups) == 2:
+                    st.info("Pairwise comparison is identical to the Global Log-Rank test for 2 groups.")
 
             else:
                 # Single group
