@@ -1047,7 +1047,12 @@ if uploaded_file:
                 if len(mv_df) < 10:
                      st.error("Not enough data points for multivariable analysis.")
                 else:
-                    if st.button("Run Multivariable Analysis"):
+                    run_analysis = st.button("Run Multivariable Analysis")
+                    
+                    if run_analysis:
+                        st.session_state['mv_analysis_active'] = True
+                        
+                    if st.session_state.get('mv_analysis_active', False):
                         try:
                             # Encore Categorical Variables
                             # Detect categorical columns (object or category)
@@ -1067,7 +1072,7 @@ if uploaded_file:
                             
                             # Results Table
                             summary_mv = cph_mv.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']]
-                            summary_mv.columns = ['Hazard Ratio (HR)', 'Lower 95% CI', 'Upper 95% CI', 'p-value']
+                            summary_mv.columns = ['Hazard Ratio (HR)', 'Lower 95%', 'Upper 95%', 'p-value']
                             
                             st.write("### Regression Results")
                             st.dataframe(summary_mv.style.format("{:.3f}"))
@@ -1095,12 +1100,9 @@ if uploaded_file:
                             y_pos = np.arange(len(plot_data))
                             
                             # Plot Points and Error Bars
-                            # xerr expected as shape (2, N) : [[left_errs], [right_errs]]
-                            # left_err = HR - Lower
-                            # right_err = Upper - HR
                             x_errs = [
-                                plot_data['Hazard Ratio (HR)'] - plot_data['Lower 95% CI'],
-                                plot_data['Upper 95% CI'] - plot_data['Hazard Ratio (HR)']
+                                plot_data['Hazard Ratio (HR)'] - plot_data['Lower 95%'],  # Updated col names
+                                plot_data['Upper 95%'] - plot_data['Hazard Ratio (HR)']
                             ]
                             
                             ax_forest.errorbar(plot_data['Hazard Ratio (HR)'], y_pos, xerr=x_errs, 
@@ -1132,6 +1134,43 @@ if uploaded_file:
                             buf_forest = io.BytesIO()
                             fig_forest.savefig(buf_forest, format="png", dpi=300, bbox_inches='tight')
                             buf_forest.seek(0)
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.download_button("💾 Download Forest Plot (300 DPI)", buf_forest, "forest_plot_300dpi.png", "image/png")
+                            with col2:
+                                buf_forest_hi = io.BytesIO()
+                                fig_forest.savefig(buf_forest_hi, format="png", dpi=600, bbox_inches='tight')
+                                buf_forest_hi.seek(0)
+                                st.download_button("💾 Download High-Res Forest Plot (600 DPI)", buf_forest_hi, "forest_plot_600dpi.png", "image/png")
+                                
+                                # --- AI NARRATOR (Multivariable) ---
+                                st.divider()
+                                st.write("### 🤖 AI Result Narrator")
+                                
+                                # Use session state DF if available (handles button consistency if needed)
+                                mv_df_for_narrator = st.session_state.get('mv_summary_df', summary_mv)
+                                
+                                if st.button("Generate Summary Text (Multivariable)"):
+                                    mv_summary = "In the multivariable Cox regression model adjusted for relevant covariates, the following associations were observed:\n\n"
+                                    
+                                    # Iterate over rows
+                                    for idx, row in mv_df_for_narrator.iterrows():
+                                        hr = row['Hazard Ratio (HR)']
+                                        p = row['p-value']
+                                        ci_low = row['Lower 95%'] # Updated key
+                                        ci_high = row['Upper 95%'] # Updated key
+                                        
+                                        sig_txt = "significantly associated" if p < 0.05 else "not significantly associated"
+                                        
+                                        mv_summary += f"* **{idx}**: {sig_txt} with the event (HR={hr:.2f}, 95% CI {ci_low:.2f}-{ci_high:.2f}, p={p:.4f}).\n"
+                                        
+                                    st.success("Summary Generated:")
+                                    st.text_area("Copy this text:", value=mv_summary, height=200)
+                            
+                        except Exception as e:
+                            st.error(f"Error running model: {e}")
+                            st.info("Ensure you are not including variables that perfectly predict the outcome (separation).")
                             
 
 
