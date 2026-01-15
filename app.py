@@ -7,7 +7,17 @@ from lifelines.statistics import multivariate_logrank_test, logrank_test
 import numpy as np
 import numpy as np
 import io
-import seaborn as sns
+try:
+    import seaborn as sns
+except ImportError:
+    import subprocess
+    import sys
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "seaborn"])
+        import seaborn as sns
+    except Exception as e:
+        # Fallback if pip install fails, though heatmap will fail later.
+        sns = None
 
 def compute_fine_gray_weights(df, time_col, event_col, event_of_interest=1):
     """
