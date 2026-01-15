@@ -224,6 +224,9 @@ if uploaded_file:
         leg_y_main = st.slider("Legend Y (Main)", 0.0, 1.0, 0.9, 0.05)
         
     with st.sidebar.expander("CIF Plot Legend Position"):
+        leg_x_cif = st.slider("Legend X (CIF)", 0.0, 1.0, 0.8, 0.05)
+        leg_y_cif = st.slider("Legend Y (CIF)", 0.0, 1.0, 0.8, 0.05)
+
     st.sidebar.subheader("Axes & Layout")
     
     with st.sidebar.expander("Main Plot Settings (Axes & Title)", expanded=True):
