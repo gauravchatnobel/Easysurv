@@ -19,6 +19,7 @@ except ImportError:
         # Fallback if pip install fails, though heatmap will fail later.
         sns = None
 
+@st.cache_data
 def compute_fine_gray_weights(df, time_col, event_col, event_of_interest=1):
     """
     Prepares a dataset for Fine-Gray regression using Inverse Probability of Censoring Weighting (IPCW).
@@ -173,15 +174,21 @@ st.sidebar.header("Data Upload & Configuration")
 
 uploaded_file = st.sidebar.file_uploader("Upload Clinical Data (CSV/Excel)", type=["csv", "xlsx"])
 
-if uploaded_file:
-    # Load Data
+@st.cache_data
+def load_data(file):
     try:
-        if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
+        if file.name.endswith('.csv'):
+            return pd.read_csv(file)
         else:
-            df = pd.read_excel(uploaded_file)
+            return pd.read_excel(file)
     except Exception as e:
-        st.error(f"Error loading file: {e}")
+        return None
+
+if uploaded_file:
+    # Load Data (Cached)
+    df = load_data(uploaded_file)
+    if df is None:
+        st.error("Error loading file. Please ensure it is a valid CSV or Excel file.")
         st.stop()
         
 
