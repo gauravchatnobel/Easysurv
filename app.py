@@ -183,74 +183,87 @@ if uploaded_file:
     # Grouping Variable
     group_col = st.sidebar.selectbox("Grouping Variable (e.g., MRD Status)", ["None"] + columns, index=columns.index("MRD_Status") + 1 if "MRD_Status" in columns else 0)
 
-    # Plot Settings
-    st.sidebar.subheader("Plot Settings")
-    show_risk_table = st.sidebar.checkbox("Show At-Risk Table", value=True)
-    table_height = st.sidebar.slider("Risk Table Offset (Move Down)", -0.5, -0.1, -0.25, 0.05) if show_risk_table else -0.25
-    show_censored = st.sidebar.checkbox("Show Censored Ticks", value=True)
-    show_ci = st.sidebar.checkbox("Show 95% CI Shading", value=True)
-    show_p_val_plot = st.sidebar.checkbox("Show p-value on Plot", value=False)
+    # --- SIDEBAR CONFIGURATION ---
+    st.sidebar.header("Configuration")
     
-    # Fonts & Typography
-    st.sidebar.subheader("Typography & Font Sizes")
+    # 1. Global Aesthetics
+    st.sidebar.subheader("Global Theme & Typography")
     font_options = ["sans-serif", "serif", "monospace", "Arial", "Helvetica", "Times New Roman", "Courier New", "Verdana", "Comic Sans MS"]
-    selected_font = st.sidebar.selectbox("Plot Font", font_options, index=0)
+    selected_font = st.sidebar.selectbox("Font Family", font_options, index=0)
     plt.rcParams['font.family'] = selected_font
     
-    p_val_fontsize = 12 # Default
-    axes_fontsize = st.sidebar.number_input("Axes/Tick Font Size", min_value=1, value=12, step=1)
-    legend_fontsize = st.sidebar.number_input("Legend Font Size", min_value=1, value=10, step=1)
-    line_width = st.sidebar.slider("Line Width (Boldness)", 0.5, 5.0, 1.5, 0.5)
+    # Title customizations (Shared)
+    title_fontsize = st.sidebar.slider("Title Font Size", 10, 30, 20)
+    title_bold = st.sidebar.checkbox("Bold Title", value=True)
+    title_fontweight = 'bold' if title_bold else 'normal'
 
-    # P-value Customization
-    st.sidebar.subheader("P-value Settings")
-    show_p_val_box = st.sidebar.checkbox("Box P-value text", value=True)
+    axes_fontsize = st.sidebar.number_input("Axes/Tick Font Size", min_value=6, value=12)
+    legend_fontsize = st.sidebar.number_input("Legend Font Size", min_value=6, value=10)
+    line_width = st.sidebar.slider("Line Width", 0.5, 5.0, 1.5)
     
-    with st.sidebar.expander("Main Plot P-value Position"):
-        pval_x_main = st.slider("X Position (Main)", 0.0, 1.0, 0.95, 0.05)
-        pval_y_main = st.slider("Y Position (Main)", 0.0, 1.0, 0.05, 0.05)
+    # 2. Main Plot Settings (Kaplan-Meier)
+    with st.sidebar.expander("Main Plot Settings (KM)", expanded=False):
+        st.markdown("### Layout & Axes")
+        main_title = st.text_input("Main Plot Title", value="Survival")
+        x_label = st.text_input("X-Axis Label", value="Time (Months)")
+        y_label = st.text_input("Y-Axis Label", value="Survival Probability")
         
-    with st.sidebar.expander("CIF Plot P-value Position"):
-        pval_x_cif = st.slider("X Position (CIF)", 0.0, 1.0, 0.95, 0.05)
-        pval_y_cif = st.slider("Y Position (CIF)", 0.0, 1.0, 0.2, 0.05)
+        col1, col2 = st.columns(2)
+        with col1:
+            tick_interval = st.number_input("X-Tick Step", value=12.0)
+            y_min = st.number_input("Y Min", value=0.0, step=0.1)
+        with col2:
+            y_tick_interval = st.number_input("Y-Tick Step", value=0.1)
+            y_max = st.number_input("Y Max", value=1.0, step=0.1)
+            
+        plot_height = st.slider("Plot Height", 4, 12, 6)
+        plot_width = st.slider("Plot Width", 6, 15, 10)
+        
+        st.markdown("### Elements")
+        show_risk_table = st.checkbox("Show At-Risk Table", value=True)
+        table_height = st.slider("Table Offset", -0.5, -0.1, -0.25, 0.05) if show_risk_table else -0.25
+        show_censored = st.checkbox("Show Censored Ticks", value=True)
+        show_ci = st.checkbox("Show 95% CI", value=True)
+        
+        st.markdown("### Legend")
+        show_legend_main = st.checkbox("Show Legend (Main)", value=True)
+        show_legend_box_main = st.checkbox("Box Legend (Main)", value=True)
+        leg_x_main = st.slider("Legend X (Main)", 0.0, 1.0, 0.8)
+        leg_y_main = st.slider("Legend Y (Main)", 0.0, 1.0, 0.9)
+        
+        st.markdown("### P-value")
+        show_p_val_plot = st.checkbox("Show P-value (Main)", value=False)
+        show_p_val_box_main = st.checkbox("Box P-value (Main)", value=True)
+        pval_x_main = st.slider("P-val X (Main)", 0.0, 1.0, 0.95)
+        pval_y_main = st.slider("P-val Y (Main)", 0.0, 1.0, 0.05)
 
-    # Legend Customization
-    st.sidebar.subheader("Legend Settings")
-    show_legend = st.sidebar.checkbox("Show Legend", value=True)
-    show_legend_box = st.sidebar.checkbox("Box Legend", value=True)
-    
-    with st.sidebar.expander("Main Plot Legend Position"):
-        leg_x_main = st.slider("Legend X (Main)", 0.0, 1.0, 0.8, 0.05)
-        leg_y_main = st.slider("Legend Y (Main)", 0.0, 1.0, 0.9, 0.05)
+    # 3. CIF Plot Settings
+    with st.sidebar.expander("CIF Plot Settings (Competing Risks)", expanded=False):
+        st.markdown("### Layout & Axes")
+        cif_title = st.text_input("CIF Plot Title", value="Cumulative Incidence")
+        cif_y_label = st.text_input("CIF Y-Label", value="Cumulative Incidence Probability")
         
-    with st.sidebar.expander("CIF Plot Legend Position"):
-        leg_x_cif = st.slider("Legend X (CIF)", 0.0, 1.0, 0.8, 0.05)
-        leg_y_cif = st.slider("Legend Y (CIF)", 0.0, 1.0, 0.8, 0.05)
-
-    st.sidebar.subheader("Axes & Layout")
-    
-    with st.sidebar.expander("Main Plot Settings (Axes & Title)", expanded=True):
-        main_title = st.sidebar.text_input("Main Plot Title", value="Survival")
-        x_label = st.sidebar.text_input("X-Axis Label", value="Time (Months)")
-        y_label = st.sidebar.text_input("Y-Axis Label", value="Survival Probability")
+        col3, col4 = st.columns(2)
+        with col3:
+            cif_y_min = st.number_input("CIF Y Min", value=0.0, step=0.1)
+            cif_y_tick_interval = st.number_input("CIF Y-Tick Step", value=0.1)
+        with col4:
+            cif_y_max = st.number_input("CIF Y Max", value=1.05, step=0.1)
         
-        tick_interval = st.sidebar.number_input("X-Axis Tick Interval", min_value=0.0, value=12.0, step=1.0)
-        y_tick_interval = st.sidebar.number_input("Y-Axis Tick Interval (e.g. 0.1)", min_value=0.01, value=0.1, step=0.05)
-        y_min = st.sidebar.number_input("Y-Axis Min", value=0.0, step=0.1)
-        y_max = st.sidebar.number_input("Y-Axis Max", value=1.0, step=0.1)
+        st.markdown("### Legend")
+        show_legend_cif = st.checkbox("Show Legend (CIF)", value=True)
+        show_legend_box_cif = st.checkbox("Box Legend (CIF)", value=True)
+        leg_x_cif = st.slider("Legend X (CIF)", 0.0, 1.0, 0.8)
+        leg_y_cif = st.slider("Legend Y (CIF)", 0.0, 1.0, 0.8)
         
-    with st.sidebar.expander("CIF Plot Settings (Axes & Title)"):
-        cif_title = st.sidebar.text_input("CIF Plot Title", value="Cumulative Incidence")
-        cif_y_label = st.sidebar.text_input("CIF Y-Axis Label", value="Cumulative Incidence Probability")
+        st.markdown("### P-value")
+        # CIF p-value toggle logic is handled by calculating it if enabled
+        show_p_val_box_cif = st.checkbox("Box P-value (CIF)", value=True)
+        pval_x_cif = st.slider("P-val X (CIF)", 0.0, 1.0, 0.95)
+        pval_y_cif = st.slider("P-val Y (CIF)", 0.0, 1.0, 0.2)
         
-        cif_y_tick_interval = st.sidebar.number_input("CIF Y-Axis Tick Interval", min_value=0.01, value=0.1, step=0.05)
-        cif_y_min = st.sidebar.number_input("CIF Y-Axis Min", value=0.0, step=0.1)
-        cif_y_max = st.sidebar.number_input("CIF Y-Axis Max", value=1.05, step=0.1)
-    
-    plot_height = st.sidebar.slider("Plot Height", 4, 12, 6)
-    plot_width = st.sidebar.slider("Plot Width", 6, 15, 10)
-    # Theme Selection
-    st.sidebar.subheader("Aesthetics & Themes")
+    # Theme Selection (moved to bottom or keep global)
+    st.sidebar.subheader("Color Theme")
 
     # Theme Selection
     st.sidebar.subheader("Aesthetics & Themes")
@@ -466,15 +479,15 @@ if uploaded_file:
                     add_at_risk_counts(fitters, ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels)
                 
                 # Apply Custom Label
-                ax.set_title(main_title, fontsize=axes_fontsize+2, weight='bold')
+                ax.set_title(main_title, fontsize=title_fontsize, weight=title_fontweight)
                 ax.set_xlabel(x_label, fontsize=axes_fontsize)
                 if y_label:
                     ax.set_ylabel(y_label, fontsize=axes_fontsize)
                 ax.tick_params(axis='both', which='major', labelsize=axes_fontsize)
                 
                 # Legend Customization
-                if show_legend:
-                     ax.legend(fontsize=legend_fontsize, loc=(leg_x_main, leg_y_main), frameon=show_legend_box)
+                if show_legend_main:
+                     ax.legend(fontsize=legend_fontsize, loc=(leg_x_main, leg_y_main), frameon=show_legend_box_main)
                 else:
                      if ax.get_legend():
                          ax.get_legend().remove()
@@ -630,20 +643,20 @@ if uploaded_file:
                     add_at_risk_counts([kmf_all], ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels)
             
                 # Apply Custom Label
-                ax.set_title(main_title, fontsize=axes_fontsize+2, weight='bold')
+                ax.set_title(main_title, fontsize=title_fontsize, weight=title_fontweight)
                 ax.set_xlabel(x_label, fontsize=axes_fontsize)
                 if y_label:
                     ax.set_ylabel(y_label, fontsize=axes_fontsize)
                 ax.tick_params(axis='both', which='major', labelsize=axes_fontsize)
                 
-                if show_legend:
-                     ax.legend(fontsize=legend_fontsize, loc=(leg_x_main, leg_y_main), frameon=show_legend_box)
+                if show_legend_main:
+                     ax.legend(fontsize=legend_fontsize, loc=(leg_x_main, leg_y_main), frameon=show_legend_box_main)
                 else:
                      if ax.get_legend():
                          ax.get_legend().remove()
                 
                 if show_p_val_plot and p_value_text:
-                     bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box else None
+                     bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box_main else None
                      ax.text(pval_x_main, pval_y_main, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
                 
                 st.pyplot(fig)
@@ -1069,7 +1082,8 @@ if uploaded_file:
                             y_values = cif_interp.loc[censored_times].iloc[:, 0].values
                             ax_cif.plot(censored_times, y_values, '|', color=color, markersize=10, markeredgewidth=1)
                      
-                ax_cif.set_title(cif_title, fontsize=axes_fontsize+2, weight='bold')
+                # Apply Custom Label (CIF)
+                ax_cif.set_title(cif_title, fontsize=title_fontsize, weight=title_fontweight)
                 ax_cif.set_xlabel(x_label, fontsize=axes_fontsize)
                 ax_cif.set_ylabel(cif_y_label, fontsize=axes_fontsize)
                 
@@ -1082,7 +1096,16 @@ if uploaded_file:
                 fig_cif.patch.set_facecolor(plot_bgcolor)
                 ax_cif.set_facecolor(plot_bgcolor)
                 
-                # Add Risk Table
+                # Add Risk Table (Point-in-Time)
+                if show_legend_cif:
+                     ax_cif.legend(fontsize=legend_fontsize, loc=(leg_x_cif, leg_y_cif), frameon=show_legend_box_cif)
+                else:
+                     if ax_cif.get_legend():
+                         ax_cif.get_legend().remove()
+                
+                if show_p_val_plot and fg_p_value_text:
+                     bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box_cif else None
+                     ax_cif.text(pval_x_cif, pval_y_cif, fg_p_value_text, transform=ax_cif.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
                 # Add Risk Table
                 if show_risk_table:
                     add_at_risk_counts(cif_fitters, ax=ax_cif, y_shift=table_height, colors=cif_colors, labels=cif_labels)
