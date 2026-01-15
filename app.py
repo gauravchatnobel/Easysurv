@@ -1610,6 +1610,10 @@ if uploaded_file:
                 st.table(cif_median_df)
                 
                 csv_cif_med = cif_median_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="💾 Download Median Incidence Table",
+                    data=csv_cif_med,
+                    file_name="median_incidence_table.csv",
                     mime="text/csv"
                 )
 
