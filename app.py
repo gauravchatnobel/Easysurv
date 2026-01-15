@@ -197,6 +197,8 @@ if uploaded_file:
     title_bold = st.sidebar.checkbox("Bold Title", value=True)
     title_fontweight = 'bold' if title_bold else 'normal'
 
+    p_val_fontsize = 12 # Default
+
     axes_fontsize = st.sidebar.number_input("Axes/Tick Font Size", min_value=6, value=12)
     legend_fontsize = st.sidebar.number_input("Legend Font Size", min_value=6, value=10)
     line_width = st.sidebar.slider("Line Width", 0.5, 5.0, 1.5)
