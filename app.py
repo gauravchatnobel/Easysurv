@@ -1471,7 +1471,19 @@ if uploaded_file:
                      st.subheader("3. Time-Dependent ROC Analysis")
                      st.write("Find optimal cutoff to predict event at a specific time point.")
                      
-                     from sklearn.metrics import roc_curve, roc_auc_score, auc
+                     try:
+                         from sklearn.metrics import roc_curve, roc_auc_score, auc
+                     except ImportError:
+                         st.warning("Library 'scikit-learn' not found. Installing now... (This may take a minute)")
+                         import subprocess
+                         import sys
+                         try:
+                             subprocess.check_call([sys.executable, "-m", "pip", "install", "scikit-learn"])
+                             st.success("Installation successful! Please refresh the page if the error persists.")
+                             from sklearn.metrics import roc_curve, roc_auc_score, auc
+                         except Exception as e:
+                             st.error(f"Failed to auto-install scikit-learn: {e}")
+                             st.stop()
 
                      roc_time = st.number_input("Target Time for Prediction (e.g., 24 months)", min_value=1.0, value=24.0, step=6.0)
                      
