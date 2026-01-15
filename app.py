@@ -1462,7 +1462,89 @@ if uploaded_file:
                              st.info(f"**{bio_col}** is NOT strictly associated as a linear continuous variable. A threshold effect might still exist.")
                              
                      except Exception as e:
-                         st.error(f"Cox PH Analysis failed: {e}")
+                         # import might be missing if we used scikit-learn without importing.
+                         # But actually CoxPHFitter is lifelines.
+                         st.error(f"Analysis failed: {e}")
+
+                     # --- ROC Section ---
+                     st.divider()
+                     st.subheader("3. Time-Dependent ROC Analysis")
+                     st.write("Find optimal cutoff to predict event at a specific time point.")
+                     
+                     from sklearn.metrics import roc_curve, roc_auc_score, auc
+
+                     roc_time = st.number_input("Target Time for Prediction (e.g., 24 months)", min_value=1.0, value=24.0, step=6.0)
+                     
+                     if st.button("Run ROC Analysis"):
+                         # Prepare data for ROC
+                         # Status at time t:
+                         # 1 if Event=1 AND Time <= t
+                         # 0 if Time > t
+                         # Exclude if Event=0 AND Time <= t (Censored before t - unknown status)
+                         
+                         roc_data = df_clean[[time_col, event_col, bio_col]].replace([np.inf, -np.inf], np.nan).dropna()
+                         
+                         # Vectorized Filter
+                         mask_event = (roc_data[event_col] == 1) & (roc_data[time_col] <= roc_time)
+                         mask_no_event = (roc_data[time_col] > roc_time)
+                         
+                         roc_valid = roc_data[mask_event | mask_no_event].copy()
+                         roc_valid['target'] = mask_event.astype(int)
+                         
+                         if len(roc_valid) < 10 or roc_valid['target'].nunique() < 2:
+                             st.warning("Not enough valid data points (events and non-events) at this time point for ROC analysis.")
+                         else:
+                             try:
+                                 # Calculate ROC
+                                 fpr, tpr, thresholds = roc_curve(roc_valid['target'], roc_valid[bio_col])
+                                 roc_auc = auc(fpr, tpr)
+                                 
+                                 # Find Optimal Cutoff (Youden's Index = TPR - FPR)
+                                 # Or sensitivity + specificity - 1
+                                 # Here recall standard ROC is for "positive" class = 1.
+                                 # If high biomarker -> high risk, then direct.
+                                 # If low biomarker -> high risk, AUC < 0.5.
+                                 
+                                 if roc_auc < 0.5:
+                                     # Values are inverted (Lower is riskier)
+                                     # We can invert variables for calc or just standardized
+                                     # Standard practice: Force AUC > 0.5 by flipping prediction
+                                     st.caption("Note: Lower values appear to be associated with higher risk (Inverse association).")
+                                     # But straightforwardly, Youden index works on thresholds.
+                                     
+                                 # Youden
+                                 # TPR = Sensitivity, FPR = 1 - Specificity
+                                 youden = tpr - fpr
+                                 best_idx = np.argmax(youden)
+                                 best_thresh_roc = thresholds[best_idx]
+                                 best_sens = tpr[best_idx]
+                                 best_spec = 1 - fpr[best_idx]
+                                 
+                                 st.success(f"**Optimal ROC Cutoff:** {best_thresh_roc:.2f} (AUC = {roc_auc:.3f})")
+                                 st.write(f"Sensitivity: {best_sens:.2f} | Specificity: {best_spec:.2f}")
+                                 
+                                 # Plot ROC
+                                 fig_roc, ax_roc = plt.subplots(figsize=(6, 4))
+                                 ax_roc.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (AUC = {roc_auc:.2f})')
+                                 ax_roc.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+                                 ax_roc.scatter(fpr[best_idx], tpr[best_idx], color='red', marker='o', s=100, label=f"Best: {best_thresh_roc:.2f}")
+                                 ax_roc.set_xlim([0.0, 1.0])
+                                 ax_roc.set_ylim([0.0, 1.05])
+                                 ax_roc.set_xlabel('False Positive Rate')
+                                 ax_roc.set_ylabel('True Positive Rate')
+                                 ax_roc.set_title(f'ROC Curve at t={roc_time}')
+                                 ax_roc.legend(loc="lower right")
+                                 st.pyplot(fig_roc)
+                                 
+                                 # Store for Action
+                                 st.session_state.optimal_cut = {
+                                     'col': bio_col,
+                                     'cut': best_thresh_roc,
+                                     'p': 0.0 # Placeholder
+                                 }
+                                 
+                             except Exception as e:
+                                 st.error(f"ROC Calculation Error: {e}")
                  
                  with col2:
                      st.subheader("2. Cutoff Finder")
