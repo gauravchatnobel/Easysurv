@@ -464,6 +464,9 @@ if uploaded_file:
                 # Legend Customization
                 if show_legend:
                      ax.legend(fontsize=legend_fontsize, loc=(leg_x_main, leg_y_main), frameon=show_legend_box)
+                else:
+                     if ax.get_legend():
+                         ax.get_legend().remove()
                 
                 st.pyplot(fig)
 
@@ -623,6 +626,9 @@ if uploaded_file:
                 
                 if show_legend:
                      ax.legend(fontsize=legend_fontsize, loc=(leg_x_main, leg_y_main), frameon=show_legend_box)
+                else:
+                     if ax.get_legend():
+                         ax.get_legend().remove()
                 
                 if show_p_val_plot and p_value_text:
                      bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box else None
@@ -1072,6 +1078,9 @@ if uploaded_file:
                 
                 if show_legend:
                      ax_cif.legend(fontsize=legend_fontsize, loc=(leg_x_cif, leg_y_cif), frameon=show_legend_box)
+                else:
+                     if ax_cif.get_legend():
+                         ax_cif.get_legend().remove()
 
 
 
