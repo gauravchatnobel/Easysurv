@@ -1472,18 +1472,39 @@ if uploaded_file:
                      st.write("Find optimal cutoff to predict event at a specific time point.")
                      
                      try:
-                         from sklearn.metrics import roc_curve, roc_auc_score, auc
-                     except ImportError:
-                         st.warning("Library 'scikit-learn' not found. Installing now... (This may take a minute)")
-                         import subprocess
-                         import sys
-                         try:
-                             subprocess.check_call([sys.executable, "-m", "pip", "install", "scikit-learn"])
-                             st.success("Installation successful! Please refresh the page if the error persists.")
-                             from sklearn.metrics import roc_curve, roc_auc_score, auc
-                         except Exception as e:
-                             st.error(f"Failed to auto-install scikit-learn: {e}")
-                             st.stop()
+                        # --- Pure NumPy Implementation of ROC/AUC to avoid dependency hell ---
+                        def calculate_roc_auc_numpy(y_true, y_score):
+                            # y_true: binary 0/1, y_score: continuous
+                            
+                            # Sort by score descending
+                            desc_score_indices = np.argsort(y_score, kind="mergesort")[::-1]
+                            y_score = y_score[desc_score_indices]
+                            y_true = y_true[desc_score_indices]
+                            
+                            # Distinct thresholds
+                            distinct_value_indices = np.where(np.diff(y_score))[0]
+                            threshold_idxs = np.r_[distinct_value_indices, y_true.size - 1]
+                            
+                            # Accumulate positives (tps) and negatives (fps)
+                            tps = np.cumsum(y_true)[threshold_idxs]
+                            fps = (1 + threshold_idxs) - tps
+                            
+                            # Rates
+                            tpr = tps / tps[-1]
+                            fpr = fps / fps[-1]
+                            
+                            # Add 0,0 start point
+                            tpr = np.r_[0, tpr]
+                            fpr = np.r_[0, fpr]
+                            thresholds = np.r_[y_score[0] + 1, y_score[threshold_idxs]]
+                            
+                            # AUC using Trapezoidal rule
+                            roc_auc = np.trapz(tpr, fpr)
+                            
+                            return fpr, tpr, thresholds, roc_auc
+
+                     except Exception as e:
+                         st.error(f"Internal Function Error: {e}") 
 
                      roc_time = st.number_input("Target Time for Prediction (e.g., 24 months)", min_value=1.0, value=24.0, step=6.0)
                      
@@ -1507,9 +1528,8 @@ if uploaded_file:
                              st.warning("Not enough valid data points (events and non-events) at this time point for ROC analysis.")
                          else:
                              try:
-                                 # Calculate ROC
-                                 fpr, tpr, thresholds = roc_curve(roc_valid['target'], roc_valid[bio_col])
-                                 roc_auc = auc(fpr, tpr)
+                                 # Calculate ROC (Custom NumPy)
+                                 fpr, tpr, thresholds, roc_auc = calculate_roc_auc_numpy(roc_valid['target'].values, roc_valid[bio_col].values)
                                  
                                  # Find Optimal Cutoff (Youden's Index = TPR - FPR)
                                  # Or sensitivity + specificity - 1
