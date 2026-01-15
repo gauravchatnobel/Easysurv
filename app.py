@@ -197,9 +197,22 @@ if uploaded_file:
     selected_font = st.sidebar.selectbox("Plot Font", font_options, index=0)
     plt.rcParams['font.family'] = selected_font
     
+    p_val_fontsize = 12 # Default
     axes_fontsize = st.sidebar.number_input("Axes/Tick Font Size", min_value=1, value=12, step=1)
     legend_fontsize = st.sidebar.number_input("Legend Font Size", min_value=1, value=10, step=1)
     line_width = st.sidebar.slider("Line Width (Boldness)", 0.5, 5.0, 1.5, 0.5)
+
+    # P-value Customization
+    st.sidebar.subheader("P-value Settings")
+    show_p_val_box = st.sidebar.checkbox("Box P-value text", value=True)
+    
+    with st.sidebar.expander("Main Plot P-value Position"):
+        pval_x_main = st.slider("X Position (Main)", 0.0, 1.0, 0.95, 0.05)
+        pval_y_main = st.slider("Y Position (Main)", 0.0, 1.0, 0.05, 0.05)
+        
+    with st.sidebar.expander("CIF Plot P-value Position"):
+        pval_x_cif = st.slider("X Position (CIF)", 0.0, 1.0, 0.95, 0.05)
+        pval_y_cif = st.slider("Y Position (CIF)", 0.0, 1.0, 0.2, 0.05)
 
     # Axes & Layout
     st.sidebar.subheader("Axes & Layout")
@@ -345,7 +358,7 @@ if uploaded_file:
                 
                     # We will perform detailed stats below, just showing p-value on plot for now
                     res = multivariate_logrank_test(df_clean[time_col], df_clean[group_col], df_clean[event_col])
-                    hr_text = f"p = {res.p_value:.4f}"
+                    p_value_text = f"p = {res.p_value:.4f}"
                 except:
                     pass
 
@@ -417,9 +430,10 @@ if uploaded_file:
                     kmf_group.plot_survival_function(ax=ax, ci_show=show_ci, show_censors=show_censored, color=color, linewidth=line_width)
                     fitters.append(kmf_group)
             
-                if hr_text:
-                    ax.text(0.7, 0.9, hr_text, transform=ax.transAxes, fontsize=12, 
-                            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.5))
+                # P-value and Legend if applicable (Single group usually no legend needed unless CI)
+                if show_p_val_plot and p_value_text:
+                     bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box else None
+                     ax.text(pval_x_main, pval_y_main, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
 
                 # Risk Table logic (basic implementation using lifelines built-in if possible, or custom)
                 if show_risk_table:
@@ -437,11 +451,6 @@ if uploaded_file:
                 # Legend Font Size
                 ax.legend(fontsize=legend_fontsize)
                 
-                # P-value and Legend if applicable (Single group usually no legend needed unless CI)
-                # P-value and Legend if applicable (Single group usually no legend needed unless CI)
-                if show_p_val_plot:
-                     ax.text(0.95, 0.05, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=dict(facecolor='white', alpha=0.5))
-
                 st.pyplot(fig)
 
                 # DOWNLOAD BUTTON
@@ -601,7 +610,8 @@ if uploaded_file:
                 ax.legend(fontsize=legend_fontsize)
                 
                 if show_p_val_plot and p_value_text:
-                     ax.text(0.95, 0.2, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=dict(facecolor='white', alpha=0.5))
+                     bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box else None
+                     ax.text(pval_x_main, pval_y_main, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
                 
                 st.pyplot(fig)
 
@@ -942,9 +952,9 @@ if uploaded_file:
                                  pass
                 
                 # Display P-value on Plot
-                if fg_p_value_text:
-                    ax_cif.text(0.7, 0.9, fg_p_value_text, transform=ax_cif.transAxes, fontsize=10, 
-                            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.5))
+                if show_p_val_plot and fg_p_value_text:
+                     bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box else None
+                     ax_cif.text(pval_x_cif, pval_y_cif, fg_p_value_text, transform=ax_cif.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
 
                 if group_col != "None" and group_col in cif_df.columns:
                     groups = sorted(cif_df[group_col].unique())
