@@ -1540,19 +1540,6 @@ if uploaded_file:
                                  fpr, tpr, thresholds, roc_auc = calculate_roc_auc_numpy(roc_valid['target'].values, roc_valid[bio_col].values)
                                  
                                  # Find Optimal Cutoff (Youden's Index = TPR - FPR)
-                                 # Or sensitivity + specificity - 1
-                                 # Here recall standard ROC is for "positive" class = 1.
-                                 # If high biomarker -> high risk, then direct.
-                                 # If low biomarker -> high risk, AUC < 0.5.
-                                 
-                                 if roc_auc < 0.5:
-                                     # Values are inverted (Lower is riskier)
-                                     # We can invert variables for calc or just standardized
-                                     # Standard practice: Force AUC > 0.5 by flipping prediction
-                                     st.caption("Note: Lower values appear to be associated with higher risk (Inverse association).")
-                                     # But straightforwardly, Youden index works on thresholds.
-                                     
-                                 # Youden
                                  # TPR = Sensitivity, FPR = 1 - Specificity
                                  youden = tpr - fpr
                                  best_idx = np.argmax(youden)
@@ -1560,8 +1547,28 @@ if uploaded_file:
                                  best_sens = tpr[best_idx]
                                  best_spec = 1 - fpr[best_idx]
                                  
+                                 # NEW: Calculate Log-Rank P-value for this specific ROC-derived cutoff
+                                 # This answers "Does this ROC cutoff actually separate survival curves?"
+                                 group_roc = (cox_df[bio_col] > best_thresh_roc).astype(int)
+                                 roc_p_val = np.nan
+                                 try:
+                                     if group_roc.sum() > 0 and (len(group_roc) - group_roc.sum()) > 0:
+                                         res_roc = multivariate_logrank_test(cox_df[time_col], group_roc, cox_df[event_col])
+                                         roc_p_val = res_roc.p_value
+                                 except:
+                                     pass
+                                 
                                  st.success(f"**Optimal ROC Cutoff:** {best_thresh_roc:.2f} (AUC = {roc_auc:.3f})")
-                                 st.write(f"Sensitivity: {best_sens:.2f} | Specificity: {best_spec:.2f}")
+                                 
+                                 col_roc_stats1, col_roc_stats2 = st.columns(2)
+                                 with col_roc_stats1:
+                                     st.write(f"Sensitivity: {best_sens:.2f}")
+                                     st.write(f"Specificity: {best_spec:.2f}")
+                                 with col_roc_stats2:
+                                      if not np.isnan(roc_p_val):
+                                          st.metric("Survival Separation P-value", f"{roc_p_val:.5f}", help="P-value from Log-Rank test using this cutoff.")
+                                      else:
+                                          st.write("P-value: N/A")
                                  
                                  # Plot ROC
                                  fig_roc, ax_roc = plt.subplots(figsize=(6, 4))
@@ -1671,7 +1678,10 @@ if uploaded_file:
                      }
                      st.session_state.custom_cutoffs.append(new_def)
                      st.success(f"Variable **{new_var_name}** created! It is now available in the Main and CIF tabs.")
-                     st.experimental_rerun()
+                     if hasattr(st, "rerun"):
+                         st.rerun()
+                     else:
+                         st.experimental_rerun()
 
 else:
     st.info("Please upload a CSV or Excel file to begin analysis.")
