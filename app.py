@@ -214,6 +214,19 @@ if uploaded_file:
         pval_x_cif = st.slider("X Position (CIF)", 0.0, 1.0, 0.95, 0.05)
         pval_y_cif = st.slider("Y Position (CIF)", 0.0, 1.0, 0.2, 0.05)
 
+    # Legend Customization
+    st.sidebar.subheader("Legend Settings")
+    show_legend = st.sidebar.checkbox("Show Legend", value=True)
+    show_legend_box = st.sidebar.checkbox("Box Legend", value=True)
+    
+    with st.sidebar.expander("Main Plot Legend Position"):
+        leg_x_main = st.slider("Legend X (Main)", 0.0, 1.0, 0.8, 0.05)
+        leg_y_main = st.slider("Legend Y (Main)", 0.0, 1.0, 0.9, 0.05)
+        
+    with st.sidebar.expander("CIF Plot Legend Position"):
+        leg_x_cif = st.slider("Legend X (CIF)", 0.0, 1.0, 0.8, 0.05)
+        leg_y_cif = st.slider("Legend Y (CIF)", 0.0, 1.0, 0.8, 0.05)
+
     # Axes & Layout
     st.sidebar.subheader("Axes & Layout")
     x_label = st.sidebar.text_input("X-Axis Label", value="Time (Months)")
@@ -448,8 +461,9 @@ if uploaded_file:
                     ax.set_ylabel(y_label, fontsize=axes_fontsize)
                 ax.tick_params(axis='both', which='major', labelsize=axes_fontsize)
                 
-                # Legend Font Size
-                ax.legend(fontsize=legend_fontsize)
+                # Legend Customization
+                if show_legend:
+                     ax.legend(fontsize=legend_fontsize, loc=(leg_x_main, leg_y_main), frameon=show_legend_box)
                 
                 st.pyplot(fig)
 
@@ -607,7 +621,8 @@ if uploaded_file:
                     ax.set_ylabel(y_label, fontsize=axes_fontsize)
                 ax.tick_params(axis='both', which='major', labelsize=axes_fontsize)
                 
-                ax.legend(fontsize=legend_fontsize)
+                if show_legend:
+                     ax.legend(fontsize=legend_fontsize, loc=(leg_x_main, leg_y_main), frameon=show_legend_box)
                 
                 if show_p_val_plot and p_value_text:
                      bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box else None
@@ -1054,7 +1069,9 @@ if uploaded_file:
                 if y_label:
                     ax_cif.set_ylabel("Cumulative Incidence", fontsize=axes_fontsize)
                 ax_cif.tick_params(axis='both', which='major', labelsize=axes_fontsize)
-                ax_cif.legend(fontsize=legend_fontsize)
+                
+                if show_legend:
+                     ax_cif.legend(fontsize=legend_fontsize, loc=(leg_x_cif, leg_y_cif), frameon=show_legend_box)
 
 
 
