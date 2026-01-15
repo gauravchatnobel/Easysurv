@@ -1133,6 +1133,105 @@ if uploaded_file:
                             fig_forest.savefig(buf_forest, format="png", dpi=300, bbox_inches='tight')
                             buf_forest.seek(0)
                             
+                if len(mv_df) < 10:
+                     st.error("Not enough data points for multivariable analysis.")
+                else:
+                    # Logic to handle persistence
+                    # If button clicked, run and set flag. If flag set, run.
+                    # We also need to check if covariates changed? Ideally yes, but simpler is to just run if flag is true.
+                    # Setting a unique key for the button creates a state variable too, but let's be explicit.
+                    
+                    run_analysis = st.button("Run Multivariable Analysis")
+                    
+                    if run_analysis:
+                        st.session_state['mv_analysis_active'] = True
+                        
+                    if st.session_state.get('mv_analysis_active', False):
+                        try:
+                            # Encore Categorical Variables
+                            # Detect categorical columns (object or category)
+                            # Actually, get_dummies handles this, but we should be careful about reference levels.
+                            # get_dummies(drop_first=True) automatically drops one level to avoid multicollinearity.
+                            
+                            mv_data_encoded = pd.get_dummies(mv_df, columns=covariates, drop_first=True)
+                            
+                            # Sanitize Column Names for Lifelines/Stats (remove spaces/special chars)
+                            # This is important for formula strings but CoxPHFitter handles dataframe input well.
+                            # However, cleaner names are better for the plot.
+                            mv_data_encoded.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in mv_data_encoded.columns]
+                            
+                            # Fit Model
+                            cph_mv = CoxPHFitter()
+                            cph_mv.fit(mv_data_encoded, duration_col=time_col, event_col=event_col)
+                            
+                            # Results Table
+                            summary_mv = cph_mv.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']]
+                            summary_mv.columns = ['Hazard Ratio (HR)', 'Lower 95%', 'Upper 95%', 'p-value']
+                            
+                            st.write("### Regression Results")
+                            st.dataframe(summary_mv.style.format("{:.3f}"))
+                            
+                            # Save to Session State specifically for Narrator or Persistence
+                            st.session_state['mv_summary_df'] = summary_mv
+
+                            # Forest Plot
+                            st.write("### Forest Plot")
+                            
+                            # Prepare Data for Plot
+                            plot_data = summary_mv.copy()
+                            plot_data = plot_data.sort_index(ascending=False) # Top to bottom on plot
+                            
+                            # Dynamic height
+                            fig_forest, ax_forest = plt.subplots(figsize=(10, max(4, len(plot_data) * 0.5 + 1)))
+                            
+                            # Theme Color
+                            forest_color = '#1f77b4'
+                            if selected_theme in all_themes and len(all_themes[selected_theme]) > 0:
+                                 forest_color = all_themes[selected_theme][0]
+                            elif selected_theme == "Custom":
+                                 pass # Use default blue or allow custom override? Basic blue is fine.
+                            
+                            y_pos = np.arange(len(plot_data))
+                            
+                            # Plot Points and Error Bars
+                            # xerr expected as shape (2, N) : [[left_errs], [right_errs]]
+                            # left_err = HR - Lower
+                            # right_err = Upper - HR
+                            x_errs = [
+                                plot_data['Hazard Ratio (HR)'] - plot_data['Lower 95% CI'],
+                                plot_data['Upper 95% CI'] - plot_data['Hazard Ratio (HR)']
+                            ]
+                            
+                            ax_forest.errorbar(plot_data['Hazard Ratio (HR)'], y_pos, xerr=x_errs, 
+                                               fmt='o', color=forest_color, ecolor='black', capsize=5, markersize=8)
+                            
+                            # Reference Line
+                            ax_forest.axvline(x=1, color='red', linestyle='--', linewidth=1)
+                            
+                            # Labels
+                            ax_forest.set_yticks(y_pos)
+                            ax_forest.set_yticklabels(plot_data.index, fontsize=10, fontweight='bold')
+                            ax_forest.set_xlabel("Hazard Ratio (95% CI)")
+                            ax_forest.set_title("Multivariable Cox Regression Results")
+                            
+                            # Grid
+                            ax_forest.grid(True, axis='x', linestyle=':', alpha=0.6)
+                            
+                            # Clean Spines
+                            ax_forest.spines['top'].set_visible(False)
+                            ax_forest.spines['right'].set_visible(False)
+                            ax_forest.spines['left'].set_visible(False)
+                            
+                            st.pyplot(fig_forest)
+                            
+                            # Save to session_state for Report
+                            st.session_state['report_fig_forest'] = fig_forest
+                            
+                            # Download
+                            buf_forest = io.BytesIO()
+                            fig_forest.savefig(buf_forest, format="png", dpi=300, bbox_inches='tight')
+                            buf_forest.seek(0)
+                            
                             col1, col2 = st.columns(2)
                             with col1:
                                 st.download_button("💾 Download Forest Plot (300 DPI)", buf_forest, "forest_plot_300dpi.png", "image/png")
@@ -1169,6 +1268,7 @@ if uploaded_file:
                         except Exception as e:
                             st.error(f"Error running model: {e}")
                             st.info("Ensure you are not including variables that perfectly predict the outcome (separation).")
+
 
             else:
                 st.info("Select at least one covariate variable (e.g., Age, Gender, Mutations) to begin.")
