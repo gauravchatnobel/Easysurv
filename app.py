@@ -1122,8 +1122,8 @@ if uploaded_file:
                     add_at_risk_counts(cif_fitters, ax=ax_cif, y_shift=table_height, colors=cif_colors, labels=cif_labels)
                 
                 ax_cif.set_xlabel(x_label, fontsize=axes_fontsize)
-                if y_label:
-                    ax_cif.set_ylabel("Cumulative Incidence", fontsize=axes_fontsize)
+                if cif_y_label:
+                    ax_cif.set_ylabel(cif_y_label, fontsize=axes_fontsize)
                 ax_cif.tick_params(axis='both', which='major', labelsize=axes_fontsize)
                 
                 if show_legend_cif:
