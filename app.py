@@ -172,6 +172,31 @@ if uploaded_file:
         st.error(f"Error loading file: {e}")
         st.stop()
 
+    # --- DATA FILTRATION ---
+    with st.expander("🔍 Step 1: Filter Data (Optional)", expanded=True):
+        st.write("Select subset of data based on categorical variables (e.g., specific ELN Risk groups).")
+        all_cols_filter = df.columns.tolist()
+        filter_cols = st.multiselect("Select Columns to Filter By", all_cols_filter)
+        
+        if filter_cols:
+            df_filtered = df.copy()
+            for col in filter_cols:
+                # Get unique values (drop NaNs for the selector)
+                unique_vals = sorted(df[col].dropna().unique())
+                selected_vals = st.multiselect(f"Select values to KEEP for '{col}'", unique_vals, default=unique_vals)
+                
+                # Apply filter
+                if selected_vals:
+                    df_filtered = df_filtered[df_filtered[col].isin(selected_vals)]
+            
+            # Show stats
+            n_before = len(df)
+            n_after = len(df_filtered)
+            st.metric("Rows Remaining", f"{n_after} / {n_before}", delta=n_after-n_before)
+            
+            # Update the main dataframe
+            df = df_filtered
+
     st.subheader("Data Preview")
     st.dataframe(df.head())
 
