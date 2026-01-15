@@ -172,18 +172,7 @@ if uploaded_file:
         st.error(f"Error loading file: {e}")
         st.stop()
         
-    # --- DOWNLOAD MODIFIED DATA ---
-    with st.sidebar:
-        st.divider()
-        csv_buffer = df.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="💾 Download Enhanced Data (CSV)",
-            data=csv_buffer,
-            file_name="easysurv_enhanced_data.csv",
-            mime="text/csv",
-            help="Download the dataset including all new variables created in this session."
-        )
-        st.divider()
+
 
     # --- SESSION STATE & CUSTOM VARIABLES ---
     if 'custom_cutoffs' not in st.session_state:
@@ -444,6 +433,21 @@ if uploaded_file:
     theme_names = ["Default"] + list(journal_themes.keys()) + list(fun_themes.keys()) + ["Custom"]
     
     selected_theme = st.sidebar.selectbox("Choose Theme", theme_names)
+    
+    # --- DOWNLOAD MODIFIED DATA (At bottom of sidebar) ---
+    st.sidebar.divider()
+    # Use df (which has new vars added at the top) or df_clean (which filters NaNs). 
+    # Usually users want the full dataset with new variables, so 'df' is better, 
+    # but 'df_filtered' if they want the filtered view. Let's give them the full 'df' with enhancements.
+    if df is not None:
+        csv_buffer = df.to_csv(index=False).encode('utf-8')
+        st.sidebar.download_button(
+            label="💾 Download Enhanced Data (CSV)",
+            data=csv_buffer,
+            file_name="easysurv_enhanced_data.csv",
+            mime="text/csv",
+            help="Download the dataset including all new variables created in this session."
+        )
     
     custom_colors = {}
     # Data Cleaning for NaNs
