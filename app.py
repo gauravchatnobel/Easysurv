@@ -525,7 +525,7 @@ if df is not None:
     }
     
     fun_themes = {
-        "Sci-Fi Duo": ["#A6EEE6", "#F0F035", "#44281D", "#E4A71B", "#8BCF21", "#FBFBFB"],
+        "Cosmic Nihilism": ["#A6EEE6", "#F0F035", "#44281D", "#E4A71B", "#8BCF21", "#FBFBFB"],
         "Hollywood Equine": ["#2C3E50", "#D35400", "#2980B9", "#C0392B", "#bdc3c7", "#F39C12"],
         "Prehistoric One": ["#5D4037", "#D84315", "#388E3C", "#FBC02D", "#455A64", "#212121"],
         "Alien Flora": ["#F4EBD0", "#D66853", "#3C505D", "#7D9D9C", "#212D40", "#A8C686"],
@@ -543,9 +543,15 @@ if df is not None:
         "Grand Hotel": ["#F1BB7B", "#FD6467", "#5B1A18", "#D67236"],
         "Gotham Night": ["#0C2340", "#282D3C", "#808080", "#000000", "#710193", "#32CD32", "#B3B3B3"],
         "Coal Town Saga": ["#212121", "#B71C1C", "#FFC107", "#5D4037", "#00C853", "#E65100"],
-        "Feudal Colors": ["#FFD700", "#DC143C", "#0000CD", "#DAA520", "#000000", "#FFFFFF"],
-        "Classic Monochrome": ["#1A1A1A", "#4D4D4D", "#808080", "#B3B3B3", "#E6E6E6", "#F0EAD6"], 
+        "Tragedy of a King": ["#FFD700", "#DC143C", "#0000CD", "#DAA520", "#000000", "#FFFFFF"],
+        "Monochrome on the Road": ["#1A1A1A", "#4D4D4D", "#808080", "#B3B3B3", "#E6E6E6", "#F0EAD6"], 
         "Anime Fantasy": ["#8CBF88", "#E53935", "#607D8B", "#FFA500", "#D2E3EF", "#FF6347"],
+
+        # New Cult Classics
+        "Manic Urbanism": ["#E91E63", "#D32F2F", "#607D8B", "#455A64", "#212121"], # Psychological Blur (Satoshi Kon)
+        "Nameless Terror": ["#5D4037", "#3E2723", "#B71C1C", "#263238", "#ECEFF1"], # The Monster (Urasawa)
+        "The Great Epic": ["#FF9800", "#FFC107", "#D32F2F", "#00BCD4", "#795548"], # Ancient War (Mahabharata)
+        "Wizard of Loneliness": ["#E0E0E0", "#90A4AE", "#546E7A", "#A1887F", "#B0BEC5"], # Corporate Parody (Nathan) 
         
         # Literary Themes
         "Saint Petersburg 1866": ["#3E2723", "#BF360C", "#F9A825", "#424242", "#ECEFF1"], # Crime & Punishment: Squalor, blood, feverish yellow, stone grey, pale sky
