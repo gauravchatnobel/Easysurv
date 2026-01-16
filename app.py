@@ -6,6 +6,8 @@ from lifelines import KaplanMeierFitter, CoxPHFitter, AalenJohansenFitter
 from lifelines.statistics import multivariate_logrank_test, logrank_test
 import numpy as np
 import numpy as np
+import numpy as np
+np.random.seed(42) # Set global seed for reproducibility (e.g. Aalen-Johansen jittering)
 import io
 try:
     import seaborn as sns
@@ -165,6 +167,7 @@ st.title("EASYSURV: Interactive Survival Analysis Tool")
 # Sidebar - Configuration
 st.sidebar.header("Data Upload & Configuration")
 
+st.sidebar.warning("⚠️ **Security Note**: Do not upload Patient Health Information (PHI). This tool runs locally/in-memory, but standard data privacy hygiene applies.")
 uploaded_file = st.sidebar.file_uploader("Upload Clinical Data (CSV/Excel)", type=["csv", "xlsx"])
 
 @st.cache_data
@@ -1078,8 +1081,8 @@ if df is not None:
                     sig_word = "significantly" if result.p_value < 0.05 else "not significantly"
                     
                     # 2. Main statement
-                    # 2. Main statement
-                    summary = f"The Kaplan-Meier survival analysis comparing groups defined by **{group_col}** ({', '.join([str(g) for g in groups])}) revealed that {group_col} was **{sig_word} associated with survival** (Log-rank test p={result.p_value:.4f}). "
+                    summary = "Survival estimates were calculated using the Kaplan-Meier method. Comparisons between groups were performed using the Log-rank test. "
+                    summary += f"The analysis comparing groups defined by **{group_col}** ({', '.join([str(g) for g in groups])}) revealed that {group_col} was **{sig_word} associated with survival** (Log-rank test p={result.p_value:.4f}). "
                     
                     # 3. Median details
                     med_details = []
@@ -1329,7 +1332,8 @@ if df is not None:
                                 mv_df_for_narrator = st.session_state.get('mv_summary_df', summary_mv)
                                 
                                 if st.button("Generate Summary Text (Multivariable)"):
-                                    mv_summary = "In the multivariable Cox regression model adjusted for relevant covariates, the following associations were observed:\n\n"
+                                    mv_summary = "Multivariable analysis was performed using the Cox Proportional Hazards regression model to assess independent predictors of survival.\n\n"
+                                    mv_summary += "In the adjusted model, the following associations were observed:\n\n"
                                     
                                     # Iterate over rows
                                     for idx, row in mv_df_for_narrator.iterrows():
@@ -1467,6 +1471,8 @@ if df is not None:
 
             # Plot CIF
             if cif_df is not None: # Triggered either by default mode or button in 2-col mode
+                
+                st.warning("ℹ️ **Note on Ties**: Tied event times are handled using random jitter (controlled by fixed seed=42) to ensure valid Aalen-Johansen estimation.")
                 
                 # Check groupings
                 cif_fitters = []
@@ -1831,7 +1837,8 @@ if df is not None:
                 st.write("### 🤖 AI Result Narrator (Competing Risks)")
                 if st.button("Generate Summary Text (CIF)"):
                      
-                     cif_summary = "In the competing risks analysis using the Aalen-Johansen estimator:\n\n"
+                     cif_summary = "Cumulative Incidence Functions (CIF) were estimated using the Aalen-Johansen method to account for competing risks. Comparisons were performed using the Fine-Gray subdistribution hazard model (Log-Likelihood Ratio Test).\n\n"
+                     cif_summary += "In the competing risks analysis:\n\n"
                      
                      # 1. Median Time Stats
                      if cif_median_data:
