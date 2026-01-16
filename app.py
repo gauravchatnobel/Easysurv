@@ -10,14 +10,7 @@ import io
 try:
     import seaborn as sns
 except ImportError:
-    import subprocess
-    import sys
-    try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "seaborn"])
-        import seaborn as sns
-    except Exception as e:
-        # Fallback if pip install fails, though heatmap will fail later.
-        sns = None
+    sns = None
 
 @st.cache_data
 def compute_fine_gray_weights(df, time_col, event_col, event_of_interest=1):
@@ -1132,7 +1125,7 @@ if df is not None:
                 buf = io.BytesIO()
                 fig.savefig(buf, format="png", dpi=300, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
                 buf.seek(0)
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns(3)
                 with col1:
                     st.download_button(
                         label="💾 Download Plot (300 DPI)",
@@ -1149,6 +1142,16 @@ if df is not None:
                         data=buf_hi,
                         file_name="survival_plot_600dpi.png",
                         mime="image/png"
+                    )
+                with col3:
+                    buf_pdf = io.BytesIO()
+                    fig.savefig(buf_pdf, format="pdf", bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
+                    buf_pdf.seek(0)
+                    st.download_button(
+                        label="📄 Download Plot (PDF)",
+                        data=buf_pdf,
+                        file_name="survival_plot.pdf",
+                        mime="application/pdf"
                     )
 
 
@@ -1512,7 +1515,7 @@ if df is not None:
                                   # Log-Likelihood Ratio Test against null model
                                   res_fg = cph_fg.log_likelihood_ratio_test()
                                   if show_p_val_plot_cif:
-                                      fg_p_value_text = f"Gray's p = {res_fg.p_value:.4f}"
+                                      fg_p_value_text = f"Fine-Gray (LRT) p = {res_fg.p_value:.4f}"
                                   
                                   # 5. Extract HR Table
                                   fg_summary = cph_fg.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']]
@@ -1530,7 +1533,7 @@ if df is not None:
                                  pass
                 
                 # Display P-value on Plot
-                if show_p_val_plot and fg_p_value_text:
+                if show_p_val_plot_cif and fg_p_value_text:
                      bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box_cif else None
                      ax_cif.text(pval_x_cif, pval_y_cif, fg_p_value_text, transform=ax_cif.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
 
@@ -1635,7 +1638,7 @@ if df is not None:
                      if ax_cif.get_legend():
                          ax_cif.get_legend().remove()
                 
-                if show_p_val_plot and fg_p_value_text:
+                if show_p_val_plot_cif and fg_p_value_text:
                      bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box_cif else None
                      ax_cif.text(pval_x_cif, pval_y_cif, fg_p_value_text, transform=ax_cif.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
                 # Add Risk Table
@@ -1666,7 +1669,7 @@ if df is not None:
                 fig_cif.savefig(buf_cif, format="png", dpi=300, bbox_inches='tight', facecolor=fig_cif.get_facecolor(), edgecolor='none')
                 buf_cif.seek(0)
                 
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns(3)
                 with col1:
                     st.download_button("💾 Download CIF Plot (300 DPI)", buf_cif, "cif_plot_300dpi.png", "image/png")
                 with col2:
@@ -1674,6 +1677,12 @@ if df is not None:
                     fig_cif.savefig(buf_cif_hi, format="png", dpi=600, bbox_inches='tight', facecolor=fig_cif.get_facecolor(), edgecolor='none')
                     buf_cif_hi.seek(0)
                     st.download_button("💾 Download High-Res CIF Plot (600 DPI)", buf_cif_hi, "cif_plot_600dpi.png", "image/png")
+                
+                with col3:
+                    buf_cif_pdf = io.BytesIO()
+                    fig_cif.savefig(buf_cif_pdf, format="pdf", bbox_inches='tight', facecolor=fig_cif.get_facecolor(), edgecolor='none')
+                    buf_cif_pdf.seek(0)
+                    st.download_button("📄 Download CIF Plot (PDF)", buf_cif_pdf, "cif_plot.pdf", "application/pdf")
                 
                 # Display Fine-Gray Table
                 if fg_summary is not None:
