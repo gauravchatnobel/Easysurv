@@ -467,7 +467,7 @@ if df is not None:
         pval_y_main = st.slider("P-val Y (Main)", 0.0, 1.0, 0.05)
 
         st.markdown("### Free Text Annotation")
-        main_free_text = st.text_input("Add Text (Main)", value="", placeholder="e.g. HR=0.45")
+        main_free_text = st.text_area("Add Text (Main)", value="", placeholder="e.g. HR=0.45\nSecond Line", height=70)
         main_text_x = st.slider("Text X (Main)", 0.0, 1.0, 0.5)
         main_text_y = st.slider("Text Y (Main)", 0.0, 1.0, 0.5)
         main_text_size = st.number_input("Text Size (Main)", min_value=6, value=12)
@@ -499,7 +499,7 @@ if df is not None:
         pval_y_cif = st.slider("P-val Y (CIF)", 0.0, 1.0, 0.2)
         
         st.markdown("### Free Text Annotation")
-        cif_free_text = st.text_input("Add Text (CIF)", value="", placeholder="e.g. p=0.003")
+        cif_free_text = st.text_area("Add Text (CIF)", value="", placeholder="e.g. p=0.003\nGroup B vs C", height=70)
         cif_text_x = st.slider("Text X (CIF)", 0.0, 1.0, 0.5)
         cif_text_y = st.slider("Text Y (CIF)", 0.0, 1.0, 0.5)
         cif_text_size = st.number_input("Text Size (CIF)", min_value=6, value=12)
