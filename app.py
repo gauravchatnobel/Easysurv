@@ -1147,6 +1147,22 @@ if df is not None:
                 if len(mv_df) < 10:
                      st.error("Not enough data points for multivariable analysis.")
                 else:
+                    # --- Reference Group Selection for Categorical Variables ---
+                    categorical_refs = {}
+                    
+                    # 1. Identify Categorical Columns
+                    cat_cols = [c for c in covariates if pd.api.types.is_object_dtype(mv_df[c]) or pd.api.types.is_categorical_dtype(mv_df[c])]
+                    
+                    if cat_cols:
+                        st.markdown("##### Reference Group Selection")
+                        cols = st.columns(min(3, len(cat_cols)))
+                        for i, col in enumerate(cat_cols):
+                            unique_levels = sorted(mv_df[col].dropna().unique().astype(str))
+                            with cols[i % 3]:
+                                # User selects one level to be the reference (dropped)
+                                ref = st.selectbox(f"Ref for {col}", unique_levels, key=f"ref_{col}", index=0)
+                                categorical_refs[col] = ref
+
                     run_analysis = st.button("Run Multivariable Analysis")
                     
                     if run_analysis:
@@ -1154,12 +1170,24 @@ if df is not None:
                         
                     if st.session_state.get('mv_analysis_active', False):
                         try:
-                            # Encore Categorical Variables
-                            # Detect categorical columns (object or category)
-                            # Actually, get_dummies handles this, but we should be careful about reference levels.
-                            # get_dummies(drop_first=True) automatically drops one level to avoid multicollinearity.
+                            # Encore Categorical Variables MANUALLY to handle Reference Group
+                            mv_data_encoded = mv_df.copy()
                             
-                            mv_data_encoded = pd.get_dummies(mv_df, columns=covariates, drop_first=True)
+                            # Drop original categorical columns from encoding base, we will add dummies
+                            mv_data_encoded = mv_data_encoded.drop(columns=cat_cols)
+                            
+                            for col in cat_cols:
+                                ref = categorical_refs.get(col)
+                                # Get Dummies
+                                dummies = pd.get_dummies(mv_df[col], prefix=col)
+                                
+                                # Drop the reference column
+                                ref_col_name = f"{col}_{ref}"
+                                if ref_col_name in dummies.columns:
+                                    dummies = dummies.drop(columns=[ref_col_name])
+                                    
+                                # Concatenate
+                                mv_data_encoded = pd.concat([mv_data_encoded, dummies], axis=1)
                             
                             # Sanitize Column Names for Lifelines/Stats (remove spaces/special chars)
                             # This is important for formula strings but CoxPHFitter handles dataframe input well.
