@@ -204,7 +204,7 @@ else:
     
     st.markdown('<div class="hero-box">', unsafe_allow_html=True)
     st.markdown("## 👋 Welcome to EasySurv")
-    st.markdown("### The Clinician-Friendly Survival Analysis Tool")
+    st.markdown("### Survival Analysis for everyone")
     st.markdown("Perform publication-quality Kaplan-Meier, Cox Regression, and Competing Risks analysis in seconds without writing a single line of code.")
     st.markdown('</div>', unsafe_allow_html=True)
     
