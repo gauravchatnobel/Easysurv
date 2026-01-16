@@ -167,7 +167,7 @@ st.title("EASYSURV: Interactive Survival Analysis Tool")
 # Sidebar - Configuration
 st.sidebar.header("Data Upload & Configuration")
 
-st.sidebar.warning("⚠️ **Security Note**: Do not upload Patient Health Information (PHI). This tool runs locally/in-memory, but standard data privacy hygiene applies.")
+st.sidebar.warning("⚠️ **Security Note**: Do not upload identifiable patient data / PHI. This tool runs locally/in-memory, but standard data privacy hygiene applies.")
 uploaded_file = st.sidebar.file_uploader("Upload Clinical Data (CSV/Excel)", type=["csv", "xlsx"])
 
 @st.cache_data
