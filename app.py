@@ -466,6 +466,13 @@ if df is not None:
         pval_x_main = st.slider("P-val X (Main)", 0.0, 1.0, 0.95)
         pval_y_main = st.slider("P-val Y (Main)", 0.0, 1.0, 0.05)
 
+        st.markdown("### Free Text Annotation")
+        main_free_text = st.text_input("Add Text (Main)", value="", placeholder="e.g. HR=0.45")
+        main_text_x = st.slider("Text X (Main)", 0.0, 1.0, 0.5)
+        main_text_y = st.slider("Text Y (Main)", 0.0, 1.0, 0.5)
+        main_text_size = st.number_input("Text Size (Main)", min_value=6, value=12)
+        main_text_box = st.checkbox("Box Text (Main)", value=False)
+
     # 3. CIF Plot Settings
     with st.sidebar.expander("CIF Plot Settings (Competing Risks)", expanded=False):
         st.markdown("### Layout & Axes")
@@ -490,6 +497,13 @@ if df is not None:
         show_p_val_box_cif = st.checkbox("Box P-value (CIF)", value=True)
         pval_x_cif = st.slider("P-val X (CIF)", 0.0, 1.0, 0.95)
         pval_y_cif = st.slider("P-val Y (CIF)", 0.0, 1.0, 0.2)
+        
+        st.markdown("### Free Text Annotation")
+        cif_free_text = st.text_input("Add Text (CIF)", value="", placeholder="e.g. p=0.003")
+        cif_text_x = st.slider("Text X (CIF)", 0.0, 1.0, 0.5)
+        cif_text_y = st.slider("Text Y (CIF)", 0.0, 1.0, 0.5)
+        cif_text_size = st.number_input("Text Size (CIF)", min_value=6, value=12)
+        cif_text_box = st.checkbox("Box Text (CIF)", value=False)
         
     # Theme Selection (moved to bottom or keep global)
     st.sidebar.subheader("Color Theme")
@@ -1098,6 +1112,10 @@ if df is not None:
                      bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box_main else None
                      ax.text(pval_x_main, pval_y_main, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
                 
+                if main_free_text:
+                     bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if main_text_box else None
+                     ax.text(main_text_x, main_text_y, main_free_text, transform=ax.transAxes, ha='center', va='center', bbox=bbox_props, fontsize=main_text_size)
+                
                 st.pyplot(fig)
 
                 # DOWNLOAD BUTTON
@@ -1624,6 +1642,10 @@ if df is not None:
                 else:
                      if ax_cif.get_legend():
                          ax_cif.get_legend().remove()
+
+                if cif_free_text:
+                     bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if cif_text_box else None
+                     ax_cif.text(cif_text_x, cif_text_y, cif_free_text, transform=ax_cif.transAxes, ha='center', va='center', bbox=bbox_props, fontsize=cif_text_size)
 
 
 
