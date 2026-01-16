@@ -842,7 +842,7 @@ if df is not None:
                 buf = io.BytesIO()
                 fig.savefig(buf, format="png", dpi=300, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
                 buf.seek(0)
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns(3)
                 with col1:
                     st.download_button(
                         label="💾 Download Plot (300 DPI)",
@@ -860,6 +860,17 @@ if df is not None:
                         file_name="survival_plot_600dpi.png",
                         mime="image/png"
                     )
+                with col3:
+                    buf_pdf = io.BytesIO()
+                    fig.savefig(buf_pdf, format="pdf", bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
+                    buf_pdf.seek(0)
+                    st.download_button(
+                        label="📄 Download Plot (PDF)",
+                        data=buf_pdf,
+                        file_name="survival_plot.pdf",
+                        mime="application/pdf"
+                    )
+
 
                 # 2. Statistics (Cox PH / Logrank)
                 st.divider()
@@ -1067,7 +1078,8 @@ if df is not None:
                     sig_word = "significantly" if result.p_value < 0.05 else "not significantly"
                     
                     # 2. Main statement
-                    summary = f"The survival analysis comparing groups defined by **{group_col}** ({', '.join([str(g) for g in groups])}) revealed that {group_col} was **{sig_word} associated with survival** (Log-rank p={result.p_value:.4f}). "
+                    # 2. Main statement
+                    summary = f"The Kaplan-Meier survival analysis comparing groups defined by **{group_col}** ({', '.join([str(g) for g in groups])}) revealed that {group_col} was **{sig_word} associated with survival** (Log-rank test p={result.p_value:.4f}). "
                     
                     # 3. Median details
                     med_details = []
@@ -1294,7 +1306,7 @@ if df is not None:
                             fig_forest.savefig(buf_forest, format="png", dpi=300, bbox_inches='tight')
                             buf_forest.seek(0)
                             
-                            col1, col2 = st.columns(2)
+                            col1, col2, col3 = st.columns(3)
                             with col1:
                                 st.download_button("💾 Download Forest Plot (300 DPI)", buf_forest, "forest_plot_300dpi.png", "image/png")
                             with col2:
@@ -1302,6 +1314,12 @@ if df is not None:
                                 fig_forest.savefig(buf_forest_hi, format="png", dpi=600, bbox_inches='tight')
                                 buf_forest_hi.seek(0)
                                 st.download_button("💾 Download High-Res Forest Plot (600 DPI)", buf_forest_hi, "forest_plot_600dpi.png", "image/png")
+
+                            with col3:
+                                buf_forest_pdf = io.BytesIO()
+                                fig_forest.savefig(buf_forest_pdf, format="pdf", bbox_inches='tight')
+                                buf_forest_pdf.seek(0)
+                                st.download_button("📄 Download Forest Plot (PDF)", buf_forest_pdf, "forest_plot.pdf", "application/pdf")
                                 
                                 # --- AI NARRATOR (Multivariable) ---
                                 st.divider()
