@@ -830,6 +830,10 @@ if df is not None:
                      if ax.get_legend():
                          ax.get_legend().remove()
                 
+                if main_free_text:
+                     bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if main_text_box else None
+                     ax.text(main_text_x, main_text_y, main_free_text, transform=ax.transAxes, ha='center', va='center', bbox=bbox_props, fontsize=main_text_size)
+                
                 st.pyplot(fig)
                 
                 # Save to session_state for Report
