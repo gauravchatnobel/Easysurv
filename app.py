@@ -931,6 +931,9 @@ if df is not None:
                 
                     st.dataframe(summary_df.style.format("{:.3f}"))
                     
+                    # Save for AI Narrator
+                    st.session_state['uv_cox_summary'] = summary_df
+                    
                     # Download Cox Table
                     csv_cox = summary_df.to_csv().encode('utf-8')
                     st.download_button(
@@ -1077,22 +1080,37 @@ if df is not None:
                 st.divider()
                 st.subheader("🤖 AI Result Narrator")
                 if st.button("Generate Summary Text (Univariable)"):
-                    # 1. Significance
-                    sig_word = "significantly" if result.p_value < 0.05 else "not significantly"
+                    # 1. Methods
+                    summary = "**Methods**\n"
+                    summary += "Survival estimates were calculated using the Kaplan-Meier method. Comparisons between groups were performed using the Log-rank test. Univariable associations were assessed using Cox Proportional Hazards regression models.\n\n"
                     
-                    # 2. Main statement
-                    summary = "Survival estimates were calculated using the Kaplan-Meier method. Comparisons between groups were performed using the Log-rank test. "
-                    summary += f"The analysis comparing groups defined by **{group_col}** ({', '.join([str(g) for g in groups])}) revealed that {group_col} was **{sig_word} associated with survival** (Log-rank test p={result.p_value:.4f}). "
+                    # 2. Results
+                    summary += "**Results**\n"
+                    
+                    # Log-rank
+                    sig_word = "significantly" if result.p_value < 0.05 else "not significantly"
+                    summary += f"The Kaplan-Meier survival analysis comparing groups defined by **{group_col}** ({', '.join([str(g) for g in groups])}) revealed that {group_col} was **{sig_word} associated with survival** (Log-rank test p={result.p_value:.4f}). "
+                    
+                    # Cox PH (if available)
+                    if 'uv_cox_summary' in st.session_state:
+                        summary += "In the univariable Cox regression:\n"
+                        cox_df = st.session_state['uv_cox_summary']
+                        for idx, row in cox_df.iterrows():
+                             hr = row['Hazard Ratio (HR)']
+                             p = row['p-value']
+                             ci_low = row['Lower 95% CI']
+                             ci_high = row['Upper 95% CI']
+                             summary += f"* **{idx}**: HR={hr:.2f} (95% CI {ci_low:.2f}-{ci_high:.2f}, p={p:.4f})\n"
                     
                     # 3. Median details
                     med_details = []
                     for dataItem in median_data:
                         med_details.append(f"{dataItem['Group']} (Median: {dataItem['Median Survival']}, 95% CI: {dataItem['95% CI (Median)']})")
                     
-                    summary += "Median survival times were: " + "; ".join(med_details) + "."
+                    summary += "\nMedian survival times were: " + "; ".join(med_details) + "."
                     
                     st.success("Summary Generated:")
-                    st.code(summary, language="text")
+                    st.text_area("Copy this text:", value=summary, height=200)
 
             else:
                 # Single group
