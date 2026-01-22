@@ -165,6 +165,19 @@ def check_epv(df, event_col, covariates):
     else:
         return {'status': 'red', 'message': f"EPV = {epv:.1f} (High Risk: {int(n_events)} events / {n_params} parameters)", 'value': epv}
 
+def get_correlation_matrix(df, covariates):
+    """
+    Returns the One-Hot Encoded correlation matrix for visualization.
+    """
+    if len(covariates) < 2: return None
+    try:
+         df_check = pd.get_dummies(df[covariates], drop_first=True).dropna()
+         df_check = df_check.select_dtypes(include=[np.number])
+         if df_check.shape[1] < 2: return None
+         return df_check.corr()
+    except:
+         return None
+
 def check_collinearity(df, covariates, threshold=0.7):
     """
     Checks for multicollinearity using One-Hot Encoded correlations.
@@ -173,31 +186,20 @@ def check_collinearity(df, covariates, threshold=0.7):
     """
     if len(covariates) < 2: return []
     
-    try:
-        # Create Design Matrix (One-Hot Encoded)
-        # We use drop_first=True to simulate the regression environment
-        df_check = pd.get_dummies(df[covariates], drop_first=True).dropna()
-        
-        # Ensure purely numeric (get_dummies should assume this, but safety first)
-        df_check = df_check.select_dtypes(include=[np.number])
-        
-        if df_check.shape[1] < 2: return []
-        
-        corr_matrix = df_check.corr().abs()
-        
-        # Upper triangle only
-        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
-        
-        high_corr = []
-        for col in upper.columns:
-            for row in upper.index:
-                 val = upper.loc[row, col]
-                 if val > threshold:
-                     high_corr.append((row, col, float(val)))
-                     
-        return high_corr
-    except:
-        return []
+    corr_matrix = get_correlation_matrix(df, covariates)
+    if corr_matrix is None: return []
+    
+    # Upper triangle only
+    upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+    
+    high_corr = []
+    for col in upper.columns:
+        for row in upper.index:
+             val = upper.loc[row, col]
+             if val > threshold:
+                 high_corr.append((row, col, float(val)))
+                 
+    return high_corr
 
 def check_separation(cph_model):
     """
