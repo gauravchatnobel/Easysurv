@@ -2466,95 +2466,133 @@ if df is not None:
                               st.text_area("Copy Text:", narrative, height=150)
 
              elif diag_mode == "Prognostic Model Comparison (C-Index)":
-                  st.write("Compare the discriminative power (C-index) of up to 3 models.")
-                  
-                  st.info(f"Target: **{time_col}** (Time), **{event_col}** (Event)")
-                  
-                  c1, c2, c3 = st.columns(3)
-                  with c1:
-                      st.write("#### Model A (Base)")
-                      vars_a = st.multiselect("Covariates A", [c for c in columns if c not in [time_col, event_col]], key="mod_a")
-                  with c2:
-                      st.write("#### Model B (+1)")
-                      vars_b = st.multiselect("Covariates B", [c for c in columns if c not in [time_col, event_col]], key="mod_b")
-                  with c3:
-                      st.write("#### Model C (+2) [Optional]")
-                      vars_c = st.multiselect("Covariates C", [c for c in columns if c not in [time_col, event_col]], key="mod_c")
-                  
-                  if st.button("Compare Models"):
-                       if not vars_a or not vars_b:
-                           st.error("Please define at least Model A and Model B.")
-                       else:
-                           try:
-                               res_list = []
-                               
-                               def fit_get_c(vars_in, label):
-                                   if not vars_in: return None
-                                   d = df_clean[[time_col, event_col] + vars_in].dropna()
-                                   d_enc = pd.get_dummies(d, drop_first=True)
-                                   d_enc.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in d_enc.columns]
-                                   cph = CoxPHFitter()
-                                   cph.fit(d_enc, duration_col=time_col, event_col=event_col)
-                                   return {"Label": label, "C-Index": cph.concordance_index_, "Vars": len(vars_in)}
-                               
-                               res_a = fit_get_c(vars_a, "Model A")
-                               res_b = fit_get_c(vars_b, "Model B")
-                               res_c = fit_get_c(vars_c, "Model C")
-                               
-                               res_list = [r for r in [res_a, res_b, res_c] if r is not None]
-                               
-                               st.divider()
-                               st.write("### 📈 C-Index Comparison")
-                               
-                               # Table
-                               res_df = pd.DataFrame(res_list)
-                               st.table(res_df.set_index("Label")[["C-Index", "Vars"]].style.format({"C-Index": "{:.3f}"}))
-                               
-                               # Deltas
-                               delta_ab = res_b["C-Index"] - res_a["C-Index"]
-                               st.metric("Δ (Model B - Model A)", f"{delta_ab:+.3f}", delta_color="normal")
-                               
-                               if res_c:
-                                   delta_bc = res_c["C-Index"] - res_b["C-Index"]
-                                   st.metric("Δ (Model C - Model B)", f"{delta_bc:+.3f}", delta_color="normal")
-                               
-                               # Plot (Step/Forest Style)
-                               fig_p, ax_p = plt.subplots(figsize=(8, 4))
-                               
-                               y_pos = range(len(res_list))
-                               c_vals = [r["C-Index"] for r in res_list]
-                               labels = [r["Label"] for r in res_list]
-                               
-                               # Theme Color
-                               pt_color = "black"
-                               if selected_theme in all_themes: pt_color = all_themes[selected_theme][0]
-                               
-                               ax_p.plot(c_vals, y_pos, 'o-', color=pt_color, markersize=10, linewidth=2)
-                               # Add faint grid
-                               ax_p.grid(True, axis='x', linestyle='--', alpha=0.5)
-                               
-                               ax_p.set_yticks(y_pos)
-                               ax_p.set_yticklabels(labels, fontsize=12, fontweight='bold')
-                               ax_p.set_xlabel("Harrell's Concordance Index")
-                               ax_p.set_title("Discriminative Power Ladder", loc='left')
-                               
-                               # Add labels
-                               for y, c in zip(y_pos, c_vals):
-                                   ax_p.text(c, y + 0.15, f"{c:.3f}", ha='center', va='bottom', fontsize=10, color='black')
-                               
-                               # Adjust X limits to focus on difference
-                               c_min, c_max = min(c_vals), max(c_vals)
-                               ax_p.set_xlim(max(0.5, c_min - 0.05), min(1.0, c_max + 0.05))
-                               
-                               st.pyplot(fig_p)
-                               
-                               # PDF
-                               buf_p = io.BytesIO()
-                               fig_p.savefig(buf_p, format="pdf", bbox_inches='tight')
-                               st.download_button("📄 Download Ladder Plot (PDF)", buf_p, "c_index_ladder.pdf", "application/pdf")
+                 st.write("Compare the discriminative power (C-index) of up to 3 models with 95% Confidence Intervals (Bootstrapped).")
+                 
+                 st.info(f"Target: **{time_col}** (Time), **{event_col}** (Event)")
+                 
+                 c1, c2, c3 = st.columns(3)
+                 with c1:
+                     st.write("#### Model A (Base)")
+                     vars_a = st.multiselect("Covariates A", [c for c in columns if c not in [time_col, event_col]], key="mod_a")
+                 with c2:
+                     st.write("#### Model B (+1)")
+                     vars_b = st.multiselect("Covariates B", [c for c in columns if c not in [time_col, event_col]], key="mod_b")
+                 with c3:
+                     st.write("#### Model C (+2) [Optional]")
+                     vars_c = st.multiselect("Covariates C", [c for c in columns if c not in [time_col, event_col]], key="mod_c")
+                 
+                 if st.button("Compare Models"):
+                      if not vars_a or not vars_b:
+                          st.error("Please define at least Model A and Model B.")
+                      else:
+                          try:
+                              res_list = []
+                              
+                              def fit_get_c_bootstrap(vars_in, label, n_boot=20):
+                                  if not vars_in: return None
+                                  # Data Prep
+                                  d = df_clean[[time_col, event_col] + vars_in].dropna()
+                                  d_enc = pd.get_dummies(d, drop_first=True)
+                                  d_enc.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in d_enc.columns]
+                                  
+                                  # Fit Main
+                                  cph = CoxPHFitter()
+                                  cph.fit(d_enc, duration_col=time_col, event_col=event_col)
+                                  c_est = cph.concordance_index_
+                                  
+                                  # Bootstrap
+                                  boot_cs = []
+                                  for _ in range(n_boot):
+                                      # Resample
+                                      d_boot = d_enc.sample(n=len(d_enc), replace=True)
+                                      try:
+                                          cph_b = CoxPHFitter()
+                                          cph_b.fit(d_boot, duration_col=time_col, event_col=event_col)
+                                          boot_cs.append(cph_b.concordance_index_)
+                                      except:
+                                          pass # Skip failed fits
+                                  
+                                  if boot_cs:
+                                      lower = np.percentile(boot_cs, 2.5)
+                                      upper = np.percentile(boot_cs, 97.5)
+                                  else:
+                                      lower, upper = c_est, c_est
+                                      
+                                  return {"Label": label, "C-Index": c_est, "Lower": lower, "Upper": upper, "Vars": len(vars_in)}
+                              
+                              with st.spinner("Bootstrapping C-Indices (n=20)..."):
+                                  res_a = fit_get_c_bootstrap(vars_a, "Model A")
+                                  res_b = fit_get_c_bootstrap(vars_b, "Model B")
+                                  res_c = fit_get_c_bootstrap(vars_c, "Model C")
+                              
+                              res_list = [r for r in [res_a, res_b, res_c] if r is not None]
+                              
+                              st.divider()
+                              st.write("### 📈 C-Index Comparison (Forest Plot)")
+                              
+                              # Table
+                              res_df = pd.DataFrame(res_list)
+                              res_df["95% CI"] = res_df.apply(lambda x: f"{x['Lower']:.3f} - {x['Upper']:.3f}", axis=1)
+                              st.table(res_df.set_index("Label")[["C-Index", "95% CI", "Vars"]].style.format({"C-Index": "{:.3f}"}))
+                              
+                              # Deltas
+                              delta_ab = res_b["C-Index"] - res_a["C-Index"]
+                              st.metric("Δ (Model B - Model A)", f"{delta_ab:+.3f}", delta_color="normal")
+                              
+                              if res_c:
+                                  delta_bc = res_c["C-Index"] - res_b["C-Index"]
+                                  st.metric("Δ (Model C - Model B)", f"{delta_bc:+.3f}", delta_color="normal")
+                              
+                              # Plot (Forest Style)
+                              fig_p, ax_p = plt.subplots(figsize=(8, 4))
+                              
+                              y_pos = np.arange(len(res_list))
+                              c_vals = [r["C-Index"] for r in res_list]
+                              labels = [r["Label"] for r in res_list]
+                              
+                              # Errors for errorbar [down, up] relative to mean
+                              xerr = [
+                                  [r["C-Index"] - r["Lower"] for r in res_list],
+                                  [r["Upper"] - r["C-Index"] for r in res_list]
+                              ]
+                              
+                              # Theme Color
+                              pt_color = "black"
+                              if selected_theme in all_themes: pt_color = all_themes[selected_theme][0]
+                              
+                              # Error Bar Plot
+                              ax_p.errorbar(x=c_vals, y=y_pos, xerr=xerr, fmt='o', markersize=10, 
+                                            linewidth=2, capsize=5, color=pt_color, ecolor=pt_color)
+                              
+                              # Add fainter line connecting means if desired? Or just points.
+                              # User asked for "Ladder" but with forest style. Let's connect them faintly to show progression.
+                              ax_p.plot(c_vals, y_pos, '-', color=pt_color, alpha=0.3)
 
-                           except Exception as e:
-                               st.error(f"Error during comparison: {e}")
+                              ax_p.grid(True, axis='x', linestyle='--', alpha=0.5)
+                              
+                              ax_p.set_yticks(y_pos)
+                              ax_p.set_yticklabels(labels, fontsize=12, fontweight='bold')
+                              ax_p.set_xlabel("Harrell's Concordance Index (95% CI)")
+                              ax_p.set_title("Discriminative Power Ladder (Forest Plot)", loc='left')
+                              
+                              # Add labels above points
+                              for y, c in zip(y_pos, c_vals):
+                                  ax_p.text(c, y + 0.15, f"{c:.3f}", ha='center', va='bottom', fontsize=10, color='black')
+                              
+                              # Adjust Limits
+                              lows = [r["Lower"] for r in res_list]
+                              highs = [r["Upper"] for r in res_list]
+                              ax_p.set_xlim(max(0.4, min(lows) - 0.05), min(1.0, max(highs) + 0.05))
+                              
+                              st.pyplot(fig_p)
+                              
+                              # PDF
+                              buf_p = io.BytesIO()
+                              fig_p.savefig(buf_p, format="pdf", bbox_inches='tight')
+                              st.download_button("📄 Download Forest Plot (PDF)", buf_p, "c_index_forest.pdf", "application/pdf")
+
+                          except Exception as e:
+                              st.error(f"Error during comparison: {e}")
 
 
     else:
