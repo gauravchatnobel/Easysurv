@@ -1592,7 +1592,16 @@ if df is not None:
                      ax_cif.text(pval_x_cif, pval_y_cif, fg_p_value_text, transform=ax_cif.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
 
                 if group_col != "None" and group_col in cif_df.columns:
-                    groups = sorted(cif_df[group_col].unique())
+                    if groups_ordered:
+                        groups = [g for g in groups_ordered if g in cif_df[group_col].unique()]
+                        # If for some reason the subset leaves gaps, or if new items appeared, append them?
+                        # Usually cif_df is subset of df, so groups_ordered should cover it unless filters applied differently.
+                        # For safety, let's append leftovers.
+                        leftovers = [g for g in sorted(cif_df[group_col].unique()) if g not in groups]
+                        groups.extend(leftovers)
+                    else:
+                        groups = sorted(cif_df[group_col].unique())
+
                     for i, group in enumerate(groups):
                         mask = cif_df[group_col] == group
                         
