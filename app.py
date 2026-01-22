@@ -2433,49 +2433,49 @@ if df is not None:
                             st.success("Report Generated:")
                             st.text_area("Copy Text:", narrative, height=150)
 
-        with tab8:
-            st.subheader("📚 Reproducibility & Citations")
-            
-            st.markdown("""
-            ### 📦 Software Versions
-            To ensure reproducibility of your results, please report the following software versions in your manuscript:
-            """)
-            
-            import importlib.metadata
-            def get_version(pkg):
-                try:
-                    return importlib.metadata.version(pkg)
-                except:
-                    return "Not Found"
-            
-            libs = ["lifelines", "pandas", "numpy", "scipy", "matplotlib", "streamlit"]
-            vers = {lib: get_version(lib) for lib in libs}
-            
-            ver_df = pd.DataFrame(list(vers.items()), columns=["Library", "Version"])
-            st.table(ver_df.style.highlight_null(color="red"))
-            
-            st.divider()
-            
-            st.markdown("""
-            ### 📜 Methodology References
-            
-            #### Survival Analysis
-            *   **Kaplan-Meier Estimator**: Kaplan, E. L., & Meier, P. (1958). Nonparametric estimation from incomplete observations. *Journal of the American statistical association*, 53(282), 457-481.
-            *   **Cox Proportional Hazards**: Cox, D. R. (1972). Regression models and life-tables. *Journal of the Royal Statistical Society: Series B (Methodological)*, 34(2), 187-220.
-            *   **Log-Rank Test**: Mantel, N. (1966). Evaluation of survival data and two new rank order statistics arising in its consideration. *Cancer Chemotherapy Reports*, 50(3), 163-170.
-            
-            #### Competing Risks
-            *   **Fine-Gray Regression**: Fine, J. P., & Gray, R. J. (1999). A proportional hazards model for the subdistribution of a competing risk. *Journal of the American Statistical Association*, 94(446), 496-509.
-            *   **Aalen-Johansen Estimator**: Aalen, O. O., & Johansen, S. (1978). An empirical transition matrix for non-homogeneous Markov chains based on censored observations. *Scandinavian Journal of Statistics*, 141-150.
-            
-            #### Diagnostic Accuracy
-            *   **Wilson Score Interval**: Wilson, E. B. (1927). Probable inference, the law of succession, and statistical inference. *Journal of the American Statistical Association*, 22(158), 209-212.
-            *   **Harrell's C-Index**: Harrell Jr, F. E., Lee, K. L., & Mark, D. B. (1996). Multivariable prognostic models: issues in developing models, evaluating assumptions and adequacy, and measuring and reducing errors. *Statistics in medicine*, 15(4), 361-387.
-            
-            ### 📝 How to Cite EasySurv
-            If you use this tool for your research, please cite it as:
-            > **EasySurv: An Interactive Platform for Survival Analysis (v2.0)**. Powered by Lifelines & Streamlit. Available at: [https://easysurv.streamlit.app](https://easysurv.streamlit.app)
-            """)
+         with tab8:
+             st.subheader("📚 Reproducibility & Citations")
+             
+             st.markdown("""
+             ### 📦 Software Versions
+             To ensure reproducibility of your results, please report the following software versions in your manuscript:
+             """)
+             
+             import importlib.metadata
+             def get_version(pkg):
+                 try:
+                     return importlib.metadata.version(pkg)
+                 except:
+                     return "Not Found"
+             
+             libs = ["lifelines", "pandas", "numpy", "scipy", "matplotlib", "streamlit"]
+             vers = {lib: get_version(lib) for lib in libs}
+             
+             ver_df = pd.DataFrame(list(vers.items()), columns=["Library", "Version"])
+             st.table(ver_df.style.highlight_null(color="red"))
+             
+             st.divider()
+             
+             st.markdown("""
+             ### 📜 Methodology References
+             
+             #### Survival Analysis
+             *   **Kaplan-Meier Estimator**: Kaplan, E. L., & Meier, P. (1958). Nonparametric estimation from incomplete observations. *Journal of the American statistical association*, 53(282), 457-481.
+             *   **Cox Proportional Hazards**: Cox, D. R. (1972). Regression models and life-tables. *Journal of the Royal Statistical Society: Series B (Methodological)*, 34(2), 187-220.
+             *   **Log-Rank Test**: Mantel, N. (1966). Evaluation of survival data and two new rank order statistics arising in its consideration. *Cancer Chemotherapy Reports*, 50(3), 163-170.
+             
+             #### Competing Risks
+             *   **Fine-Gray Regression**: Fine, J. P., & Gray, R. J. (1999). A proportional hazards model for the subdistribution of a competing risk. *Journal of the American Statistical Association*, 94(446), 496-509.
+             *   **Aalen-Johansen Estimator**: Aalen, O. O., & Johansen, S. (1978). An empirical transition matrix for non-homogeneous Markov chains based on censored observations. *Scandinavian Journal of Statistics*, 141-150.
+             
+             #### Diagnostic Accuracy
+             *   **Wilson Score Interval**: Wilson, E. B. (1927). Probable inference, the law of succession, and statistical inference. *Journal of the American Statistical Association*, 22(158), 209-212.
+             *   **Harrell's C-Index**: Harrell Jr, F. E., Lee, K. L., & Mark, D. B. (1996). Multivariable prognostic models: issues in developing models, evaluating assumptions and adequacy, and measuring and reducing errors. *Statistics in medicine*, 15(4), 361-387.
+             
+             ### 📝 How to Cite EasySurv
+             If you use this tool for your research, please cite it as:
+             > **EasySurv: An Interactive Platform for Survival Analysis (v2.0)**. Powered by Lifelines & Streamlit. Available at: [https://easysurv.streamlit.app](https://easysurv.streamlit.app)
+             """)
 
 else:
     st.info("Please upload a CSV or Excel file to begin analysis.")
