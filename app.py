@@ -1079,16 +1079,36 @@ if df is not None:
                     else:
                         st.success("✅ No multicollinearity detected (Checked Numeric & Categorical).")
 
-                    # Visual Reassurance (Heatmap)
-                    with st.expander("🔍 Show Correlation Matrix"):
-                         corr_mat = statistics.get_correlation_matrix(mv_df, covariates)
-                         if corr_mat is not None:
-                             fig_corr, ax_corr = plt.subplots(figsize=(8, 6))
-                             sns.heatmap(corr_mat, annot=True, fmt=".2f", cmap="coolwarm", center=0, ax=ax_corr, cbar=True)
-                             ax_corr.set_title("Correlation of Model Parameters (One-Hot Encoded)")
-                             st.pyplot(fig_corr)
-                         else:
-                             st.info("Not enough numeric variation to plot correlations.")
+                    # Visual Reassurance (Heatmap & VIF)
+                    with st.expander("🔍 Show Correlation Check (Heatmap & VIF)"):
+                         col_corr, col_vif = st.columns([2, 1])
+                         
+                         with col_corr:
+                             corr_mat = statistics.get_correlation_matrix(mv_df, covariates)
+                             if corr_mat is not None:
+                                 fig_corr, ax_corr = plt.subplots(figsize=(6, 5))
+                                 sns.heatmap(corr_mat, annot=True, fmt=".2f", cmap="coolwarm", center=0, ax=ax_corr, cbar=True)
+                                 ax_corr.set_title("Correlation Matrix (Dummy Vars)")
+                                 st.pyplot(fig_corr)
+                             else:
+                                 st.info("Not enough variation to plot correlations.")
+                        
+                         with col_vif:
+                             st.markdown("**Variance Inflation Factors (VIF)**")
+                             st.caption("VIF > 5 indicates potential multicollinearity.")
+                             vif_df = statistics.calculate_vif(mv_df, covariates)
+                             if vif_df is not None:
+                                 # Color code VIF
+                                 def highlight_vif(s):
+                                     val = s['VIF']
+                                     if val > 10: color = '#ffcccc' # Red
+                                     elif val > 5: color = '#ffffcc' # Yellow
+                                     else: color = '#ccffcc' # Green
+                                     return [f'background-color: {color}']*len(s)
+                                     
+                                 st.dataframe(vif_df.style.apply(highlight_vif, axis=1).format({"VIF": "{:.2f}"}), hide_index=True)
+                             else:
+                                 st.info("Could not calculate VIF (Singular Matrix?).")
 
                     st.markdown("#### 🔧 Advanced Options")
                     use_penalizer = st.checkbox("Enable Penalized Cox (Ridge Regression)", help="Use L2 penalty to handle small sample sizes (low EPV), collinearity, or separation. This biases coefficients towards 0 but reduces variance.")
