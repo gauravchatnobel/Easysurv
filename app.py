@@ -2496,8 +2496,14 @@ if df is not None:
                      st.divider()
                      st.subheader("🤖 AI Diagnostic Narrator")
                      if st.button("Generate Diagnostic Report"):
-                           narrative = f"**Diagnostic Performance Evaluation**\n\n"
-                           narrative += f"The diagnostic performance of **{res['test_var']}** was evaluated using **{res['ref_var']}** as the reference standard (N={res['n_total']}).\n"
+                           narrative = "**Methods**\n"
+                           narrative += f"Diagnostic performance was evaluated using a 2x2 contingency table with **{res['ref_var']}** as the reference standard (N={res['n_total']}). "
+                           narrative += "Sensitivity, Specificity, Positive Predictive Value (PPV), and Negative Predictive Value (NPV) were calculated. "
+                           narrative += "95% Confidence Intervals (CIs) were estimated using the Wilson Score method. "
+                           narrative += "Association between the test and reference was assessed using the Pearson Chi-Square test.\n\n"
+                           
+                           narrative += "**Results**\n"
+                           narrative += f"Evaluating **{res['test_var']}** against **{res['ref_var']}**:\n"
                            narrative += f"- **Sensitivity**: {res['sens']:.1%} (95% CI {res['sens_l']:.1%}-{res['sens_h']:.1%}).\n"
                            narrative += f"- **Specificity**: {res['spec']:.1%} (95% CI {res['spec_l']:.1%}-{res['spec_h']:.1%}).\n"
                            narrative += f"- **Predictive Values**: PPV {res['ppv']:.1%} ({res['ppv_l']:.1%}-{res['ppv_h']:.1%}), NPV {res['npv']:.1%} ({res['npv_l']:.1%}-{res['npv_h']:.1%}).\n"
@@ -2664,7 +2670,11 @@ if df is not None:
                       st.divider()
                       st.subheader("🤖 AI Prognostic Narrator")
                       if st.button("Generate Prognostic Report"):
-                            narrative = "**Prognostic Model Comparison**\n\n"
+                            narrative = "**Methods**\n"
+                            narrative += "Discriminative power was assessed using Harrell's Concordance Index (C-Index) derived from Cox Proportional Hazards models. "
+                            narrative += "To estimate uncertainty, 95% Confidence Intervals (CIs) for the C-Index were calculated using a bootstrap approach with 50 resamples (Normal Approximation).\n\n"
+                            
+                            narrative += "**Results**\n"
                             narrative += f"We compared {len(res_list)} proportional hazards models to evaluate incremental discriminative power.\n"
                             
                             # Find Best Model
