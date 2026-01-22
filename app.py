@@ -2425,66 +2425,86 @@ if df is not None:
                          else:
                              p_val = 1.0
 
-                         st.divider()
-                         
-                         # 1. Metrics Table
-                         st.write("### 📊 Performance Metrics (with 95% CI)")
-                         metrics_data = {
-                             "Metric": ["Sensitivity (Recall)", "Specificity", "PPV (Precision)", "NPV", "Accuracy", "F1-Score"],
-                             "Value": [f"{sens:.1%} ({sens_l:.1%}-{sens_h:.1%})", 
-                                       f"{spec:.1%} ({spec_l:.1%}-{spec_h:.1%})", 
-                                       f"{ppv:.1%} ({ppv_l:.1%}-{ppv_h:.1%})", 
-                                       f"{npv:.1%} ({npv_l:.1%}-{npv_h:.1%})", 
-                                       f"{acc:.1%} ({acc_l:.1%}-{acc_h:.1%})", 
-                                       f"{f1:.3f}"]
-                         }
-                         st.table(pd.DataFrame(metrics_data))
-                         
-                         # 2. Chi-Square
-                         st.write("### 🔗 Association Statistics")
-                         sig_txt = "Significant Association" if p_val < 0.05 else "No Significant Association"
-                         st.write(f"**Chi-Square Test**: p = **{p_val:.4f}** ({sig_txt})")
-                         
-                         # 3. Visuals (Heatmap)
-                         st.write("### 🖼️ Confusion Matrix Heatmap")
-                         fig_cm, ax_cm = plt.subplots(figsize=(6, 5))
-                         
-                         labels = np.asarray([
-                             [f"TN\n{tn}", f"FP\n{fp}"],
-                             [f"FN\n{fn}", f"TP\n{tp}"]
-                         ])
-                         
-                         # Theme Logic
-                         cmap = "Blues"
-                         if selected_theme in all_themes:
-                             try:
-                                 from matplotlib.colors import LinearSegmentedColormap
-                                 base_color = all_themes[selected_theme][0]
-                                 cmap = LinearSegmentedColormap.from_list("custom", ["#f0f2f6", base_color])
-                             except:
-                                 pass
-
-                         if sns is not None:
-                             sns.heatmap(cm, annot=labels, fmt="", cmap=cmap, cbar=False, ax=ax_cm, 
-                                         xticklabels=[f"Pred Neg", f"Pred Pos ({test_pos})"],
-                                         yticklabels=[f"True Neg", f"True Pos ({ref_pos})"])
-                             ax_cm.set_xlabel(f"Test: {test_var}")
-                             ax_cm.set_ylabel(f"Reference: {ref_var}")
-                             st.pyplot(fig_cm)
+                         # STORE IN SESSION STATE
+                         st.session_state['diag_results'] = {
+                             'metrics_data': {
+                                 "Metric": ["Sensitivity (Recall)", "Specificity", "PPV (Precision)", "NPV", "Accuracy", "F1-Score"],
+                                 "Value": [f"{sens:.1%} ({sens_l:.1%}-{sens_h:.1%})", 
+                                           f"{spec:.1%} ({spec_l:.1%}-{spec_h:.1%})", 
+                                           f"{ppv:.1%} ({ppv_l:.1%}-{ppv_h:.1%})", 
+                                           f"{npv:.1%} ({npv_l:.1%}-{npv_h:.1%})", 
+                                           f"{acc:.1%} ({acc_l:.1%}-{acc_h:.1%})", 
+                                           f"{f1:.3f}"]
+                             },
+                             'p_val': p_val,
+                             'cm': cm,
+                             'tn': tn, 'fp': fp, 'fn': fn, 'tp': tp,
+                             'test_var': test_var, 'ref_var': ref_var,
+                             'test_pos': test_pos, 'ref_pos': ref_pos,
+                             'n_total': n_total,
                              
-                         # 4. Narrator
-                         st.divider()
-                         st.subheader("🤖 AI Diagnostic Narrator")
-                         if st.button("Generate Diagnostic Report"):
-                              narrative = f"**Diagnostic Performance Evaluation**\n\n"
-                              narrative += f"The diagnostic performance of **{test_var}** was evaluated using **{ref_var}** as the reference standard (N={n_total}).\n"
-                              narrative += f"- **Sensitivity**: {sens:.1%} (95% CI {sens_l:.1%}-{sens_h:.1%}).\n"
-                              narrative += f"- **Specificity**: {spec:.1%} (95% CI {spec_l:.1%}-{spec_h:.1%}).\n"
-                              narrative += f"- **Predictive Values**: PPV {ppv:.1%} ({ppv_l:.1%}-{ppv_h:.1%}), NPV {npv:.1%} ({npv_l:.1%}-{npv_h:.1%}).\n"
-                              narrative += f"- **Statistical Association**: Chi-square p={p_val:.4f}."
-                              st.success("Report Generated:")
-                              st.text_area("Copy Text:", narrative, height=150)
+                             # Narrative Data
+                             'sens': sens, 'sens_l': sens_l, 'sens_h': sens_h,
+                             'spec': spec, 'spec_l': spec_l, 'spec_h': spec_h,
+                             'ppv': ppv, 'ppv_l': ppv_l, 'ppv_h': ppv_h,
+                             'npv': npv, 'npv_l': npv_l, 'npv_h': npv_h
+                         }
 
+                 # DISPLAY FROM SESSION STATE
+                 if 'diag_results' in st.session_state:
+                     res = st.session_state['diag_results']
+                     
+                     st.divider()
+                     
+                     # 1. Metrics Table
+                     st.write("### 📊 Performance Metrics (with 95% CI)")
+                     st.table(pd.DataFrame(res['metrics_data']))
+                     
+                     # 2. Chi-Square
+                     st.write("### 🔗 Association Statistics")
+                     sig_txt = "Significant Association" if res['p_val'] < 0.05 else "No Significant Association"
+                     st.write(f"**Chi-Square Test**: p = **{res['p_val']:.4f}** ({sig_txt})")
+                     
+                     # 3. Visuals (Heatmap)
+                     st.write("### 🖼️ Confusion Matrix Heatmap")
+                     fig_cm, ax_cm = plt.subplots(figsize=(6, 5))
+                     
+                     labels = np.asarray([
+                         [f"TN\n{res['tn']}", f"FP\n{res['fp']}"],
+                         [f"FN\n{res['fn']}", f"TP\n{res['tp']}"]
+                     ])
+                     
+                     # Theme Logic
+                     cmap = "Blues"
+                     if selected_theme in all_themes:
+                         try:
+                             from matplotlib.colors import LinearSegmentedColormap
+                             base_color = all_themes[selected_theme][0]
+                             cmap = LinearSegmentedColormap.from_list("custom", ["#f0f2f6", base_color])
+                         except:
+                             pass
+
+                     if sns is not None:
+                         sns.heatmap(res['cm'], annot=labels, fmt="", cmap=cmap, cbar=False, ax=ax_cm, 
+                                     xticklabels=[f"Pred Neg", f"Pred Pos ({res['test_pos']})"],
+                                     yticklabels=[f"True Neg", f"True Pos ({res['ref_pos']})"])
+                         ax_cm.set_xlabel(f"Test: {res['test_var']}")
+                         ax_cm.set_ylabel(f"Reference: {res['ref_var']}")
+                         st.pyplot(fig_cm)
+                         
+                     # 4. Narrator
+                     st.divider()
+                     st.subheader("🤖 AI Diagnostic Narrator")
+                     if st.button("Generate Diagnostic Report"):
+                           narrative = f"**Diagnostic Performance Evaluation**\n\n"
+                           narrative += f"The diagnostic performance of **{res['test_var']}** was evaluated using **{res['ref_var']}** as the reference standard (N={res['n_total']}).\n"
+                           narrative += f"- **Sensitivity**: {res['sens']:.1%} (95% CI {res['sens_l']:.1%}-{res['sens_h']:.1%}).\n"
+                           narrative += f"- **Specificity**: {res['spec']:.1%} (95% CI {res['spec_l']:.1%}-{res['spec_h']:.1%}).\n"
+                           narrative += f"- **Predictive Values**: PPV {res['ppv']:.1%} ({res['ppv_l']:.1%}-{res['ppv_h']:.1%}), NPV {res['npv']:.1%} ({res['npv_l']:.1%}-{res['npv_h']:.1%}).\n"
+                           narrative += f"- **Statistical Association**: Chi-square p={res['p_val']:.4f}."
+                           st.success("Report Generated:")
+                           st.text_area("Copy Text:", narrative, height=150)
+             
              elif diag_mode == "Prognostic Model Comparison (C-Index)":
                  st.write("Compare the discriminative power (C-index) of up to 3 models with 95% Confidence Intervals (Bootstrapped).")
                  
@@ -2549,77 +2569,117 @@ if df is not None:
                               
                               res_list = [r for r in [res_a, res_b, res_c] if r is not None]
                               
-                              st.divider()
-                              st.write("### 📈 C-Index Comparison (Forest Plot)")
-                              
-                              # Table
-                              res_df = pd.DataFrame(res_list)
-                              res_df["95% CI"] = res_df.apply(lambda x: f"{x['Lower']:.3f} - {x['Upper']:.3f}", axis=1)
-                              st.table(res_df.set_index("Label")[["C-Index", "95% CI", "Vars"]].style.format({"C-Index": "{:.3f}"}))
-                              
-                              # Deltas
-                              delta_ab = res_b["C-Index"] - res_a["C-Index"]
-                              st.metric("Δ (Model B - Model A)", f"{delta_ab:+.3f}", delta_color="normal")
-                              
-                              if res_c:
-                                  delta_bc = res_c["C-Index"] - res_b["C-Index"]
-                                  st.metric("Δ (Model C - Model B)", f"{delta_bc:+.3f}", delta_color="normal")
-                              
-                              # Plot (Forest Style)
-                              fig_p, ax_p = plt.subplots(figsize=(8, 4))
-                              
-                              y_pos = np.arange(len(res_list))
-                              c_vals = [r["C-Index"] for r in res_list]
-                              labels = [r["Label"] for r in res_list]
-                              
-                              # Errors must be positive. Force absolute difference.
-                              xerr = [
-                                  [abs(r["C-Index"] - r["Lower"]) for r in res_list],
-                                  [abs(r["Upper"] - r["C-Index"]) for r in res_list]
-                              ]
-                              
-                              # Theme Color
-                              pt_color = "black"
-                              if selected_theme in all_themes: pt_color = all_themes[selected_theme][0]
-                              
-                              # Error Bar Plot
-                              ax_p.errorbar(x=c_vals, y=y_pos, xerr=xerr, fmt='o', markersize=10, 
-                                            linewidth=2, capsize=5, color=pt_color, ecolor=pt_color)
-                              
-                              ax_p.plot(c_vals, y_pos, '-', color=pt_color, alpha=0.3)
-
-                              ax_p.grid(True, axis='x', linestyle='--', alpha=0.5)
-                              
-                              ax_p.set_yticks(y_pos)
-                              ax_p.set_yticklabels(labels, fontsize=12, fontweight='bold')
-                              ax_p.set_xlabel("Harrell's Concordance Index (95% CI)")
-                              ax_p.set_title("Discriminative Power Ladder (Forest Plot)", loc='left')
-                              
-                              # Add labels
-                              for y, c in zip(y_pos, c_vals):
-                                  ax_p.text(c, y + 0.15, f"{c:.3f}", ha='center', va='bottom', fontsize=10, color='black')
-                              
-                              # Adjust Limits
-                              lows = [r["Lower"] for r in res_list]
-                              highs = [r["Upper"] for r in res_list]
-                              if lows and highs:
-                                  xmin = max(0.4, min(lows) - 0.05)
-                                  xmax = min(1.0, max(highs) + 0.05)
-                                  ax_p.set_xlim(xmin, xmax)
-                              
-                              # Add vertical padding for top label
-                              ax_p.set_ylim(-0.5, len(res_list) - 0.5 + 0.3)
-                              
-                              st.pyplot(fig_p)
-                              
-                              # PDF
-                              buf_p = io.BytesIO()
-                              fig_p.savefig(buf_p, format="pdf", bbox_inches='tight')
-                              st.download_button("📄 Download Forest Plot (PDF)", buf_p, "c_index_forest.pdf", "application/pdf")
-
+                              # SAVE TO SESSION STATE
+                              st.session_state['prog_results'] = {
+                                  'res_list': res_list,
+                                  'vars_a': vars_a, 'vars_b': vars_b, 'vars_c': vars_c
+                              }
+                          
                           except Exception as e:
                               st.error(f"Error during comparison: {e}")
 
+                 # DISPLAY FROM SESSION STATE
+                 if 'prog_results' in st.session_state:
+                      res_p = st.session_state['prog_results']
+                      res_list = res_p['res_list'] # Unpack for plot logic
+                      
+                      st.divider()
+                      st.write("### 📈 C-Index Comparison (Forest Plot)")
+                      
+                      # Table
+                      res_df = pd.DataFrame(res_list)
+                      res_df["95% CI"] = res_df.apply(lambda x: f"{x['Lower']:.3f} - {x['Upper']:.3f}", axis=1)
+                      st.table(res_df.set_index("Label")[["C-Index", "95% CI", "Vars"]].style.format({"C-Index": "{:.3f}"}))
+                      
+                      # Deltas Logic (Save for narrator too)
+                      delta_ab = 0
+                      delta_bc = 0
+                      
+                      # Match items
+                      r_a = next((r for r in res_list if r["Label"] == "Model A"), None)
+                      r_b = next((r for r in res_list if r["Label"] == "Model B"), None)
+                      r_c = next((r for r in res_list if r["Label"] == "Model C"), None)
+                      
+                      if r_a and r_b:
+                          delta_ab = r_b["C-Index"] - r_a["C-Index"]
+                          st.metric("Δ (Model B - Model A)", f"{delta_ab:+.3f}", delta_color="normal")
+                      
+                      if r_b and r_c:
+                          delta_bc = r_c["C-Index"] - r_b["C-Index"]
+                          st.metric("Δ (Model C - Model B)", f"{delta_bc:+.3f}", delta_color="normal")
+                      
+                      # Plot (Forest Style)
+                      fig_p, ax_p = plt.subplots(figsize=(8, 4))
+                      
+                      y_pos = np.arange(len(res_list))
+                      c_vals = [r["C-Index"] for r in res_list]
+                      labels = [r["Label"] for r in res_list]
+                      
+                      # Errors must be positive. Force absolute difference.
+                      xerr = [
+                          [abs(r["C-Index"] - r["Lower"]) for r in res_list],
+                          [abs(r["Upper"] - r["C-Index"]) for r in res_list]
+                      ]
+                      
+                      # Theme Color
+                      pt_color = "black"
+                      if selected_theme in all_themes: pt_color = all_themes[selected_theme][0]
+                      
+                      # Error Bar Plot
+                      ax_p.errorbar(x=c_vals, y=y_pos, xerr=xerr, fmt='o', markersize=10, 
+                                    linewidth=2, capsize=5, color=pt_color, ecolor=pt_color)
+                      
+                      ax_p.plot(c_vals, y_pos, '-', color=pt_color, alpha=0.3)
+
+                      ax_p.grid(True, axis='x', linestyle='--', alpha=0.5)
+                      
+                      ax_p.set_yticks(y_pos)
+                      ax_p.set_yticklabels(labels, fontsize=12, fontweight='bold')
+                      ax_p.set_xlabel("Harrell's Concordance Index (95% CI)")
+                      ax_p.set_title("Discriminative Power Ladder (Forest Plot)", loc='left')
+                      
+                      # Add labels
+                      for y, c in zip(y_pos, c_vals):
+                          ax_p.text(c, y + 0.15, f"{c:.3f}", ha='center', va='bottom', fontsize=10, color='black')
+                      
+                      # Adjust Limits
+                      lows = [r["Lower"] for r in res_list]
+                      highs = [r["Upper"] for r in res_list]
+                      if lows and highs:
+                          xmin = max(0.4, min(lows) - 0.05)
+                          xmax = min(1.0, max(highs) + 0.05)
+                          ax_p.set_xlim(xmin, xmax)
+                      
+                      # Add vertical padding for top label
+                      ax_p.set_ylim(-0.5, len(res_list) - 0.5 + 0.3)
+                      
+                      st.pyplot(fig_p)
+                      
+                      # PDF
+                      buf_p = io.BytesIO()
+                      fig_p.savefig(buf_p, format="pdf", bbox_inches='tight')
+                      st.download_button("📄 Download Forest Plot (PDF)", buf_p, "c_index_forest.pdf", "application/pdf")
+                      
+                      # 4. Narrator
+                      st.divider()
+                      st.subheader("🤖 AI Prognostic Narrator")
+                      if st.button("Generate Prognostic Report"):
+                            narrative = "**Prognostic Model Comparison**\n\n"
+                            narrative += f"We compared {len(res_list)} proportional hazards models to evaluate incremental discriminative power.\n"
+                            
+                            # Find Best Model
+                            best_mod = max(res_list, key=lambda x: x["C-Index"])
+                            narrative += f"- The best performing model was **{best_mod['Label']}** with a C-Index of **{best_mod['C-Index']:.3f}** (95% CI {best_mod['Lower']:.3f}-{best_mod['Upper']:.3f}).\n"
+                            
+                            if r_a and r_b:
+                                narrative += f"- **Model B vs A**: Adding the selected covariates improved discrimination by **{delta_ab:+.3f} points**.\n"
+                            
+                            if r_b and r_c:
+                                narrative += f"- **Model C vs B**: Further addition of covariates changed discrimination by **{delta_bc:+.3f} points**.\n"
+                                
+                            st.success("Report Generated:")
+                            st.text_area("Copy Text:", narrative, height=150)
+                 
 
     else:
         st.info("Please upload a CSV or Excel file to begin analysis.")
