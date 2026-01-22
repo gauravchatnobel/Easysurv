@@ -686,7 +686,6 @@ if df is not None:
     
     # Legend Renaming & Custom Colors
     group_labels = {}
-    if group_col != "None" and df_clean is not None:
     groups_ordered = []
     if group_col != "None" and df_clean is not None:
         with st.sidebar.expander("🎨 Custom Colors & Labels / Order", expanded=(selected_theme == "Custom")):
