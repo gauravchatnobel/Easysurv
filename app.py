@@ -2477,10 +2477,11 @@ if df is not None:
             > **EasySurv: An Interactive Platform for Survival Analysis (v2.0)**. Powered by Lifelines & Streamlit. Available at: [https://easysurv.streamlit.app](https://easysurv.streamlit.app)
             """)
 
-    else:
-        st.info("Please upload a CSV or Excel file to begin analysis.")
-        st.write("Demostration with Dummy Data:")
-        st.write("You can download the demo dataset `dummy_clinical_data.csv` from the repository:")
-        st.markdown("[📂 View Repository & Download Data](https://github.com/gauravchatnobel/Easysurv)")
-        st.caption("Right-click the link and open in a new tab to find the CSV file.")
+else:
+    st.info("Please upload a CSV or Excel file to begin analysis.")
+    st.write("Demostration with Dummy Data:")
+    st.write("You can download the demo dataset `dummy_clinical_data.csv` from the repository:")
+    st.markdown("[📂 View Repository & Download Data](https://github.com/gauravchatnobel/Easysurv)")
+    st.caption("Right-click the link and open in a new tab to find the CSV file.")
+
 
