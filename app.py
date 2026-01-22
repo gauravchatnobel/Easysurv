@@ -1051,6 +1051,27 @@ if df is not None:
                                 ref = st.selectbox(f"Ref for {col}", unique_levels, key=f"ref_{col}", index=0)
                                 categorical_refs[col] = ref
 
+                    # --- STATISTICAL GUARDRAILS (Pre-Analysis) ---
+                    st.divider()
+                    st.markdown("#### 🛡️ Statistical Guardrails")
+                    
+                    # 1. EPV Check
+                    epv_res = statistics.check_epv(mv_df, event_col, covariates)
+                    if epv_res['status'] == 'green':
+                         st.success(f"**Events Per Variable**: {epv_res['message']}")
+                    elif epv_res['status'] == 'yellow':
+                         st.warning(f"**Events Per Variable**: {epv_res['message']}")
+                    else:
+                         st.error(f"**Events Per Variable**: {epv_res['message']}")
+                         
+                    # 2. Collinearity Check
+                    high_corr = statistics.check_collinearity(mv_df, covariates)
+                    if high_corr:
+                        st.warning(f"⚠️ **Multicollinearity Detected**: High correlation (>0.7) between: " + 
+                                   ", ".join([f"{v1} & {v2} (r={val:.2f})" for v1, v2, val in high_corr]))
+                    else:
+                        st.success("✅ No multicollinearity detected among numeric covariates.")
+
                     run_analysis = st.button("Run Multivariable Analysis")
                     
                     if run_analysis:
@@ -1085,6 +1106,12 @@ if df is not None:
                             # Fit Model
                             cph_mv = CoxPHFitter()
                             cph_mv.fit(mv_data_encoded, duration_col=time_col, event_col=event_col)
+                            
+                            # 3. Separation Check (Post-Analysis)
+                            sep_warnings = statistics.check_separation(cph_mv)
+                            if sep_warnings:
+                                for w in sep_warnings:
+                                    st.error(f"🛑 **Critical Statistical Issue**: {w}")
                             
                             # Results Table
                             summary_mv = cph_mv.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']]

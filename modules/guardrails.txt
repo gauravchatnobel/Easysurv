@@ -1,0 +1,66 @@
+
+def check_epv(df, event_col, covariates):
+    """
+    Checks Events Per Variable (EPV) ratio.
+    Returns dict: {'status': 'green'/'yellow'/'red', 'message': str, 'value': float}
+    """
+    if not covariates: return {'status': 'green', 'message': 'No covariates selected.', 'value': float('inf')}
+    
+    n_events = df[event_col].sum()
+    n_vars = len(covariates) # Should ideally account for one-hot encoding columns, but this is a proxy
+    
+    epv = n_events / n_vars if n_vars > 0 else 0
+    
+    if epv >= 15:
+        return {'status': 'green', 'message': f"EPV = {epv:.1f} (Robust)", 'value': epv}
+    elif epv >= 10:
+        return {'status': 'yellow', 'message': f"EPV = {epv:.1f} (Caution: Risk of bias)", 'value': epv}
+    else:
+        return {'status': 'red', 'message': f"EPV = {epv:.1f} (High Risk: Overfitting likely)", 'value': epv}
+
+def check_collinearity(df, covariates, threshold=0.7):
+    """
+    Checks for multicollinearity among covariates.
+    Returns list of tuples: [('Var1', 'Var2', correlation)]
+    """
+    if len(covariates) < 2: return []
+    
+    # Select only numeric subset or encoded subset?
+    # For simplicity, we check only numeric correlations of the raw input
+    # Ideally should check encoded, but this is a "lightweight" sentinel.
+    
+    d_check = df[covariates].select_dtypes(include=[np.number])
+    if d_check.shape[1] < 2: return []
+    
+    corr_matrix = d_check.corr().abs()
+    upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+    
+    high_corr = []
+    for col in upper.columns:
+        for row in upper.index:
+             val = upper.loc[row, col]
+             if val > threshold:
+                 high_corr.append((row, col, float(val)))
+                 
+    return high_corr
+
+def check_separation(cph_model):
+    """
+    Checks a fitted paramaters for signs of complete separation.
+    Returns list of warnings.
+    """
+    warnings = []
+    
+    # 1. Check for infinite/huge coefficients (perfect predictor)
+    # Threshold |beta| > 10 is usually a sign (HR > 20,000 or < 0.00005)
+    high_coefs = cph_model.params_[abs(cph_model.params_) > 10].index.tolist()
+    if high_coefs:
+        warnings.append(f"Potential Separation: Extreme coefficients found for {', '.join(high_coefs)}.")
+        
+    # 2. Check for huge Standard Errors (SE > 10)
+    # This often happens when variance is infinite
+    high_se = cph_model.standard_errors_[cph_model.standard_errors_ > 5].index.tolist()
+    if high_se:
+        warnings.append(f"Unstable Estimates: Large Standard Errors found for {', '.join(high_se)}.")
+        
+    return warnings
