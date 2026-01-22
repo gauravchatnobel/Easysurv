@@ -2488,7 +2488,7 @@ if df is not None:
                           try:
                               res_list = []
                               
-                              def fit_get_c_bootstrap(vars_in, label, n_boot=20):
+                              def fit_get_c_bootstrap(vars_in, label, n_boot=50):
                                   if not vars_in: return None
                                   # Data Prep
                                   d = df_clean[[time_col, event_col] + vars_in].dropna()
@@ -2500,7 +2500,7 @@ if df is not None:
                                   cph.fit(d_enc, duration_col=time_col, event_col=event_col)
                                   c_est = cph.concordance_index_
                                   
-                                  # Bootstrap
+                                  # Bootstrap (Normal Approximation Method)
                                   boot_cs = []
                                   for _ in range(n_boot):
                                       # Resample
@@ -2510,17 +2510,19 @@ if df is not None:
                                           cph_b.fit(d_boot, duration_col=time_col, event_col=event_col)
                                           boot_cs.append(cph_b.concordance_index_)
                                       except:
-                                          pass # Skip failed fits
+                                          pass 
                                   
-                                  if boot_cs:
-                                      lower = np.percentile(boot_cs, 2.5)
-                                      upper = np.percentile(boot_cs, 97.5)
+                                  if len(boot_cs) > 5:
+                                      se = np.std(boot_cs)
+                                      # 95% CI = Estimate +/- 1.96 * SE
+                                      lower = max(0.0, c_est - 1.96 * se)
+                                      upper = min(1.0, c_est + 1.96 * se)
                                   else:
                                       lower, upper = c_est, c_est
                                       
                                   return {"Label": label, "C-Index": c_est, "Lower": lower, "Upper": upper, "Vars": len(vars_in)}
                               
-                              with st.spinner("Bootstrapping C-Indices (n=20)..."):
+                              with st.spinner("Bootstrapping C-Indices (n=50)..."):
                                   res_a = fit_get_c_bootstrap(vars_a, "Model A")
                                   res_b = fit_get_c_bootstrap(vars_b, "Model B")
                                   res_c = fit_get_c_bootstrap(vars_c, "Model C")
@@ -2550,10 +2552,10 @@ if df is not None:
                               c_vals = [r["C-Index"] for r in res_list]
                               labels = [r["Label"] for r in res_list]
                               
-                              # Errors for errorbar [down, up] relative to mean
+                              # Errors must be positive. Force absolute difference.
                               xerr = [
-                                  [r["C-Index"] - r["Lower"] for r in res_list],
-                                  [r["Upper"] - r["C-Index"] for r in res_list]
+                                  [abs(r["C-Index"] - r["Lower"]) for r in res_list],
+                                  [abs(r["Upper"] - r["C-Index"]) for r in res_list]
                               ]
                               
                               # Theme Color
@@ -2564,8 +2566,6 @@ if df is not None:
                               ax_p.errorbar(x=c_vals, y=y_pos, xerr=xerr, fmt='o', markersize=10, 
                                             linewidth=2, capsize=5, color=pt_color, ecolor=pt_color)
                               
-                              # Add fainter line connecting means if desired? Or just points.
-                              # User asked for "Ladder" but with forest style. Let's connect them faintly to show progression.
                               ax_p.plot(c_vals, y_pos, '-', color=pt_color, alpha=0.3)
 
                               ax_p.grid(True, axis='x', linestyle='--', alpha=0.5)
@@ -2575,14 +2575,18 @@ if df is not None:
                               ax_p.set_xlabel("Harrell's Concordance Index (95% CI)")
                               ax_p.set_title("Discriminative Power Ladder (Forest Plot)", loc='left')
                               
-                              # Add labels above points
+                              # Add labels
                               for y, c in zip(y_pos, c_vals):
                                   ax_p.text(c, y + 0.15, f"{c:.3f}", ha='center', va='bottom', fontsize=10, color='black')
                               
                               # Adjust Limits
                               lows = [r["Lower"] for r in res_list]
                               highs = [r["Upper"] for r in res_list]
-                              ax_p.set_xlim(max(0.4, min(lows) - 0.05), min(1.0, max(highs) + 0.05))
+                              # Handle case where lows/highs might be empty or problematic
+                              if lows and highs:
+                                  xmin = max(0.4, min(lows) - 0.05)
+                                  xmax = min(1.0, max(highs) + 0.05)
+                                  ax_p.set_xlim(xmin, xmax)
                               
                               st.pyplot(fig_p)
                               
