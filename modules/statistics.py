@@ -171,12 +171,42 @@ def get_correlation_matrix(df, covariates):
     """
     if len(covariates) < 2: return None
     try:
-         df_check = pd.get_dummies(df[covariates], drop_first=True).dropna()
+         # dtype=int ensures we get 0/1 instead of True/False
+         df_check = pd.get_dummies(df[covariates], drop_first=True, dtype=int).dropna()
+         
+         # Select numeric (int/float)
          df_check = df_check.select_dtypes(include=[np.number])
+         
          if df_check.shape[1] < 2: return None
          return df_check.corr()
-    except:
+    except Exception as e:
          return None
+
+def calculate_vif(df, covariates):
+    """
+    Calculates Variance Inflation Factor (VIF) for covariates.
+    Uses the diagonal of the inverse correlation matrix.
+    Returns DataFrame: ['Feature', 'VIF']
+    """
+    if len(covariates) < 2: return None
+    try:
+        corr_matrix = get_correlation_matrix(df, covariates)
+        if corr_matrix is None: return None
+        
+        # VIF is diagonal of inverse correlation matrix
+        try:
+            inv_corr = np.linalg.inv(corr_matrix.values)
+        except np.linalg.LinAlgError:
+            return None # Singular matrix (perfect collinearity)
+            
+        vif_values = np.diag(inv_corr)
+        
+        return pd.DataFrame({
+            "Feature": corr_matrix.columns,
+            "VIF": vif_values
+        }).sort_values(by="VIF", ascending=False)
+    except:
+        return None
 
 def check_collinearity(df, covariates, threshold=0.7):
     """
