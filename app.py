@@ -1077,7 +1077,7 @@ if df is not None:
                         st.warning(f"⚠️ **Multicollinearity Detected**: High correlation (>0.7) between: " + 
                                    ", ".join([f"{v1} & {v2} (r={val:.2f})" for v1, v2, val in high_corr]))
                     else:
-                        st.success("✅ No multicollinearity detected among numeric covariates.")
+                        st.success("✅ No multicollinearity detected (Checked Numeric & Categorical).")
 
                     st.markdown("#### 🔧 Advanced Options")
                     use_penalizer = st.checkbox("Enable Penalized Cox (Ridge Regression)", help="Use L2 penalty to handle small sample sizes (low EPV), collinearity, or separation. This biases coefficients towards 0 but reduces variance.")
