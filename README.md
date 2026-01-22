@@ -83,5 +83,14 @@ Columns expected:
 *   `b`: Binary status (1=Event, 0=Censored).
 *   Clinical variables (Age, Gender, etc.).
 
+## 🏗️ Project Structure
+The codebase uses a modular architecture for maintainability:
+*   `app.py`: Main Streamlit application (UI Layout).
+*   `modules/`:
+    *   `statistics.py`: Core mathematical functions (Cox, Kaplan-Meier, etc.).
+    *   `plotting.py`: Visualization logic.
+    *   `narrator.py`: AI Text Generation templates.
+    *   `utils.py`: Helper functions, constants, and themes.
+
 ## 📄 License
 [MIT](LICENSE)
