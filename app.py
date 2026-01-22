@@ -21,6 +21,13 @@ except ImportError:
     # Fallback to relative import (if running from inside survival_analysis/)
     from modules import utils, statistics, plotting, narrator
 
+# Force reload to pick up hot-patches (guardrails)
+import importlib
+try:
+    importlib.reload(statistics)
+except:
+    pass
+
 # Wrappers to maintain compatibility if functions were called directly
 compute_fine_gray_weights = statistics.compute_fine_gray_weights
 add_at_risk_counts = plotting.add_at_risk_counts
@@ -1072,6 +1079,12 @@ if df is not None:
                     else:
                         st.success("✅ No multicollinearity detected among numeric covariates.")
 
+                    st.markdown("#### 🔧 Advanced Options")
+                    use_penalizer = st.checkbox("Enable Penalized Cox (Ridge Regression)", help="Use L2 penalty to handle small sample sizes (low EPV), collinearity, or separation. This biases coefficients towards 0 but reduces variance.")
+                    penalizer_value = 0.0
+                    if use_penalizer:
+                        penalizer_value = st.slider("Penalizer Coefficient (Lambda)", 0.01, 1.0, 0.1, step=0.01, help="Higher values shrink coefficients more aggressively.")
+
                     run_analysis = st.button("Run Multivariable Analysis")
                     
                     if run_analysis:
@@ -1104,7 +1117,7 @@ if df is not None:
                             mv_data_encoded.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in mv_data_encoded.columns]
                             
                             # Fit Model
-                            cph_mv = CoxPHFitter()
+                            cph_mv = CoxPHFitter(penalizer=penalizer_value)
                             cph_mv.fit(mv_data_encoded, duration_col=time_col, event_col=event_col)
                             
                             # 3. Separation Check (Post-Analysis)
