@@ -2290,39 +2290,37 @@ if df is not None:
              # Default to numeric columns
              corr_cols = st.multiselect("Select Columns to Correlate", all_cols_corr, default=numeric_cols)
              
-             if len(corr_cols) < 2:
-                 st.warning("Please select at least 2 columns.")
-             else:
-                 # Correlation Settings
-                 corr_method = st.selectbox("Correlation Method", ["pearson", "spearman", "kendall"])
+            if len(corr_cols) < 2:
+                st.warning("Please select at least 2 columns.")
+            else:
+                # Correlation Settings
+                corr_method = st.selectbox("Correlation Method", ["pearson", "spearman", "kendall"])
                  
-                 # Prepare Data
-                 corr_df = df_clean[corr_cols].copy()
+                # Prepare Data
+                corr_df = df_clean[corr_cols].copy()
                  
-                 # Encode Categoricals if selected
-                 # Identify non-numeric
-                 non_num_cols = [c for c in corr_cols if c not in numeric_cols]
-                 if non_num_cols:
-                     st.info(f"Encoding categorical columns: {', '.join(non_num_cols)}")
-                     # Simple Factorization (Label Encoding) for correlation
-                     # Or Get Dummies? For heatmap, label encoding creates a single 'axis' which is usually what user wants for "Is Group A correlated with B"
-                     # Get dummies explodes the matrix too much.
-                     for c in non_num_cols:
-                         corr_df[c] = pd.factorize(corr_df[c])[0]
+                # Encode Categoricals if selected
+                # Identify non-numeric
+                non_num_cols = [c for c in corr_cols if c not in numeric_cols]
+                if non_num_cols:
+                    st.info(f"Encoding categorical columns: {', '.join(non_num_cols)}")
+                    # Simple Factorization (Label Encoding) for correlation
+                    for c in non_num_cols:
+                        corr_df[c] = pd.factorize(corr_df[c])[0]
                  
-                 # Compute Matrix
-                 corr_matrix = corr_df.corr(method=corr_method)
+                # Compute Matrix
+                corr_matrix = corr_df.corr(method=corr_method)
                  
-                  # Plot
-                  fig_corr, ax_corr = plt.subplots(figsize=(10, 8))
-                  
-                  if sns is not None:
-                      sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm", center=0, ax=ax_corr, square=True)
-                      st.pyplot(fig_corr)
-                  else:
-                      st.error("Error: The 'seaborn' library could not be loaded.")
-                      st.warning("The system attempted to auto-install it but failed. Please try restarting the app or installing 'seaborn' manually in your environment.")
-                      st.code("pip install seaborn")
+                # Plot
+                fig_corr, ax_corr = plt.subplots(figsize=(10, 8))
+                 
+                if sns is not None:
+                    sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm", center=0, ax=ax_corr, square=True)
+                    st.pyplot(fig_corr)
+                else:
+                    st.error("Error: The 'seaborn' library could not be loaded.")
+                    st.warning("The system attempted to auto-install it but failed. Please try restarting the app or installing 'seaborn' manually in your environment.")
+                    st.code("pip install seaborn")
 
         with tab7:
             st.subheader("🎯 Diagnostic Accuracy & Prognostic Concordance")
