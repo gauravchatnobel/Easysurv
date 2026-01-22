@@ -2448,10 +2448,24 @@ if df is not None:
                  except:
                      return "Not Found"
              
-             libs = ["lifelines", "pandas", "numpy", "scipy", "matplotlib", "streamlit"]
-             vers = {lib: get_version(lib) for lib in libs}
+             lib_info = [
+                 ("lifelines", "Core Survival Analysis (Kaplan-Meier, Cox PH, Fine-Gray)"),
+                 ("pandas", "Data Management (Upload, Cleanup, Filtering)"),
+                 ("numpy", "Numerical Computing (Confidence Intervals, Bootstrapping)"),
+                 ("scipy", "Advanced Statistics (P-value calculations, distributions)"),
+                 ("matplotlib", "Visualization Engine (High-Res Plots & Forests)"),
+                 ("streamlit", "Web Interface & Interactive Widgets")
+             ]
+
+             data = []
+             for lib, desc in lib_info:
+                 data.append({
+                     "Library": lib,
+                     "Version": get_version(lib),
+                     "Role in EasySurv": desc
+                 })
              
-             ver_df = pd.DataFrame(list(vers.items()), columns=["Library", "Version"])
+             ver_df = pd.DataFrame(data)
              st.table(ver_df.style.highlight_null(color="red"))
              
              st.divider()
