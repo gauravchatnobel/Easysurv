@@ -1079,6 +1079,17 @@ if df is not None:
                     else:
                         st.success("✅ No multicollinearity detected (Checked Numeric & Categorical).")
 
+                    # Visual Reassurance (Heatmap)
+                    with st.expander("🔍 Show Correlation Matrix"):
+                         corr_mat = statistics.get_correlation_matrix(mv_df, covariates)
+                         if corr_mat is not None:
+                             fig_corr, ax_corr = plt.subplots(figsize=(8, 6))
+                             sns.heatmap(corr_mat, annot=True, fmt=".2f", cmap="coolwarm", center=0, ax=ax_corr, cbar=True)
+                             ax_corr.set_title("Correlation of Model Parameters (One-Hot Encoded)")
+                             st.pyplot(fig_corr)
+                         else:
+                             st.info("Not enough numeric variation to plot correlations.")
+
                     st.markdown("#### 🔧 Advanced Options")
                     use_penalizer = st.checkbox("Enable Penalized Cox (Ridge Regression)", help="Use L2 penalty to handle small sample sizes (low EPV), collinearity, or separation. This biases coefficients towards 0 but reduces variance.")
                     penalizer_value = 0.0
