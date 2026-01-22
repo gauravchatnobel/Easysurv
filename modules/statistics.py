@@ -167,29 +167,37 @@ def check_epv(df, event_col, covariates):
 
 def check_collinearity(df, covariates, threshold=0.7):
     """
-    Checks for multicollinearity among covariates.
+    Checks for multicollinearity using One-Hot Encoded correlations.
+    Handles Numeric AND Categorical variables.
     Returns list of tuples: [('Var1', 'Var2', correlation)]
     """
     if len(covariates) < 2: return []
     
-    # Select only numeric subset or encoded subset?
-    # For simplicity, we check only numeric correlations of the raw input
-    # Ideally should check encoded, but this is a "lightweight" sentinel.
-    
-    d_check = df[covariates].select_dtypes(include=[np.number])
-    if d_check.shape[1] < 2: return []
-    
-    corr_matrix = d_check.corr().abs()
-    upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
-    
-    high_corr = []
-    for col in upper.columns:
-        for row in upper.index:
-             val = upper.loc[row, col]
-             if val > threshold:
-                 high_corr.append((row, col, float(val)))
-                 
-    return high_corr
+    try:
+        # Create Design Matrix (One-Hot Encoded)
+        # We use drop_first=True to simulate the regression environment
+        df_check = pd.get_dummies(df[covariates], drop_first=True).dropna()
+        
+        # Ensure purely numeric (get_dummies should assume this, but safety first)
+        df_check = df_check.select_dtypes(include=[np.number])
+        
+        if df_check.shape[1] < 2: return []
+        
+        corr_matrix = df_check.corr().abs()
+        
+        # Upper triangle only
+        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+        
+        high_corr = []
+        for col in upper.columns:
+            for row in upper.index:
+                 val = upper.loc[row, col]
+                 if val > threshold:
+                     high_corr.append((row, col, float(val)))
+                     
+        return high_corr
+    except:
+        return []
 
 def check_separation(cph_model):
     """
