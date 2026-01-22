@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -13,149 +12,13 @@ try:
 except ImportError:
     sns = None
 
-@st.cache_data
-def compute_fine_gray_weights(df, time_col, event_col, event_of_interest=1):
-    """
-    Prepares a dataset for Fine-Gray regression using Inverse Probability of Censoring Weighting (IPCW).
-    Ref: Fine JP, Gray RJ. A proportional hazards model for the subdistribution of a competing risk. 
-    J Am Stat Assoc. 1999;94(446):496–509.
-    """
-    df = df.copy()
-    df = df.sort_values(time_col)
-    
-    # 1. Estimate Censoring Distribution G(t)
-    censoring_df = df.copy()
-    censoring_df['cens_event'] = (censoring_df[event_col] == 0).astype(int)
-    
-    kmf_c = KaplanMeierFitter()
-    kmf_c.fit(censoring_df[time_col], censoring_df['cens_event'])
-    
-    def get_G(t):
-        probs = kmf_c.survival_function_at_times(t).values
-        # Ensure we return a scalar float
-        if np.isscalar(probs):
-             return float(probs)
-        else:
-             return float(probs.item()) if probs.size == 1 else float(probs[0])
+# --- MODULE IMPORTS ---
+from survival_analysis.modules import utils, statistics, plotting, narrator
 
-    # 2. Identify Event Times of Interest
-    event_times = df[df[event_col] == event_of_interest][time_col].unique()
-    event_times = np.sort(event_times)
-    
-    # 3. Build Expanded Dataset
-    new_rows = []
-    if 'id' not in df.columns:
-        df['id'] = range(len(df))
-    
-    for _, row in df.iterrows():
-        t = row[time_col]
-        e = row[event_col]
-        pid = row['id']
-        
-        # Case A: Event or Censored - contribute normally
-        if e == event_of_interest or e == 0:
-            new_rows.append({
-                'id': pid, 'start': 0, 'stop': t,
-                'status': 1 if e == event_of_interest else 0,
-                'weight': 1.0,
-                **{c: row[c] for c in df.columns if c not in [time_col, event_col, 'id']}
-            })
-            
-        # Case B: Competing Event - remain in risk set with decaying weights
-        elif e != event_of_interest and e > 0:
-            # Interval [0, Ti]
-            new_rows.append({
-                'id': pid, 'start': 0, 'stop': t,
-                'status': 0, 'weight': 1.0,
-                **{c: row[c] for c in df.columns if c not in [time_col, event_col, 'id']}
-            })
-            
-            # Extension [Ti, tk]
-            relevant_times = event_times[event_times > t]
-            if len(relevant_times) > 0:
-                G_Ti = max(get_G(t), 1e-5)
-                current_start = t
-                for rt in relevant_times:
-                    weight = get_G(rt) / G_Ti
-                    new_rows.append({
-                        'id': pid, 'start': current_start, 'stop': rt,
-                        'status': 0, 'weight': weight,
-                        **{c: row[c] for c in df.columns if c not in [time_col, event_col, 'id']}
-                    })
-                    current_start = rt
-                    if weight < 1e-4: break
+# Wrappers to maintain compatibility if functions were called directly
+compute_fine_gray_weights = statistics.compute_fine_gray_weights
+add_at_risk_counts = plotting.add_at_risk_counts
 
-    return pd.DataFrame(new_rows)
-
-def add_at_risk_counts(fitters, ax=None, y_shift=-0.25, colors=None, labels=None, fontsize=10):
-    """
-    Add a table of at-risk counts below the plot.
-    Re-implemented using ax.text for perfect alignment with X-axis ticks.
-    """
-    if ax is None:
-        ax = plt.gca()
-    
-    # Get ticks from the plot
-    ticks = ax.get_xticks()
-    # Filter ticks that make sense AND are within the current view limits
-    view_min, view_max = ax.get_xlim()
-    valid_ticks = [t for t in ticks if view_min <= t <= view_max]
-    
-    # Configuration for layout
-    row_height = 0.05
-    start_y = y_shift
-    
-    # Use a blended transform: X is data coords (so it matches ticks), Y is axes coords (so it stays absolute relative to plot bottom)
-    # We actually need two transforms: 
-    # 1. For data numbers: x=data, y=axes
-    # 2. For row labels: x=axes (negative), y=axes
-    import matplotlib.transforms as mtransforms
-    trans_data_axes = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
-    
-    for i, fitter in enumerate(fitters):
-        y_pos = start_y - (i * row_height)
-        
-        # 1. Plot Row Label (Left of Y-axis)
-        # Use provided custom label if available, else fitter label
-        lbl = labels[i] if labels and i < len(labels) else fitter._label
-        
-        # Color resolution
-        color = 'black'
-        if colors and i < len(colors):
-            color = colors[i]
-            
-        ax.text(-0.03, y_pos, lbl, transform=ax.transAxes, 
-                ha='right', va='center', weight='bold', color=color, fontsize=fontsize)
-        
-        # 2. Plot Counts at each tick
-        for t in valid_ticks:
-            # Calculate at risk
-            if t in fitter.event_table.index:
-                val = fitter.event_table.loc[t, 'at_risk']
-            else:
-                sliced = fitter.event_table.loc[:t]
-                if sliced.empty:
-                    val = fitter.event_table['at_risk'].iloc[0]
-                else:
-                    last_row = sliced.iloc[-1]
-                    val = last_row['at_risk'] - last_row['removed']
-            
-            if isinstance(val, (pd.Series, np.ndarray, list)):
-                try:
-                    val = val.item()
-                except:
-                    pass
-            val = int(val)
-            
-            # Plot the number
-            ax.text(t, y_pos, str(val), transform=trans_data_axes, 
-                    ha='center', va='center', color=color, fontsize=fontsize, weight='bold')
-    
-    # Adjust layout to make room for the table and labels
-    # Table height approx = row_height * len(fitters)
-    # Plus some initial offset absolute value
-    # But usually plt.subplots_adjust or bbox_inches='tight' in savefig handles this.
-    # We will assume the user might need to adjust plot margins manually if labels are very long.
 
 
 
@@ -169,20 +32,12 @@ st.sidebar.header("Data Upload & Configuration")
 st.sidebar.warning("⚠️ **Security Note**: Do not upload identifiable patient data / PHI. This tool runs locally/in-memory, but standard data privacy hygiene applies.")
 uploaded_file = st.sidebar.file_uploader("Upload Clinical Data (CSV/Excel)", type=["csv", "xlsx"])
 
-@st.cache_data
-def load_data(file):
-    try:
-        if file.name.endswith('.csv'):
-            return pd.read_csv(file)
-        else:
-            return pd.read_excel(file)
-    except Exception as e:
-        return None
+
 
 df = None
 
 if uploaded_file:
-    df = load_data(uploaded_file)
+    df = utils.load_data(uploaded_file)
 else:
     # --- LANDING PAGE ---
     st.markdown("""
@@ -506,58 +361,9 @@ if df is not None:
     # Theme Selection
     st.sidebar.subheader("Aesthetics & Themes")
     
-    # Define Palettes
-    # Define Palettes (Source: ggsci)
-    journal_themes = {
-        "Nature (NPG)": ["#E64B35", "#4DBBD5", "#00A087", "#3C5488", "#F39B7F", "#8491B4", "#91D1C2", "#DC0000", "#7E6148", "#B09C85"],
-        "Science (AAAS)": ["#3B4992", "#EE0000", "#008B45", "#631879", "#008280", "#BB0021", "#5F559B", "#A20056", "#808180", "#1B1919"],
-        "JCO": ["#0073C2", "#EFC000", "#868686", "#CD534C", "#7AA6DC", "#003C67", "#8F7700", "#3B3B3B", "#A73030", "#4A6990"],
-        "Lancet": ["#00468B", "#ED0000", "#42B540", "#0099B4", "#925E9F", "#FDAF91", "#AD002A", "#ADB6B6", "#1B1919"],
-        "NEJM": ["#BC3C29", "#0072B5", "#E18727", "#20854E", "#7876B1", "#6F99AD", "#FFDC91", "#EE4C97"],
-        "Blood": ["#AA0000", "#E00000", "#8B0000", "#FF0000", "#B22222", "#FF69B4", "#800000"], 
-        "Leukemia": ["#377EB8", "#E41A1C", "#4DAF4A", "#984EA3", "#FF7F00", "#FFFF33", "#A65628", "#F781BF"], 
-        "Jama": ["#374E55", "#DF8F44", "#00A1D5", "#B24745", "#79AF97", "#6A6599", "#80796B"],
-    }
-    
-    fun_themes = {
-        "Cosmic Nihilism": ["#A6EEE6", "#F0F035", "#44281D", "#E4A71B", "#8BCF21", "#FBFBFB"],
-        "Hollywood Equine": ["#2C3E50", "#D35400", "#2980B9", "#C0392B", "#bdc3c7", "#F39C12"],
-        "Prehistoric One": ["#5D4037", "#D84315", "#388E3C", "#FBC02D", "#455A64", "#212121"],
-        "Alien Flora": ["#F4EBD0", "#D66853", "#3C505D", "#7D9D9C", "#212D40", "#A8C686"],
-        "Neon Acid": ["#FF00FF", "#00FF00", "#0000FF", "#FFFF00", "#00FFFF", "#FF0000"],
-        "Cyber Grid": ["#2F5061", "#4291C7", "#D57FBE", "#E45D5C", "#FFAE91", "#F9DB57", "#FFFFD0"],
-        "Dream Layers": ["#EFAC3D", "#842650", "#69932B", "#5F2D7B", "#5C5D5E"],
-        "Deep Space": ["#0B3D91", "#F2C45A", "#465362", "#A2BCE0", "#1E1E24"],
-        "Office Separation": ["#F0F6F7", "#89AEC8", "#7B6727", "#4E452A", "#002C55"],
-        "Sudden Departure": ["#F2A78C", "#F2DCBB", "#B4B4BB", "#77708C", "#C997A2"],
-        "Family Empire": ["#1C2541", "#3A506B", "#5BC0BE", "#6FFFE9", "#0B132B"],
-        "Practice Run": ["#e0e1dd", "#778da9", "#415a77", "#1b263b", "#0d1b2a"],
-        "Exclusion Zone": ["#D8FF00", "#E0FF33", "#333333", "#555555", "#D65050"],
-        "Seven Kingdoms": ["#808080", "#FFD700", "#B22222", "#000000", "#228B22"],
-        "Indian Train Journey": ["#FF0000", "#00A08A", "#F2AD00", "#F98400", "#5BBCD6"],
-        "Grand Hotel": ["#F1BB7B", "#FD6467", "#5B1A18", "#D67236"],
-        "Gotham Night": ["#0C2340", "#282D3C", "#808080", "#000000", "#710193", "#32CD32", "#B3B3B3"],
-        "Coal Town Saga": ["#212121", "#B71C1C", "#FFC107", "#5D4037", "#00C853", "#E65100"],
-        "Tragedy of a King": ["#FFD700", "#DC143C", "#0000CD", "#DAA520", "#000000", "#FFFFFF"],
-        "Monochrome on the Road": ["#1A1A1A", "#4D4D4D", "#808080", "#B3B3B3", "#E6E6E6", "#F0EAD6"], 
-        "Anime Fantasy": ["#8CBF88", "#E53935", "#607D8B", "#FFA500", "#D2E3EF", "#FF6347"],
-
-        # New Cult Classics
-        "Manic Urbanism": ["#E91E63", "#D32F2F", "#607D8B", "#455A64", "#212121"], # Psychological Blur (Satoshi Kon)
-        "Nameless Terror": ["#5D4037", "#3E2723", "#B71C1C", "#263238", "#ECEFF1"], # The Monster (Urasawa)
-        "The Great Epic": ["#FF9800", "#FFC107", "#D32F2F", "#00BCD4", "#795548"], # Ancient War (Mahabharata)
-        "Wizard of Loneliness": ["#E0E0E0", "#90A4AE", "#546E7A", "#A1887F", "#B0BEC5"], # Corporate Parody (Nathan) 
-        
-        # Literary Themes
-        "Saint Petersburg 1866": ["#3E2723", "#BF360C", "#F9A825", "#424242", "#ECEFF1"], # Crime & Punishment: Squalor, blood, feverish yellow, stone grey, pale sky
-        "The Law Clerk": ["#263238", "#546E7A", "#78909C", "#D7CCC8", "#8D6E63", "#212121"], # The Trial: Bureaucracy, paper, ink, oppressive grey
-        "Stream of Life": ["#D81B60", "#F48FB1", "#4A148C", "#FFF176", "#00BCD4"], # Agua Viva/G.H.: Visceral pink, organic purple, blinding yellow, fluid blue
-        "Cosmic Ocean": ["#311B92", "#7C4DFF", "#00E676", "#3E2723", "#FF6F00"], # Solaris/Stalker: Deep space purple, irradiated green, rust, amber
-        "The Playwright": ["#607D8B", "#8D6E63", "#CFD8DC", "#A1887F", "#546E7A"], # Chekhov: Muted, melancholic, realistic earth tones
-    }
-    
-    all_themes = {**journal_themes, **fun_themes}
-    theme_names = ["Default"] + list(journal_themes.keys()) + list(fun_themes.keys()) + ["Custom"]
+    # Use themes from utils
+    all_themes = utils.all_themes
+    theme_names = ["Default"] + list(utils.journal_themes.keys()) + list(utils.fun_themes.keys()) + ["Custom"]
     
     selected_theme = st.sidebar.selectbox("Choose Theme", theme_names)
     
@@ -2346,17 +2152,7 @@ if df is not None:
          with tab7:
              st.subheader("🎯 Diagnostic Accuracy & Prognostic Concordance")
              
-             def calculate_wilson_ci(k, n, alpha=0.95):
-                 """Returns (lower, upper) tuple for Wilson Score Interval"""
-                 if n == 0: return 0.0, 0.0
-                 p = k / n
-                 z = norm.ppf(1 - (1 - alpha) / 2)
-                 denominator = 1 + z**2/n
-                 centre_adjusted_probability = p + z**2 / (2*n)
-                 adjusted_standard_deviation = np.sqrt((p*(1 - p) + z**2 / (4*n)) / n)
-                 lower = (centre_adjusted_probability - z*adjusted_standard_deviation) / denominator
-                 upper = (centre_adjusted_probability + z*adjusted_standard_deviation) / denominator
-                 return lower, upper
+
 
              diag_mode = st.radio("Select Analysis Type:", ["Diagnostic Test Evaluation (2x2 Matrix)", "Prognostic Model Comparison (C-Index)"])
              
@@ -2407,7 +2203,7 @@ if df is not None:
                          # Metrics & CIs
                          def get_metric_ci(num, den):
                              val = num / den if den > 0 else 0
-                             low, high = calculate_wilson_ci(num, den)
+                             low, high = statistics.calculate_wilson_ci(num, den)
                              return val, low, high
 
                          sens, sens_l, sens_h = get_metric_ci(tp, tp + fn)
@@ -2496,18 +2292,7 @@ if df is not None:
                      st.divider()
                      st.subheader("🤖 AI Diagnostic Narrator")
                      if st.button("Generate Diagnostic Report"):
-                           narrative = "**Methods**\n"
-                           narrative += f"Diagnostic performance was evaluated using a 2x2 contingency table with **{res['ref_var']}** as the reference standard (N={res['n_total']}). "
-                           narrative += "Sensitivity, Specificity, Positive Predictive Value (PPV), and Negative Predictive Value (NPV) were calculated. "
-                           narrative += "95% Confidence Intervals (CIs) were estimated using the Wilson Score method. "
-                           narrative += "Association between the test and reference was assessed using the Pearson Chi-Square test.\n\n"
-                           
-                           narrative += "**Results**\n"
-                           narrative += f"Evaluating **{res['test_var']}** against **{res['ref_var']}**:\n"
-                           narrative += f"- **Sensitivity**: {res['sens']:.1%} (95% CI {res['sens_l']:.1%}-{res['sens_h']:.1%}).\n"
-                           narrative += f"- **Specificity**: {res['spec']:.1%} (95% CI {res['spec_l']:.1%}-{res['spec_h']:.1%}).\n"
-                           narrative += f"- **Predictive Values**: PPV {res['ppv']:.1%} ({res['ppv_l']:.1%}-{res['ppv_h']:.1%}), NPV {res['npv']:.1%} ({res['npv_l']:.1%}-{res['npv_h']:.1%}).\n"
-                           narrative += f"- **Statistical Association**: Chi-square p={res['p_val']:.4f}."
+                           narrative = narrator.generate_diagnostic_narrative(res)
                            st.success("Report Generated:")
                            st.text_area("Copy Text:", narrative, height=150)
              
@@ -2534,44 +2319,12 @@ if df is not None:
                           try:
                               res_list = []
                               
-                              def fit_get_c_bootstrap(vars_in, label, n_boot=50):
-                                  if not vars_in: return None
-                                  # Data Prep
-                                  d = df_clean[[time_col, event_col] + vars_in].dropna()
-                                  d_enc = pd.get_dummies(d, drop_first=True)
-                                  d_enc.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in d_enc.columns]
-                                  
-                                  # Fit Main
-                                  cph = CoxPHFitter()
-                                  cph.fit(d_enc, duration_col=time_col, event_col=event_col)
-                                  c_est = cph.concordance_index_
-                                  
-                                  # Bootstrap (Normal Approximation Method)
-                                  boot_cs = []
-                                  for _ in range(n_boot):
-                                      # Resample
-                                      d_boot = d_enc.sample(n=len(d_enc), replace=True)
-                                      try:
-                                          cph_b = CoxPHFitter()
-                                          cph_b.fit(d_boot, duration_col=time_col, event_col=event_col)
-                                          boot_cs.append(cph_b.concordance_index_)
-                                      except:
-                                          pass 
-                                  
-                                  if len(boot_cs) > 5:
-                                      se = np.std(boot_cs)
-                                      # 95% CI = Estimate +/- 1.96 * SE
-                                      lower = max(0.0, c_est - 1.96 * se)
-                                      upper = min(1.0, c_est + 1.96 * se)
-                                  else:
-                                      lower, upper = c_est, c_est
-                                      
-                                  return {"Label": label, "C-Index": c_est, "Lower": lower, "Upper": upper, "Vars": len(vars_in)}
+
                               
                               with st.spinner("Bootstrapping C-Indices (n=50)..."):
-                                  res_a = fit_get_c_bootstrap(vars_a, "Model A")
-                                  res_b = fit_get_c_bootstrap(vars_b, "Model B")
-                                  res_c = fit_get_c_bootstrap(vars_c, "Model C")
+                                  res_a = statistics.get_c_index_bootstrap(df_clean, time_col, event_col, vars_a, "Model A")
+                                  res_b = statistics.get_c_index_bootstrap(df_clean, time_col, event_col, vars_b, "Model B")
+                                  res_c = statistics.get_c_index_bootstrap(df_clean, time_col, event_col, vars_c, "Model C")
                               
                               res_list = [r for r in [res_a, res_b, res_c] if r is not None]
                               
@@ -2670,23 +2423,7 @@ if df is not None:
                       st.divider()
                       st.subheader("🤖 AI Prognostic Narrator")
                       if st.button("Generate Prognostic Report"):
-                            narrative = "**Methods**\n"
-                            narrative += "Discriminative power was assessed using Harrell's Concordance Index (C-Index) derived from Cox Proportional Hazards models. "
-                            narrative += "To estimate uncertainty, 95% Confidence Intervals (CIs) for the C-Index were calculated using a bootstrap approach with 50 resamples (Normal Approximation).\n\n"
-                            
-                            narrative += "**Results**\n"
-                            narrative += f"We compared {len(res_list)} proportional hazards models to evaluate incremental discriminative power.\n"
-                            
-                            # Find Best Model
-                            best_mod = max(res_list, key=lambda x: x["C-Index"])
-                            narrative += f"- The best performing model was **{best_mod['Label']}** with a C-Index of **{best_mod['C-Index']:.3f}** (95% CI {best_mod['Lower']:.3f}-{best_mod['Upper']:.3f}).\n"
-                            
-                            if r_a and r_b:
-                                narrative += f"- **Model B vs A**: Adding the selected covariates improved discrimination by **{delta_ab:+.3f} points**.\n"
-                            
-                            if r_b and r_c:
-                                narrative += f"- **Model C vs B**: Further addition of covariates changed discrimination by **{delta_bc:+.3f} points**.\n"
-                                
+                            narrative = narrator.generate_prognostic_narrative(res_list)
                             st.success("Report Generated:")
                             st.text_area("Copy Text:", narrative, height=150)
                  

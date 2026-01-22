@@ -1,0 +1,131 @@
+import pandas as pd
+import numpy as np
+from lifelines import KaplanMeierFitter, CoxPHFitter
+from scipy.stats import norm
+
+def compute_fine_gray_weights(df, time_col, event_col, event_of_interest=1):
+    """
+    Prepares a dataset for Fine-Gray regression using Inverse Probability of Censoring Weighting (IPCW).
+    Ref: Fine JP, Gray RJ. A proportional hazards model for the subdistribution of a competing risk. 
+    J Am Stat Assoc. 1999;94(446):496–509.
+    """
+    df = df.copy()
+    df = df.sort_values(time_col)
+    
+    # 1. Estimate Censoring Distribution G(t)
+    censoring_df = df.copy()
+    censoring_df['cens_event'] = (censoring_df[event_col] == 0).astype(int)
+    
+    kmf_c = KaplanMeierFitter()
+    kmf_c.fit(censoring_df[time_col], censoring_df['cens_event'])
+    
+    def get_G(t):
+        probs = kmf_c.survival_function_at_times(t).values
+        # Ensure we return a scalar float
+        if np.isscalar(probs):
+             return float(probs)
+        else:
+             return float(probs.item()) if probs.size == 1 else float(probs[0])
+
+    # 2. Identify Event Times of Interest
+    event_times = df[df[event_col] == event_of_interest][time_col].unique()
+    event_times = np.sort(event_times)
+    
+    # 3. Build Expanded Dataset
+    new_rows = []
+    if 'id' not in df.columns:
+        df['id'] = range(len(df))
+    
+    for _, row in df.iterrows():
+        t = row[time_col]
+        e = row[event_col]
+        pid = row['id']
+        
+        # Case A: Event or Censored - contribute normally
+        if e == event_of_interest or e == 0:
+            new_rows.append({
+                'id': pid, 'start': 0, 'stop': t,
+                'status': 1 if e == event_of_interest else 0,
+                'weight': 1.0,
+                **{c: row[c] for c in df.columns if c not in [time_col, event_col, 'id']}
+            })
+            
+        # Case B: Competing Event - remain in risk set with decaying weights
+        elif e != event_of_interest and e > 0:
+            # Interval [0, Ti]
+            new_rows.append({
+                'id': pid, 'start': 0, 'stop': t,
+                'status': 0, 'weight': 1.0,
+                **{c: row[c] for c in df.columns if c not in [time_col, event_col, 'id']}
+            })
+            
+            # Extension [Ti, tk]
+            relevant_times = event_times[event_times > t]
+            if len(relevant_times) > 0:
+                G_Ti = max(get_G(t), 1e-5)
+                current_start = t
+                for rt in relevant_times:
+                    weight = get_G(rt) / G_Ti
+                    new_rows.append({
+                        'id': pid, 'start': current_start, 'stop': rt,
+                        'status': 0, 'weight': weight,
+                        **{c: row[c] for c in df.columns if c not in [time_col, event_col, 'id']}
+                    })
+                    current_start = rt
+                    if weight < 1e-4: break
+
+    return pd.DataFrame(new_rows)
+
+def calculate_wilson_ci(k, n, alpha=0.95):
+    """Returns (lower, upper) tuple for Wilson Score Interval"""
+    if n == 0: return 0.0, 0.0
+    p = k / n
+    z = norm.ppf(1 - (1 - alpha) / 2)
+    denominator = 1 + z**2/n
+    centre_adjusted_probability = p + z**2 / (2*n)
+    adjusted_standard_deviation = np.sqrt((p*(1 - p) + z**2 / (4*n)) / n)
+    lower = (centre_adjusted_probability - z*adjusted_standard_deviation) / denominator
+    upper = (centre_adjusted_probability + z*adjusted_standard_deviation) / denominator
+    return lower, upper
+
+def get_c_index_bootstrap(df, time_col, event_col, covariates, label="", n_boot=50):
+    """
+    Fits Cox model and perform Bootstrap validation for C-Index estimation.
+    Returns dictionary with result.
+    """
+    if not covariates: return None
+    
+    # Data Prep
+    d = df[[time_col, event_col] + covariates].dropna()
+    d_enc = pd.get_dummies(d, drop_first=True)
+    d_enc.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in d_enc.columns]
+    
+    # Fit Main
+    cph = CoxPHFitter()
+    try:
+        cph.fit(d_enc, duration_col=time_col, event_col=event_col)
+        c_est = cph.concordance_index_
+    except:
+        return None
+
+    # Bootstrap (Normal Approximation Method)
+    boot_cs = []
+    for _ in range(n_boot):
+        # Resample
+        d_boot = d_enc.sample(n=len(d_enc), replace=True)
+        try:
+            cph_b = CoxPHFitter()
+            cph_b.fit(d_boot, duration_col=time_col, event_col=event_col)
+            boot_cs.append(cph_b.concordance_index_)
+        except:
+            pass 
+    
+    if len(boot_cs) > 5:
+        se = np.std(boot_cs)
+        # 95% CI = Estimate +/- 1.96 * SE
+        lower = max(0.0, c_est - 1.96 * se)
+        upper = min(1.0, c_est + 1.96 * se)
+    else:
+        lower, upper = c_est, c_est
+        
+    return {"Label": label, "C-Index": c_est, "Lower": lower, "Upper": upper, "Vars": len(covariates)}
