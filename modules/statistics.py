@@ -132,22 +132,38 @@ def get_c_index_bootstrap(df, time_col, event_col, covariates, label="", n_boot=
 
 def check_epv(df, event_col, covariates):
     """
-    Checks Events Per Variable (EPV) ratio.
+    Checks Events Per Variable (EPV) ratio using effective Degrees of Freedom.
+    DoF = (Levels - 1) for categorical, 1 for numeric.
     Returns dict: {'status': 'green'/'yellow'/'red', 'message': str, 'value': float}
     """
     if not covariates: return {'status': 'green', 'message': 'No covariates selected.', 'value': float('inf')}
     
     n_events = df[event_col].sum()
-    n_vars = len(covariates) # Should ideally account for one-hot encoding columns, but this is a proxy
     
-    epv = n_events / n_vars if n_vars > 0 else 0
+    # Calculate Degrees of Freedom (DoF)
+    n_params = 0
+    df_cov = df[covariates].dropna()
+    
+    for col in covariates:
+        if pd.api.types.is_numeric_dtype(df_cov[col]) and len(df_cov[col].unique()) > 2:
+            # Continuous variable = 1 DoF
+            n_params += 1
+        else:
+            # Categorical or Binary
+            unique_vals = len(df_cov[col].unique())
+            # DoF is levels - 1 (e.g., 3 levels -> 2 dummy vars)
+            # If unique_vals is 1 (constant), DoF is 0
+            dof = max(0, unique_vals - 1)
+            n_params += dof
+            
+    epv = n_events / n_params if n_params > 0 else 0
     
     if epv >= 15:
-        return {'status': 'green', 'message': f"EPV = {epv:.1f} (Robust)", 'value': epv}
+        return {'status': 'green', 'message': f"EPV = {epv:.1f} (Robust: {int(n_events)} events / {n_params} parameters)", 'value': epv}
     elif epv >= 10:
-        return {'status': 'yellow', 'message': f"EPV = {epv:.1f} (Caution: Risk of bias)", 'value': epv}
+        return {'status': 'yellow', 'message': f"EPV = {epv:.1f} (Caution: {int(n_events)} events / {n_params} parameters)", 'value': epv}
     else:
-        return {'status': 'red', 'message': f"EPV = {epv:.1f} (High Risk: Overfitting likely)", 'value': epv}
+        return {'status': 'red', 'message': f"EPV = {epv:.1f} (High Risk: {int(n_events)} events / {n_params} parameters)", 'value': epv}
 
 def check_collinearity(df, covariates, threshold=0.7):
     """
