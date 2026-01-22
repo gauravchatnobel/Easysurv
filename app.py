@@ -2322,7 +2322,7 @@ if df is not None:
                      st.warning("The system attempted to auto-install it but failed. Please try restarting the app or installing 'seaborn' manually in your environment.")
                      st.code("pip install seaborn")
 
-        with tab7:
+         with tab7:
             st.subheader("🎯 Diagnostic Accuracy & Prognostic Concordance")
             
             diag_mode = st.radio("Select Analysis Type:", ["Diagnostic Test Evaluation (2x2 Matrix)", "Prognostic Model Comparison (C-Index)"])
