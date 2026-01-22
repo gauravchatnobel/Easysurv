@@ -687,9 +687,25 @@ if df is not None:
     # Legend Renaming & Custom Colors
     group_labels = {}
     if group_col != "None" and df_clean is not None:
-        with st.sidebar.expander("🎨 Custom Colors & Labels", expanded=(selected_theme == "Custom")):
-            unique_groups = sorted(df_clean[group_col].dropna().unique())
-            for grp in unique_groups:
+    groups_ordered = []
+    if group_col != "None" and df_clean is not None:
+        with st.sidebar.expander("🎨 Custom Colors & Labels / Order", expanded=(selected_theme == "Custom")):
+            # Get original unique groups
+            unique_raw = sorted(df_clean[group_col].dropna().unique())
+            
+            # 1. Reordering Widget
+            st.caption("Drag and drop to reorder groups in the Legend & Risk Table.")
+            groups_ordered = st.multiselect("Group Order", unique_raw, default=unique_raw)
+            
+            # If user removes some, we should probably warn or just show what's selected. 
+            # But usually for ordering, they keep all. If list is empty, fallback to default.
+            if not groups_ordered:
+                groups_ordered = unique_raw
+            
+            st.divider()
+            
+            # 2. Colors & Labels for the ORDERED groups
+            for grp in groups_ordered:
                 col1, col2 = st.columns([1, 1])
                 with col1:
                     new_label = st.text_input(f"Label for {grp}", value=str(grp), key=f"label_{grp}")
@@ -768,7 +784,10 @@ if df is not None:
 
             if group_col != "None":
                 # Sorting groups for consistent color assignment
-                groups = sorted(df_clean[group_col].unique())
+                if groups_ordered:
+                    groups = groups_ordered
+                else:
+                    groups = sorted(df_clean[group_col].unique())
                 results = []
             
                 # Determine Color Palette
