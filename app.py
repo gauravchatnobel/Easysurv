@@ -2313,8 +2313,8 @@ if df is not None:
                  # Compute Matrix
                  corr_matrix = corr_df.corr(method=corr_method)
                  
-                 # Plot
-                 fig_corr, ax_corr = plt.subplots(figsize=(10, 8))
+                # Plot
+                fig_corr, ax_corr = plt.subplots(figsize=(10, 8))
                  
                 if sns is not None:
                     sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm", center=0, ax=ax_corr, square=True)
