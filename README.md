@@ -42,6 +42,13 @@ A comprehensive, code-free platform for performing publication-ready survival an
 ### 6. 📄 Reporting
 *   **One-Click Report**: Generate a printer-friendly HTML report summarizing all your analyses, plots, and dataset statistics.
 
+### 7. NEW: Diagnostic & Prognostic Module (v2.0)
+*   **Diagnostic Metrics**: Calculate Sensitivity, Specificity, PPV, NPV, and Accuracy with **95% Wilson Score Confidence Intervals**.
+*   **Robustness**: Automatically handles missing values pairwise (e.g., for NGS MRD) without crashing.
+*   **Prognostic "Ladder"**: Compare the Harrell's C-Index of up to **3 models** (e.g., Clinical vs +Biomarker vs +Combined).
+*   **Forest Plot**: Visualize the incremental value of biomarkers using a publication-ready Forest Plot with **Bootstrapped 95% CIs** (n=50, Normal Approximation).
+*   **Theme Integration**: All plots automatically adapt to your chosen color theme (e.g., NEJM, Nature, or Custom).
+
 ---
 
 ## 🚀 How to Run

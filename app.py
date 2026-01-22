@@ -6,8 +6,6 @@ from lifelines import KaplanMeierFitter, CoxPHFitter, AalenJohansenFitter
 from lifelines.statistics import multivariate_logrank_test, logrank_test
 import numpy as np
 from scipy.stats import norm
-import numpy as np
-import numpy as np
 np.random.seed(42) # Set global seed for reproducibility (e.g. Aalen-Johansen jittering)
 import io
 try:
