@@ -2323,7 +2323,7 @@ if df is not None:
                      st.error("Error: The 'seaborn' library could not be loaded.")
                      st.warning("The system attempted to auto-install it but failed. Please try restarting the app or installing 'seaborn' manually in your environment.")
                      st.code("pip install seaborn")
-             
+        
         with tab7:
             st.subheader("🎯 Diagnostic Accuracy & Prognostic Concordance")
             
