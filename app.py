@@ -13,7 +13,13 @@ except ImportError:
     sns = None
 
 # --- MODULE IMPORTS ---
-from survival_analysis.modules import utils, statistics, plotting, narrator
+# --- MODULE IMPORTS ---
+try:
+    # Try absolute import first (if running from root)
+    from survival_analysis.modules import utils, statistics, plotting, narrator
+except ImportError:
+    # Fallback to relative import (if running from inside survival_analysis/)
+    from modules import utils, statistics, plotting, narrator
 
 # Wrappers to maintain compatibility if functions were called directly
 compute_fine_gray_weights = statistics.compute_fine_gray_weights
