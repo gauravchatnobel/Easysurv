@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from lifelines import KaplanMeierFitter, CoxPHFitter, AalenJohansenFitter
 from lifelines.statistics import multivariate_logrank_test, logrank_test
 import numpy as np
+from scipy.stats import norm
 import numpy as np
 import numpy as np
 np.random.seed(42) # Set global seed for reproducibility (e.g. Aalen-Johansen jittering)
@@ -2323,185 +2324,243 @@ if df is not None:
                      st.code("pip install seaborn")
 
          with tab7:
-            st.subheader("🎯 Diagnostic Accuracy & Prognostic Concordance")
-            
-            diag_mode = st.radio("Select Analysis Type:", ["Diagnostic Test Evaluation (2x2 Matrix)", "Prognostic Model Comparison (C-Index)"])
-            
-            if diag_mode == "Diagnostic Test Evaluation (2x2 Matrix)":
-                st.write("Evaluate the performance of a diagnostic method (e.g., LSC) against a gold standard or outcome.")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown("#### Test Variable (New Method)")
-                    test_var = st.selectbox("Select Test Column", columns, help="The new method being evaluated (e.g., LSC_Status)")
-                    test_vals = sorted(df_clean[test_var].unique())
-                    test_pos = st.selectbox("Select 'Positive' Value for Test", test_vals, index=1 if len(test_vals)>1 else 0)
-                
-                with col2:
-                    st.markdown("#### Reference Standard (Gold Standard/Outcome)")
-                    ref_var = st.selectbox("Select Reference Column", columns, help="The truth or outcome (e.g., NGS_Status, Relapse)")
-                    ref_vals = sorted(df_clean[ref_var].unique())
-                    ref_pos = st.selectbox("Select 'Positive' Value for Reference", ref_vals, index=1 if len(ref_vals)>1 else 0)
-                
-                if st.button("Calculate Diagnostic Metrics"):
-                    # Create Binary Vectors
-                    # 1 = Positive, 0 = Negative
-                    y_test = (df_clean[test_var] == test_pos).astype(int)
-                    y_ref = (df_clean[ref_var] == ref_pos).astype(int)
-                    
-                    # Confusion Matrix
-                    from sklearn.metrics import confusion_matrix, accuracy_score, f1_score
-                    cm = confusion_matrix(y_ref, y_test) 
-                    # Structure: [[TN, FP], [FN, TP]]
-                    try:
-                        tn, fp, fn, tp = cm.ravel()
-                    except ValueError:
-                         # Handle edge cases where dimension mismatch (e.g. only 1 class present)
-                         tn, fp, fn, tp = 0,0,0,0
-                         if cm.shape == (1,1):
-                             if y_test.iloc[0] == 0: tn = cm[0,0]
-                             else: tp = cm[0,0]
+             st.subheader("🎯 Diagnostic Accuracy & Prognostic Concordance")
+             
+             def calculate_wilson_ci(k, n, alpha=0.95):
+                 """Returns (lower, upper) tuple for Wilson Score Interval"""
+                 if n == 0: return 0.0, 0.0
+                 p = k / n
+                 z = norm.ppf(1 - (1 - alpha) / 2)
+                 denominator = 1 + z**2/n
+                 centre_adjusted_probability = p + z**2 / (2*n)
+                 adjusted_standard_deviation = np.sqrt((p*(1 - p) + z**2 / (4*n)) / n)
+                 lower = (centre_adjusted_probability - z*adjusted_standard_deviation) / denominator
+                 upper = (centre_adjusted_probability + z*adjusted_standard_deviation) / denominator
+                 return lower, upper
 
-                    # Metrics
-                    sens = tp / (tp + fn) if (tp + fn) > 0 else 0
-                    spec = tn / (tn + fp) if (tn + fp) > 0 else 0
-                    ppv = tp / (tp + fp) if (tp + fp) > 0 else 0
-                    npv = tn / (tn + fn) if (tn + fn) > 0 else 0
-                    acc = accuracy_score(y_ref, y_test)
-                    f1 = f1_score(y_ref, y_test)
-                    
-                    # Chi-Square Test
-                    from scipy.stats import chi2_contingency
-                    contingency_table = [[tp, fp], [fn, tn]] # Standard Epidemiological format often TP/FP top row? No, chi2 doesn't care about order for p-value
-                    # But for display let's standardise
-                    chi2, p_val, dof, ex = chi2_contingency(cm)
-                    
-                    st.divider()
-                    
-                    # 1. Metrics Table
-                    st.write("### 📊 Performance Metrics")
-                    metrics_data = {
-                        "Metric": ["Sensitivity (Recall)", "Specificity", "PPV (Precision)", "NPV", "Accuracy", "F1-Score"],
-                        "Value": [f"{sens:.1%}", f"{spec:.1%}", f"{ppv:.1%}", f"{npv:.1%}", f"{acc:.1%}", f"{f1:.3f}"]
-                    }
-                    st.table(pd.DataFrame(metrics_data))
-                    
-                    # 2. Chi-Square
-                    st.write("### 🔗 Association Statistics")
-                    sig_txt = "Significant Association" if p_val < 0.05 else "No Significant Association"
-                    st.write(f"**Chi-Square Test**: p = **{p_val:.4f}** ({sig_txt})")
-                    
-                    # 3. Visuals (Heatmap)
-                    st.write("### 🖼️ Confusion Matrix Heatmap")
-                    fig_cm, ax_cm = plt.subplots(figsize=(6, 5))
-                    
-                    # Custom Annotations
-                    labels = np.asarray([
-                        [f"TN\n{tn}", f"FP\n{fp}"],
-                        [f"FN\n{fn}", f"TP\n{tp}"]
-                    ])
-                    
-                    if sns is not None:
-                        sns.heatmap(cm, annot=labels, fmt="", cmap="Blues", cbar=False, ax=ax_cm, 
-                                    xticklabels=[f"Pred Neg", f"Pred Pos ({test_pos})"],
-                                    yticklabels=[f"True Neg", f"True Pos ({ref_pos})"])
-                        ax_cm.set_xlabel(f"Test: {test_var}")
-                        ax_cm.set_ylabel(f"Reference: {ref_var}")
-                        st.pyplot(fig_cm)
-                        
-                    # 4. Narrator
-                    st.divider()
-                    st.subheader("🤖 AI Diagnostic Narrator")
-                    if st.button("Generate Diagnostic Report"):
-                         narrative = f"**Diagnostic Performance Evaluation**\n\n"
-                         narrative += f"The diagnostic performance of **{test_var}** was evaluated using **{ref_var}** as the reference standard.\n"
-                         narrative += f"- **Sensitivity**: {sens:.1%}, indicating the test correctly identified {sens:.1%} of positive cases.\n"
-                         narrative += f"- **Specificity**: {spec:.1%}, indicating the test correctly identified {spec:.1%} of negative cases.\n"
-                         narrative += f"- **Predictive Values**: The Positive Predictive Value (PPV) was {ppv:.1%}, and the Negative Predictive Value (NPV) was {npv:.1%}.\n"
-                         narrative += f"- **Statistical Association**: A Chi-square test revealed a {sig_txt.lower()} between the test and the reference (p={p_val:.4f})."
-                         st.success("Report Generated:")
-                         st.text_area("Copy Text:", narrative, height=150)
-
-            elif diag_mode == "Prognostic Model Comparison (C-Index)":
-                 st.write("Compare the discriminative power (C-index) of two models (e.g., Clinical Risk vs Clinical + Biomarker).")
-                 
-                 st.info(f"Target: **{time_col}** (Time), **{event_col}** (Event)")
+             diag_mode = st.radio("Select Analysis Type:", ["Diagnostic Test Evaluation (2x2 Matrix)", "Prognostic Model Comparison (C-Index)"])
+             
+             if diag_mode == "Diagnostic Test Evaluation (2x2 Matrix)":
+                 st.write("Evaluate the performance of a diagnostic method (e.g., LSC) against a gold standard or outcome.")
                  
                  col1, col2 = st.columns(2)
                  with col1:
-                     st.write("#### Model A (Baseline)")
-                     vars_a = st.multiselect("Select Covariates for Model A", [c for c in columns if c not in [time_col, event_col]], key="mod_a")
-                     
-                 with col2:
-                     st.write("#### Model B (Enhanced)")
-                     vars_b = st.multiselect("Select Covariates for Model B", [c for c in columns if c not in [time_col, event_col]], key="mod_b")
+                     st.markdown("#### Test Variable (New Method)")
+                     test_var = st.selectbox("Select Test Column", columns, help="The new method being evaluated (e.g., LSC_Status)")
+                     # DROPNA pairwise for selector
+                     test_vals = sorted(df_clean[test_var].dropna().unique())
+                     test_pos = st.selectbox("Select 'Positive' Value for Test", test_vals, index=1 if len(test_vals)>1 else 0)
                  
-                 if st.button("Compare Models"):
-                      if not vars_a or not vars_b:
-                          st.error("Please select covariates for both models.")
-                      else:
-                          try:
-                              # Fit Model A
-                              df_a = df_clean[[time_col, event_col] + vars_a].dropna()
-                              # Encoding A
-                              df_a_enc = pd.get_dummies(df_a, drop_first=True)
-                              # Sanitize
-                              df_a_enc.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in df_a_enc.columns]
-                              
-                              cph_a = CoxPHFitter()
-                              cph_a.fit(df_a_enc, duration_col=time_col, event_col=event_col)
-                              c_index_a = cph_a.concordance_index_
-                              
-                              # Fit Model B
-                              df_b = df_clean[[time_col, event_col] + vars_b].dropna()
-                              # Encoding B
-                              df_b_enc = pd.get_dummies(df_b, drop_first=True)
-                              df_b_enc.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in df_b_enc.columns]
-                              
-                              cph_b = CoxPHFitter()
-                              cph_b.fit(df_b_enc, duration_col=time_col, event_col=event_col)
-                              c_index_b = cph_b.concordance_index_
-                              
-                              # Calculate Delta
-                              delta = c_index_b - c_index_a
-                              
-                              st.divider()
-                              st.write("### 📈 C-Index Comparison")
-                              
-                              res_data = pd.DataFrame({
-                                  "Model": ["Model A (Baseline)", "Model B (Enhanced)"],
-                                  "Variables": [", ".join(vars_a), ", ".join(vars_b)],
-                                  "C-Index": [c_index_a, c_index_b]
-                              })
-                              st.table(res_data.style.format({"C-Index": "{:.3f}"}))
-                              
-                              st.metric("Incremental Value (Delta C-Index)", f"{delta:+.3f}", delta_color="normal")
-                              
-                              # Plot
-                              fig_c, ax_c = plt.subplots(figsize=(6, 3))
-                              
-                              bars = ax_c.barh(["Model A", "Model B"], [c_index_a, c_index_b], color=["#B0BEC5", "#4CAF50"])
-                              ax_c.set_xlim(0.5, 1.0) # Zoom in on relevant C-index range (0.5=random)
-                              ax_c.set_xlabel("Harrell's Concordance Index")
-                              ax_c.set_title("Discriminative Power Comparison")
-                              ax_c.bar_label(bars, fmt='%.3f')
-                              
-                              st.pyplot(fig_c)
-                              
-                              # PDF
-                              buf_c = io.BytesIO()
-                              fig_c.savefig(buf_c, format="pdf", bbox_inches='tight')
-                              st.download_button("📄 Download Comparisons (PDF)", buf_c, "c_index_comparison.pdf", "application/pdf")
+                 with col2:
+                     st.markdown("#### Reference Standard (Gold Standard/Outcome)")
+                     ref_var = st.selectbox("Select Reference Column", columns, help="The truth or outcome (e.g., NGS_Status, Relapse)")
+                     # DROPNA pairwise for selector
+                     ref_vals = sorted(df_clean[ref_var].dropna().unique())
+                     ref_pos = st.selectbox("Select 'Positive' Value for Reference", ref_vals, index=1 if len(ref_vals)>1 else 0)
+                 
+                 if st.button("Calculate Diagnostic Metrics"):
+                     # Filter Data Pairwise FIRST
+                     df_diag = df_clean[[test_var, ref_var]].dropna()
+                     n_total = len(df_diag)
+                     if n_total < len(df_clean):
+                         st.warning(f"⚠️ Excluded {len(df_clean) - n_total} rows with missing values in the selected columns.")
+                     
+                     if n_total == 0:
+                         st.error("No valid data remaining after removing missing values.")
+                     else:
+                         # Create Binary Vectors
+                         y_test = (df_diag[test_var] == test_pos).astype(int)
+                         y_ref = (df_diag[ref_var] == ref_pos).astype(int)
+                         
+                         # Confusion Matrix
+                         from sklearn.metrics import confusion_matrix, accuracy_score, f1_score
+                         cm = confusion_matrix(y_ref, y_test) 
+                         # Structure: [[TN, FP], [FN, TP]]
+                         try:
+                             tn, fp, fn, tp = cm.ravel()
+                         except ValueError:
+                              tn, fp, fn, tp = 0,0,0,0
+                              if cm.shape == (1,1):
+                                  if y_test.iloc[0] == 0: tn = cm[0,0]
+                                  else: tp = cm[0,0]
 
-                          except Exception as e:
-                              st.error(f"Error during comparison: {e}")
+                         # Metrics & CIs
+                         def get_metric_ci(num, den):
+                             val = num / den if den > 0 else 0
+                             low, high = calculate_wilson_ci(num, den)
+                             return val, low, high
+
+                         sens, sens_l, sens_h = get_metric_ci(tp, tp + fn)
+                         spec, spec_l, spec_h = get_metric_ci(tn, tn + fp)
+                         ppv, ppv_l, ppv_h = get_metric_ci(tp, tp + fp)
+                         npv, npv_l, npv_h = get_metric_ci(tn, tn + fn)
+                         acc, acc_l, acc_h = get_metric_ci(tp + tn, n_total)
+                         f1 = f1_score(y_ref, y_test)
+                         
+                         # Chi-Square Test
+                         from scipy.stats import chi2_contingency
+                         cm_chi = np.array([[tp, fp], [fn, tn]])
+                         if np.sum(cm_chi) > 0:
+                             chi2, p_val, dof, ex = chi2_contingency(cm_chi)
+                         else:
+                             p_val = 1.0
+
+                         st.divider()
+                         
+                         # 1. Metrics Table
+                         st.write("### 📊 Performance Metrics (with 95% CI)")
+                         metrics_data = {
+                             "Metric": ["Sensitivity (Recall)", "Specificity", "PPV (Precision)", "NPV", "Accuracy", "F1-Score"],
+                             "Value": [f"{sens:.1%} ({sens_l:.1%}-{sens_h:.1%})", 
+                                       f"{spec:.1%} ({spec_l:.1%}-{spec_h:.1%})", 
+                                       f"{ppv:.1%} ({ppv_l:.1%}-{ppv_h:.1%})", 
+                                       f"{npv:.1%} ({npv_l:.1%}-{npv_h:.1%})", 
+                                       f"{acc:.1%} ({acc_l:.1%}-{acc_h:.1%})", 
+                                       f"{f1:.3f}"]
+                         }
+                         st.table(pd.DataFrame(metrics_data))
+                         
+                         # 2. Chi-Square
+                         st.write("### 🔗 Association Statistics")
+                         sig_txt = "Significant Association" if p_val < 0.05 else "No Significant Association"
+                         st.write(f"**Chi-Square Test**: p = **{p_val:.4f}** ({sig_txt})")
+                         
+                         # 3. Visuals (Heatmap)
+                         st.write("### 🖼️ Confusion Matrix Heatmap")
+                         fig_cm, ax_cm = plt.subplots(figsize=(6, 5))
+                         
+                         labels = np.asarray([
+                             [f"TN\n{tn}", f"FP\n{fp}"],
+                             [f"FN\n{fn}", f"TP\n{tp}"]
+                         ])
+                         
+                         # Theme Logic
+                         cmap = "Blues"
+                         if selected_theme in all_themes:
+                             try:
+                                 from matplotlib.colors import LinearSegmentedColormap
+                                 base_color = all_themes[selected_theme][0]
+                                 cmap = LinearSegmentedColormap.from_list("custom", ["#f0f2f6", base_color])
+                             except:
+                                 pass
+
+                         if sns is not None:
+                             sns.heatmap(cm, annot=labels, fmt="", cmap=cmap, cbar=False, ax=ax_cm, 
+                                         xticklabels=[f"Pred Neg", f"Pred Pos ({test_pos})"],
+                                         yticklabels=[f"True Neg", f"True Pos ({ref_pos})"])
+                             ax_cm.set_xlabel(f"Test: {test_var}")
+                             ax_cm.set_ylabel(f"Reference: {ref_var}")
+                             st.pyplot(fig_cm)
+                             
+                         # 4. Narrator
+                         st.divider()
+                         st.subheader("🤖 AI Diagnostic Narrator")
+                         if st.button("Generate Diagnostic Report"):
+                              narrative = f"**Diagnostic Performance Evaluation**\n\n"
+                              narrative += f"The diagnostic performance of **{test_var}** was evaluated using **{ref_var}** as the reference standard (N={n_total}).\n"
+                              narrative += f"- **Sensitivity**: {sens:.1%} (95% CI {sens_l:.1%}-{sens_h:.1%}).\n"
+                              narrative += f"- **Specificity**: {spec:.1%} (95% CI {spec_l:.1%}-{spec_h:.1%}).\n"
+                              narrative += f"- **Predictive Values**: PPV {ppv:.1%} ({ppv_l:.1%}-{ppv_h:.1%}), NPV {npv:.1%} ({npv_l:.1%}-{npv_h:.1%}).\n"
+                              narrative += f"- **Statistical Association**: Chi-square p={p_val:.4f}."
+                              st.success("Report Generated:")
+                              st.text_area("Copy Text:", narrative, height=150)
+
+             elif diag_mode == "Prognostic Model Comparison (C-Index)":
+                  st.write("Compare the discriminative power (C-index) of up to 3 models.")
+                  
+                  st.info(f"Target: **{time_col}** (Time), **{event_col}** (Event)")
+                  
+                  c1, c2, c3 = st.columns(3)
+                  with c1:
+                      st.write("#### Model A (Base)")
+                      vars_a = st.multiselect("Covariates A", [c for c in columns if c not in [time_col, event_col]], key="mod_a")
+                  with c2:
+                      st.write("#### Model B (+1)")
+                      vars_b = st.multiselect("Covariates B", [c for c in columns if c not in [time_col, event_col]], key="mod_b")
+                  with c3:
+                      st.write("#### Model C (+2) [Optional]")
+                      vars_c = st.multiselect("Covariates C", [c for c in columns if c not in [time_col, event_col]], key="mod_c")
+                  
+                  if st.button("Compare Models"):
+                       if not vars_a or not vars_b:
+                           st.error("Please define at least Model A and Model B.")
+                       else:
+                           try:
+                               res_list = []
+                               
+                               def fit_get_c(vars_in, label):
+                                   if not vars_in: return None
+                                   d = df_clean[[time_col, event_col] + vars_in].dropna()
+                                   d_enc = pd.get_dummies(d, drop_first=True)
+                                   d_enc.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in d_enc.columns]
+                                   cph = CoxPHFitter()
+                                   cph.fit(d_enc, duration_col=time_col, event_col=event_col)
+                                   return {"Label": label, "C-Index": cph.concordance_index_, "Vars": len(vars_in)}
+                               
+                               res_a = fit_get_c(vars_a, "Model A")
+                               res_b = fit_get_c(vars_b, "Model B")
+                               res_c = fit_get_c(vars_c, "Model C")
+                               
+                               res_list = [r for r in [res_a, res_b, res_c] if r is not None]
+                               
+                               st.divider()
+                               st.write("### 📈 C-Index Comparison")
+                               
+                               # Table
+                               res_df = pd.DataFrame(res_list)
+                               st.table(res_df.set_index("Label")[["C-Index", "Vars"]].style.format({"C-Index": "{:.3f}"}))
+                               
+                               # Deltas
+                               delta_ab = res_b["C-Index"] - res_a["C-Index"]
+                               st.metric("Δ (Model B - Model A)", f"{delta_ab:+.3f}", delta_color="normal")
+                               
+                               if res_c:
+                                   delta_bc = res_c["C-Index"] - res_b["C-Index"]
+                                   st.metric("Δ (Model C - Model B)", f"{delta_bc:+.3f}", delta_color="normal")
+                               
+                               # Plot (Step/Forest Style)
+                               fig_p, ax_p = plt.subplots(figsize=(8, 4))
+                               
+                               y_pos = range(len(res_list))
+                               c_vals = [r["C-Index"] for r in res_list]
+                               labels = [r["Label"] for r in res_list]
+                               
+                               # Theme Color
+                               pt_color = "black"
+                               if selected_theme in all_themes: pt_color = all_themes[selected_theme][0]
+                               
+                               ax_p.plot(c_vals, y_pos, 'o-', color=pt_color, markersize=10, linewidth=2)
+                               # Add faint grid
+                               ax_p.grid(True, axis='x', linestyle='--', alpha=0.5)
+                               
+                               ax_p.set_yticks(y_pos)
+                               ax_p.set_yticklabels(labels, fontsize=12, fontweight='bold')
+                               ax_p.set_xlabel("Harrell's Concordance Index")
+                               ax_p.set_title("Discriminative Power Ladder", loc='left')
+                               
+                               # Add labels
+                               for y, c in zip(y_pos, c_vals):
+                                   ax_p.text(c, y + 0.15, f"{c:.3f}", ha='center', va='bottom', fontsize=10, color='black')
+                               
+                               # Adjust X limits to focus on difference
+                               c_min, c_max = min(c_vals), max(c_vals)
+                               ax_p.set_xlim(max(0.5, c_min - 0.05), min(1.0, c_max + 0.05))
+                               
+                               st.pyplot(fig_p)
+                               
+                               # PDF
+                               buf_p = io.BytesIO()
+                               fig_p.savefig(buf_p, format="pdf", bbox_inches='tight')
+                               st.download_button("📄 Download Ladder Plot (PDF)", buf_p, "c_index_ladder.pdf", "application/pdf")
+
+                           except Exception as e:
+                               st.error(f"Error during comparison: {e}")
 
 
-
-else:
-    st.info("Please upload a CSV or Excel file to begin analysis.")
-    st.write("Demostration with Dummy Data:")
-    st.write("You can download the demo dataset `dummy_clinical_data.csv` from the repository:")
-    st.markdown("[📂 View Repository & Download Data](https://github.com/gauravchatnobel/Easysurv)")
-    st.caption("Right-click the link and open in a new tab to find the CSV file.")
+    else:
+        st.info("Please upload a CSV or Excel file to begin analysis.")
+        st.write("Demostration with Dummy Data:")
+        st.write("You can download the demo dataset `dummy_clinical_data.csv` from the repository:")
+        st.markdown("[📂 View Repository & Download Data](https://github.com/gauravchatnobel/Easysurv)")
+        st.caption("Right-click the link and open in a new tab to find the CSV file.")
 
