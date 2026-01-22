@@ -2582,11 +2582,13 @@ if df is not None:
                               # Adjust Limits
                               lows = [r["Lower"] for r in res_list]
                               highs = [r["Upper"] for r in res_list]
-                              # Handle case where lows/highs might be empty or problematic
                               if lows and highs:
                                   xmin = max(0.4, min(lows) - 0.05)
                                   xmax = min(1.0, max(highs) + 0.05)
                                   ax_p.set_xlim(xmin, xmax)
+                              
+                              # Add vertical padding for top label
+                              ax_p.set_ylim(-0.5, len(res_list) - 0.5 + 0.3)
                               
                               st.pyplot(fig_p)
                               
