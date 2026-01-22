@@ -31,6 +31,11 @@ A comprehensive, code-free platform for performing publication-ready survival an
     *   Adjust for confounders (Age, Sex, etc.).
     *   **Forest Plots**: Visualize Hazard Ratios with 95% CIs.
     *   **Session Persistence**: Analysis results stay visible while you explore.
+    *   🛡️ **Statistical Guardrails (New)**: Automatic warnings for:
+        *   **Events Per Variable (EPV)**: Ensures sufficient sample size (using Degrees of Freedom).
+        *   **Multicollinearity**: Smart detection for Numeric & Categorical overlaps (VIF + Heatmap).
+        *   **Separation**: Detects perfect prediction (infinite HRs).
+    *   **Penalized Cox (Ridge)**: Optional toggle to salvage models with severe collinearity or small sample sizes.
 *   **Competing Risks Analysis (CIF)**:
     *   **Fine-Gray Regression**: Subdistribution Hazard Ratios for competing events (e.g., Relapse vs Death).
     *   **Cumulative Incidence Plots**: Estimate event probability over time.
