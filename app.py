@@ -1029,6 +1029,24 @@ if df is not None:
             covariates = st.multiselect("Select Covariates for Analysis", covariate_options)
             
             if covariates:
+                # --- STRUCTURAL REDUNDANCY CHECK (Gap 2) ---
+                for i, c1 in enumerate(covariates):
+                    for j, c2 in enumerate(covariates):
+                        if i >= j: continue
+                        # Check 1: Substring containment (e.g. "Age" and "Age_Group")
+                        if (c1 in c2 or c2 in c1) and len(c1) > 2 and len(c2) > 2:
+                            st.warning(f"⚠️ **Structural Redundancy Warning**: You selected both **{c1}** and **{c2}**. If one is derived from the other, this introduces multicollinearity. Choose only one.", icon="🏗️")
+                        
+                        # Check 2: Known clinical subsets (heuristic)
+                        c1_l = c1.lower()
+                        c2_l = c2.lower()
+                        if "risk" in c1_l and "risk" in c2_l: # Partial overlap on key clinical terms
+                             pass # Ideally we would be stricter, but "Risk" is common
+                        
+                        # Example: "ELN" and "Cytogenetics" often overlap implicitly
+                        if ("eln" in c1_l and "cyto" in c2_l) or ("eln" in c2_l and "cyto" in c1_l):
+                             st.warning(f"⚠️ **Clinical Overlap Warning**: **{c1}** and **{c2}** typically encode similar information. Ensure they are distinct.", icon="🧬")
+
                 st.info(f"Target: **{time_col}** (Time), **{event_col}** (Event)")
                 
                 # Check for NaNs in selected variables
@@ -1062,14 +1080,52 @@ if df is not None:
                     st.divider()
                     st.markdown("#### 🛡️ Statistical Guardrails")
                     
-                    # 1. EPV Check
+                    # 1. Run Checks
                     epv_res = statistics.check_epv(mv_df, event_col, covariates)
-                    if epv_res['status'] == 'green':
-                         st.success(f"**Events Per Variable**: {epv_res['message']}")
-                    elif epv_res['status'] == 'yellow':
-                         st.warning(f"**Events Per Variable**: {epv_res['message']}")
-                    else:
-                         st.error(f"**Events Per Variable**: {epv_res['message']}")
+                    
+                    # 2. VIF & Collinearity
+                    vif_df = statistics.calculate_vif(mv_df, covariates)
+                    high_corr = statistics.check_collinearity(mv_df, covariates)
+                    
+                    # 3. Separation (requires model fit, so we assume None for pre-check or handle post-fit)
+                    # For pre-analysis summary, we only use pre-fit checks. Separation is added to summary later if detected.
+                    
+                    # 4. Generate Summary
+                    risk_summary = statistics.summarize_model_risk(epv_res, high_corr, vif_df, [])
+                    
+                    # Display Unified Risk Card
+                    risk_color = "green"
+                    if risk_summary['status'] == 'red': risk_color = "red"
+                    elif risk_summary['status'] == 'yellow': risk_color = "orange"
+                    
+                    with st.container(border=True):
+                        col_icon, col_text = st.columns([1, 6])
+                        with col_icon:
+                            st.markdown(f"<h1 style='text-align: center; color: {risk_color};'>🛡️</h1>", unsafe_allow_html=True)
+                        with col_text:
+                            st.subheader(f"Model Health: :{'red' if risk_color=='red' else risk_color}[{risk_summary['label']}]")
+                            st.write(f"_{risk_summary['recommendation']}_")
+                        
+                        if risk_summary['reasons']:
+                            with st.expander("See Risk Details", expanded=True):
+                                for r in risk_summary['reasons']:
+                                    st.write(r)
+
+                    # Detailed Checks (Collapsed by default if Green, Expanded if issues)
+                    with st.expander("View Detailed Statistical Report", expanded=(risk_summary['status']!='green')):
+                        # 1. EPV Check
+                        if epv_res['status'] == 'green':
+                             st.success(f"**Events Per Variable**: {epv_res['message']}")
+                        elif epv_res['status'] == 'yellow':
+                             st.warning(f"**Events Per Variable**: {epv_res['message']}")
+                        else:
+                             st.error(f"**Events Per Variable**: {epv_res['message']}")
+
+                         
+                    # Check for sparse sublevels
+                    if 'sparse_warnings' in epv_res and epv_res['sparse_warnings']:
+                        for w in epv_res['sparse_warnings']:
+                            st.caption(w)
                          
                     # 2. Collinearity Check
                     high_corr = statistics.check_collinearity(mv_df, covariates)
