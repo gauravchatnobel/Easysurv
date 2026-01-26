@@ -265,3 +265,67 @@ def check_separation(cph_model):
         warnings.append(f"Unstable Estimates: Large Standard Errors found for {', '.join(high_se)}.")
         
     return warnings
+
+def summarize_model_risk(epv_res, collinearity_list, vif_df, separation_warnings):
+    """
+    Synthesizes multiple statistical checks into a unified model health score.
+    Returns dict: {
+        'status': 'green'/'yellow'/'red',
+        'label': 'Robust'/'Caution'/'High Risk',
+        'reasons': [str],
+        'recommendation': str
+    }
+    """
+    reasons = []
+    status = 'green'
+    
+    # Check 1: EPV
+    if epv_res['status'] == 'red':
+        status = 'red'
+        reasons.append(f"❌ Critical Sample Size Issue: {epv_res['message']}")
+    elif epv_res['status'] == 'yellow':
+        if status != 'red': status = 'yellow'
+        reasons.append(f"⚠️ Low Sample Size: {epv_res['message']}")
+        
+    # Check 1b: Sparse Events
+    if epv_res.get('sparse_warnings'):
+        if status != 'red': status = 'yellow'
+        reasons.append("⚠️ Sparse Events detected in specific subgroups.")
+
+    # Check 2: Separation
+    if separation_warnings:
+        status = 'red'
+        reasons.append("❌ Complete Separation Detected (Infinite HRs).")
+        
+    # Check 3: VIF
+    if vif_df is not None:
+        max_vif = vif_df['VIF'].max()
+        if max_vif > 10:
+            status = 'red'
+            reasons.append(f"❌ Severe Multicollinearity (Max VIF={max_vif:.1f}).")
+        elif max_vif > 5:
+            if status != 'red': status = 'yellow'
+            reasons.append(f"⚠️ Potential Multicollinearity (Max VIF={max_vif:.1f}).")
+            
+    # Check 4: Raw Correlation (Backup)
+    if collinearity_list and (vif_df is None or vif_df.empty):
+         if status != 'red': status = 'yellow'
+         reasons.append(f"⚠️ High Correlation detected ({len(collinearity_list)} pairs > 0.7).")
+
+    # Final Interpretation
+    rec = "Model appears statistically robust."
+    label = "Robust"
+    
+    if status == 'red':
+        label = "High Risk"
+        rec = "Results are likely unreliable. Consider reducing variables, simplifying categorical levels, or using Penalized Cox."
+    elif status == 'yellow':
+        label = "Caution"
+        rec = "Results interpretability may be limited. Proceed with care."
+        
+    return {
+        'status': status,
+        'label': label,
+        'reasons': reasons,
+        'recommendation': rec
+    }
