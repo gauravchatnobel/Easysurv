@@ -141,8 +141,9 @@ def check_epv(df, event_col, covariates):
     n_events = df[event_col].sum()
     
     # Calculate Degrees of Freedom (DoF)
-    n_params = 0
+    ns = 0
     df_cov = df[covariates].dropna()
+    sparse_warnings = []
     
     for col in covariates:
         if pd.api.types.is_numeric_dtype(df_cov[col]) and len(df_cov[col].unique()) > 2:
@@ -156,14 +157,27 @@ def check_epv(df, event_col, covariates):
             dof = max(0, unique_vals - 1)
             n_params += dof
             
+            # Check for Sparse Events (Gap Check)
+            try:
+                # Group by level and sum events
+                min_events = df.groupby(col)[event_col].sum().min()
+                if min_events < 5:
+                    sparse_warnings.append(f"⚠️ Categories in **{col}** have very few events (min={min_events}).")
+            except:
+                pass
+            
     epv = n_events / n_params if n_params > 0 else 0
     
+    result = {'value': epv, 'sparse_warnings': sparse_warnings}
+    
     if epv >= 15:
-        return {'status': 'green', 'message': f"EPV = {epv:.1f} (Robust: {int(n_events)} events / {n_params} parameters)", 'value': epv}
+        result.update({'status': 'green', 'message': f"EPV = {epv:.1f} (Robust: {int(n_events)} events / {n_params} parameters)"})
     elif epv >= 10:
-        return {'status': 'yellow', 'message': f"EPV = {epv:.1f} (Caution: {int(n_events)} events / {n_params} parameters)", 'value': epv}
+        result.update({'status': 'yellow', 'message': f"EPV = {epv:.1f} (Caution: {int(n_events)} events / {n_params} parameters)"})
     else:
-        return {'status': 'red', 'message': f"EPV = {epv:.1f} (High Risk: {int(n_events)} events / {n_params} parameters)", 'value': epv}
+        result.update({'status': 'red', 'message': f"EPV = {epv:.1f} (High Risk: {int(n_events)} events / {n_params} parameters)"})
+        
+    return result
 
 def get_correlation_matrix(df, covariates):
     """
@@ -226,7 +240,7 @@ def check_collinearity(df, covariates, threshold=0.7):
     for col in upper.columns:
         for row in upper.index:
              val = upper.loc[row, col]
-             if val > threshold:
+             if abs(val) > threshold:
                  high_corr.append((row, col, float(val)))
                  
     return high_corr
