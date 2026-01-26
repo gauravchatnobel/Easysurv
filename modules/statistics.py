@@ -141,7 +141,7 @@ def check_epv(df, event_col, covariates):
     n_events = df[event_col].sum()
     
     # Calculate Degrees of Freedom (DoF)
-    ns = 0
+    n_params = 0
     df_cov = df[covariates].dropna()
     sparse_warnings = []
     
