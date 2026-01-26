@@ -1157,9 +1157,9 @@ if df is not None:
                                  # Color code VIF
                                  def highlight_vif(s):
                                      val = s['VIF']
-                                     if val > 10: color = '#ffcccc' # Red
-                                     elif val > 5: color = '#ffffcc' # Yellow
-                                     else: color = '#ccffcc' # Green
+                                     if val > 10: color = 'rgba(255, 0, 0, 0.2)' # Red (translucent)
+                                     elif val > 5: color = 'rgba(255, 255, 0, 0.2)' # Yellow (translucent)
+                                     else: color = 'rgba(0, 255, 0, 0.1)' # Green (translucent)
                                      return [f'background-color: {color}']*len(s)
                                      
                                  st.dataframe(vif_df.style.apply(highlight_vif, axis=1).format({"VIF": "{:.2f}"}), hide_index=True)
