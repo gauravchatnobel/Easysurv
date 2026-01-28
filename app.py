@@ -531,13 +531,13 @@ if df is not None:
     landmark_info = ""
     if time_col and event_col and df_clean is not None and landmark_time > 0:
         original_n_global = len(df_clean)
-        # Filter: Keep if Time > Landmark
-        df_clean = df_clean[df_clean[time_col] > landmark_time].copy()
+        # Filter: Keep if Time >= Landmark
+        df_clean = df_clean[df_clean[time_col] >= landmark_time].copy()
         # Adjust: Time = Time - Landmark
         df_clean[time_col] = df_clean[time_col] - landmark_time
         
         dropped_landmark_global = original_n_global - len(df_clean)
-        landmark_info = f" | **Landmark Analysis**: Conditioned on survival > {landmark_time}. (Excluded {dropped_landmark_global} early events/censors)."
+        landmark_info = f" | **Landmark Analysis**: Conditioned on survival ≥ {landmark_time}. (Excluded {dropped_landmark_global} early events/censors). **Note:** Results are not comparable to full-cohort estimates; interpret as conditional on being event-free at landmark."
 
     # Legend Renaming & Custom Colors
     group_labels = {}
@@ -1502,7 +1502,12 @@ if df is not None:
                 
                 # Determine Ticks (Uniform with Main Plot)
                 cif_max_time = cif_df[cif_time_col].max()
-                if tick_interval:
+                if enable_zoom:
+                     ax_cif.set_xlim(0, zoom_max)
+                     if tick_interval:
+                          cif_custom_ticks = np.arange(0, zoom_max + tick_interval, tick_interval)
+                          ax_cif.set_xticks(cif_custom_ticks)
+                elif tick_interval:
                     cif_custom_ticks = np.arange(0, cif_max_time + tick_interval, tick_interval)
                     ax_cif.set_xticks(cif_custom_ticks)
                     ax_cif.set_xlim(0, cif_custom_ticks[-1]) # Strict x-limits for table alignment
