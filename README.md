@@ -54,6 +54,12 @@ A comprehensive, code-free platform for performing publication-ready survival an
 *   **Forest Plot**: Visualize the incremental value of biomarkers using a publication-ready Forest Plot with **Bootstrapped 95% CIs** (n=50, Normal Approximation).
 *   **Theme Integration**: All plots automatically adapt to your chosen color theme (e.g., NEJM, Nature, or Custom).
 
+### 8. NEW: Landmark & Zoom Analysis
+*   **Global Landmark Analysis**: Perform conditional survival analysis (e.g., "Survival among patients who were alive at 6 months").
+    *   Filters the **entire dataset** (Median, Cox, CIF, Biomarkers) to exclude early events/censors.
+    *   Automatically resets Time Zero (`Time = Time - Landmark`).
+*   **Zoom Plotting**: Manually focus on a specific time window (e.g., first 24 months) without altering the underlying statistics.
+
 ---
 
 ## 🚀 How to Run
