@@ -1433,6 +1433,17 @@ if df is not None:
                     
                     # Create Composite Columns
                     temp_df['Composite_Time'] = temp_df[[rfs_time_col, os_time_col]].min(axis=1)
+
+                    # --- GLOBAL LANDMARK FILTER (for CIF) ---
+                    if landmark_time > 0:
+                        # Keep only patients event-free at landmark (Composite Time >= Landmark)
+                        temp_df = temp_df[temp_df['Composite_Time'] >= landmark_time].copy()
+                        
+                        # Adjust Times
+                        temp_df[rfs_time_col] = temp_df[rfs_time_col] - landmark_time
+                        temp_df[os_time_col] = temp_df[os_time_col] - landmark_time
+                        temp_df['Composite_Time'] = temp_df['Composite_Time'] - landmark_time
+                    # ----------------------------------------
                     
                     # Status Logic:
                     # 0 = Censored (Both 0)
