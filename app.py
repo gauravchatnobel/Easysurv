@@ -540,6 +540,15 @@ if df is not None:
                         color = st.color_picker(f"Color for {grp}", key=f"color_{grp}")
                         custom_colors[grp] = color
 
+    with st.sidebar.expander("🔍 Landmark & Zoom Analysis"):
+        landmark_time = st.number_input("Landmark Time", min_value=0.0, value=0.0, step=1.0, help="Exclude patients who died/censored before this time. Time 0 becomes this landmark.")
+        
+        # Determine max time for slider default
+        max_time_default = float(df_clean[time_col].max()) if df_clean is not None else 100.0
+        
+        enable_zoom = st.checkbox("Enable Custom X-Axis Limit")
+        zoom_max = st.number_input("Max X-Axis Time", min_value=1.0, value=max_time_default, disabled=not enable_zoom)
+
     # Analysis
     if time_col and event_col and df_clean is not None:
         st.divider()
@@ -549,9 +558,27 @@ if df is not None:
 
         with tab1:
         
+            # Landmark / Zoom Logic Setup
+            df_univar = df_clean.copy()
+            landmark_info = ""
+            
+            if landmark_time > 0:
+                original_n = len(df_univar)
+                # Filter: Keep if Time > Landmark
+                df_univar = df_univar[df_univar[time_col] > landmark_time]
+                # Adjust: Time = Time - Landmark
+                df_univar[time_col] = df_univar[time_col] - landmark_time
+                
+                dropped_landmark = original_n - len(df_univar)
+                landmark_info = f" | **Landmark Analysis**: Conditioned on survival > {landmark_time}. (Excluded {dropped_landmark} early events/censors)."
+
             if dropped_count > 0:
-                st.warning(f"⚠️ **Missing Values Detected**: Dropped {dropped_count} rows containing NaNs in the selected columns. Analysis based on {len(df_clean)} remaining rows.")
-                with st.expander("See details of missing values"):
+                st.warning(f"⚠️ **Missing Values Detected**: Dropped {dropped_count} rows containing NaNs. Analysis based on {len(df_univar)} rows.{landmark_info}")
+            elif landmark_info:
+                st.info(landmark_info)
+
+            if dropped_count > 0:
+                 with st.expander("See details of missing values"):
                     st.write("Number of missing values per column (in the original selection):")
                     # Calculate missing per column in the subset
                     missing_stats = df[cols_to_check].isna().sum()
@@ -560,20 +587,20 @@ if df is not None:
             # Calculate P-value for Plot if requested
             hr_text = ""
             p_value_text = None # Initialize to avoid NameError
-            if show_p_val_plot and group_col != "None" and len(df_clean[group_col].unique()) >= 2:
+            if show_p_val_plot and group_col != "None" and len(df_univar[group_col].unique()) >= 2:
                 try:
-                    cox_df = df_clean[[time_col, event_col, group_col]].dropna()
+                    cox_df = df_univar[[time_col, event_col, group_col]].dropna()
                     cox_data_encoded = pd.get_dummies(cox_df, columns=[group_col], drop_first=True)
                     cox_data_encoded.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in cox_data_encoded.columns]
                     cph_plot = CoxPHFitter()
                     cph_plot.fit(cox_data_encoded, duration_col=time_col, event_col=event_col)
-                    if len(df_clean[group_col].unique()) == 2:
+                    if len(df_univar[group_col].unique()) == 2:
                          # For 2 groups, we might want to respect the reference group too, but usually it's just A vs B.
                          # We'll rely on the main CoxPH section below for detailed HR.
                          pass
                 
                     # We will perform detailed stats below, just showing p-value on plot for now
-                    res = multivariate_logrank_test(df_clean[time_col], df_clean[group_col], df_clean[event_col])
+                    res = multivariate_logrank_test(df_univar[time_col], df_univar[group_col], df_univar[event_col])
                     p_value_text = f"p = {res.p_value:.4f}"
                 except:
                     pass
@@ -594,8 +621,13 @@ if df is not None:
             plt.subplots_adjust(left=0.2, right=0.95, top=0.95, bottom=0.2)
 
             # Determine Ticks
-            max_time = df_clean[time_col].max()
-            if tick_interval:
+            max_time = df_univar[time_col].max()
+            if enable_zoom:
+                ax.set_xlim(0, zoom_max)
+                if tick_interval:
+                     custom_ticks = np.arange(0, zoom_max + tick_interval, tick_interval)
+                     ax.set_xticks(custom_ticks)
+            elif tick_interval:
                 custom_ticks = np.arange(0, max_time + tick_interval, tick_interval)
                 ax.set_xticks(custom_ticks)
                 ax.set_xlim(0, custom_ticks[-1]) # Strict x-limits for table alignment
@@ -612,7 +644,7 @@ if df is not None:
                 if groups_ordered:
                     groups = groups_ordered
                 else:
-                    groups = sorted(df_clean[group_col].unique())
+                    groups = sorted(df_univar[group_col].unique())
                 results = []
             
                 # Determine Color Palette
@@ -625,7 +657,7 @@ if df is not None:
                 plot_labels = [] # For the risk table
             
                 for i, group in enumerate(groups):
-                    mask = df_clean[group_col] == group
+                    mask = df_univar[group_col] == group
                 
                     # Resolve Color
                     color = None
@@ -645,7 +677,7 @@ if df is not None:
                     plot_labels.append(label)
 
                     kmf_group = KaplanMeierFitter()
-                    kmf_group.fit(df_clean[time_col][mask], df_clean[event_col][mask], label=label)
+                    kmf_group.fit(df_univar[time_col][mask], df_univar[event_col][mask], label=label)
                     kmf_group.plot_survival_function(ax=ax, ci_show=show_ci, show_censors=show_censored, color=color, linewidth=line_width)
                     fitters.append(kmf_group)
             
@@ -725,18 +757,18 @@ if df is not None:
             
                 # Logrank Test
                 if len(groups) >= 2:
-                    result = multivariate_logrank_test(df_clean[time_col], df_clean[group_col], df_clean[event_col])
+                    result = multivariate_logrank_test(df_univar[time_col], df_univar[group_col], df_univar[event_col])
                     st.write(f"**Log-Rank Test p-value**: {result.p_value:.4f}")
             
                 # Cox PH (Hazard Ratio)
                 st.subheader("Cox Proportional Hazards (Hazard Ratios)")
             
                 # Reference Group Selection
-                unique_values = sorted(df_clean[group_col].unique())
+                unique_values = sorted(df_univar[group_col].unique())
                 reference_group = st.selectbox("Select Reference Group (Baseline)", unique_values, index=0)
             
                 # Prepare data for CoxPH
-                cox_df = df_clean[[time_col, event_col, group_col]].dropna()
+                cox_df = df_univar[[time_col, event_col, group_col]].dropna()
             
                 try:
                     # 1. Prepare Data
