@@ -329,12 +329,18 @@ if df is not None:
         pval_x_main = st.slider("P-val X (Main)", 0.0, 1.0, 0.95)
         pval_y_main = st.slider("P-val Y (Main)", 0.0, 1.0, 0.05)
 
-        st.markdown("### Free Text Annotation")
-        main_free_text = st.text_area("Add Text (Main)", value="", placeholder="e.g. HR=0.45\nSecond Line", height=70)
-        main_text_x = st.slider("Text X (Main)", 0.0, 1.0, 0.5)
-        main_text_y = st.slider("Text Y (Main)", 0.0, 1.0, 0.5)
-        main_text_size = st.number_input("Text Size (Main)", min_value=6, value=12)
-        main_text_box = st.checkbox("Box Text (Main)", value=False)
+        st.markdown("### Free Text Annotations")
+        main_annotations = []
+        for i in range(1, 6):
+            with st.expander(f"Annotation {i}", expanded=(i==1)):
+                m_txt = st.text_area(f"Text ({i})", value="", placeholder="e.g. HR=0.45", key=f"main_txt_{i}", height=70)
+                m_x = st.slider(f"X ({i})", 0.0, 1.0, 0.5, key=f"main_x_{i}")
+                m_y = st.slider(f"Y ({i})", 0.0, 1.0, 0.5, key=f"main_y_{i}")
+                m_sz = st.number_input(f"Size ({i})", min_value=6, value=12, key=f"main_sz_{i}")
+                m_box = st.checkbox(f"Box ({i})", value=False, key=f"main_bx_{i}")
+                
+                if m_txt:
+                    main_annotations.append({'text': m_txt, 'x': m_x, 'y': m_y, 'size': m_sz, 'box': m_box})
 
     # 3. CIF Plot Settings
     with st.sidebar.expander("CIF Plot Settings (Competing Risks)", expanded=False):
@@ -361,12 +367,18 @@ if df is not None:
         pval_x_cif = st.slider("P-val X (CIF)", 0.0, 1.0, 0.95)
         pval_y_cif = st.slider("P-val Y (CIF)", 0.0, 1.0, 0.2)
         
-        st.markdown("### Free Text Annotation")
-        cif_free_text = st.text_area("Add Text (CIF)", value="", placeholder="e.g. p=0.003\nGroup B vs C", height=70)
-        cif_text_x = st.slider("Text X (CIF)", 0.0, 1.0, 0.5)
-        cif_text_y = st.slider("Text Y (CIF)", 0.0, 1.0, 0.5)
-        cif_text_size = st.number_input("Text Size (CIF)", min_value=6, value=12)
-        cif_text_box = st.checkbox("Box Text (CIF)", value=False)
+        st.markdown("### Free Text Annotations")
+        cif_annotations = []
+        for i in range(1, 6):
+             with st.expander(f"Annotation {i} (CIF)", expanded=(i==1)):
+                c_txt = st.text_area(f"Text ({i})", value="", placeholder="e.g. p=0.003", key=f"cif_txt_{i}", height=70)
+                c_x = st.slider(f"X ({i})", 0.0, 1.0, 0.5, key=f"cif_x_{i}")
+                c_y = st.slider(f"Y ({i})", 0.0, 1.0, 0.5, key=f"cif_y_{i}")
+                c_sz = st.number_input(f"Size ({i})", min_value=6, value=12, key=f"cif_sz_{i}")
+                c_box = st.checkbox(f"Box ({i})", value=False, key=f"cif_bx_{i}")
+                
+                if c_txt:
+                    cif_annotations.append({'text': c_txt, 'x': c_x, 'y': c_y, 'size': c_sz, 'box': c_box})
         
     # Theme Selection (moved to bottom or keep global)
     st.sidebar.subheader("Color Theme")
@@ -663,9 +675,10 @@ if df is not None:
                      if ax.get_legend():
                          ax.get_legend().remove()
                 
-                if main_free_text:
-                     bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if main_text_box else None
-                     ax.text(main_text_x, main_text_y, main_free_text, transform=ax.transAxes, ha='center', va='center', bbox=bbox_props, fontsize=main_text_size)
+                if main_annotations:
+                    for ann in main_annotations:
+                        bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if ann['box'] else None
+                        ax.text(ann['x'], ann['y'], ann['text'], transform=ax.transAxes, ha='center', va='center', bbox=bbox_props, fontsize=ann['size'])
                 
                 st.pyplot(fig)
                 
@@ -1658,9 +1671,10 @@ if df is not None:
                      if ax_cif.get_legend():
                          ax_cif.get_legend().remove()
 
-                if cif_free_text:
-                     bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if cif_text_box else None
-                     ax_cif.text(cif_text_x, cif_text_y, cif_free_text, transform=ax_cif.transAxes, ha='center', va='center', bbox=bbox_props, fontsize=cif_text_size)
+                if cif_annotations:
+                    for ann in cif_annotations:
+                        bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if ann['box'] else None
+                        ax_cif.text(ann['x'], ann['y'], ann['text'], transform=ax_cif.transAxes, ha='center', va='center', bbox=bbox_props, fontsize=ann['size'])
 
 
 
