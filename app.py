@@ -1096,8 +1096,8 @@ if df is not None:
                 
                 # Check for NaNs in selected variables
                 mv_cols = [time_col, event_col] + covariates
-                mv_df = df[mv_cols].dropna()
-                dropped_mv = len(df) - len(mv_df)
+                mv_df = df_clean[mv_cols].dropna()
+                dropped_mv = len(df_clean) - len(mv_df)
                 
                 if dropped_mv > 0:
                     st.warning(f"⚠️ {dropped_mv} rows will be dropped due to missing values in the selected covariates. Analysis based on {len(mv_df)} rows.")
