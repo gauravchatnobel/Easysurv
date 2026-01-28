@@ -561,7 +561,7 @@ if df is not None:
                     group_labels[grp] = new_label
                 with col2:
                     if selected_theme == "Custom":
-                         color = st.color_picker(f"Color for {grp}", key=f"color_{grp}")
+                        color = st.color_picker(f"Color for {grp}", key=f"color_{grp}")
                         custom_colors[grp] = color
 
     # Analysis
