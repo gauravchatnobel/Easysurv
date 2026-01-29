@@ -249,16 +249,17 @@ if df is not None:
                          m = find_var_persist(v, df, df_renamed)
                          if m is not None: mask_low |= m
                          
-                    # Assign
-                    if "2-Tier" in r_sys:
+                     elif "2-Tier" in r_sys:
                          df[r_name] = np.where(mask_high, "High Risk", "Standard Risk")
-                    else:
+                     else:
                          conds = [mask_high, (~mask_high) & (mask_low)]
                          choic = ["High Risk", "Low Risk"]
                          df[r_name] = np.select(conds, choic, default="Intermediate Risk")
+                     
+                     st.toast(f"✅ Risk Variable '{r_name}' loaded successfully!", icon="🧬")
                          
-                except Exception as e:
-                    st.error(f"Failed to rebuild Risk System {combo_def['name']}: {e}")
+                 except Exception as e:
+                     st.error(f"Failed to rebuild Risk System {combo_def['name']}: {e}")
     
     # --- DATA FILTRATION ---
     # --- DATA FILTRATION ---
@@ -1369,7 +1370,7 @@ if df is not None:
                              with st.spinner(f"Running 5-Fold CV to find optimal Lambda for L1 Ratio = {l1_ratio}..."):
                                  try:
                                      from lifelines import CoxPHFitter
-                                     from sklearn.model_selection import KFold
+                                     from sklearn.model_selection import StratifiedKFold
                                      
                                      # Prepare Data (Silent Mode)
                                      tune_df = mv_df.copy()
@@ -1384,18 +1385,20 @@ if df is not None:
                                      
                                      tune_encoded.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in tune_encoded.columns]
                                      
-                                     tune_encoded.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in tune_encoded.columns]
+                                     # Search Space (Widened per feedback)
+                                     # 0.0001 to ~30.0 (30 points)
+                                     lambdas = np.logspace(-4, 1.5, 30)
                                      
-                                     # Search Space
-                                     lambdas = np.logspace(-3, 1, 20) # 0.001 to 10.0
-                                     
-                                     kf = KFold(n_splits=5, shuffle=True, random_state=42)
+                                     # Robust Stratification (StratifiedKFold)
+                                     kf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
                                      
                                      results = []
                                      
                                      for lam in lambdas:
                                          fold_scores = []
-                                         for train_idx, val_idx in kf.split(tune_encoded):
+                                         # Stratified Split needs the 'y' (event) argument to balance folds
+                                         # We stratify by *Event Occurrence* (event_col)
+                                         for train_idx, val_idx in kf.split(tune_encoded, tune_encoded[event_col]):
                                              train_data = tune_encoded.iloc[train_idx]
                                              val_data = tune_encoded.iloc[val_idx]
                                              
@@ -1406,7 +1409,15 @@ if df is not None:
                                                  score = cph_tune.score(val_data, scoring_method="concordance_index")
                                                  fold_scores.append(score)
                                              except:
-                                                 fold_scores.append(0.5) # Fail fallback
+                                                 pass # Skip failed folds/convergence errors (don't bias with 0.5)
+                                         
+                                         # Logic: Only accept if at least 3/5 folds succeeded
+                                         if len(fold_scores) >= 3:
+                                              avg_score = np.mean(fold_scores)
+                                              results.append({'lam': lam, 'score': avg_score})
+                                         else:
+                                              # If almost all failed, mark as unreliable (0.5)
+                                              results.append({'lam': lam, 'score': 0.5})
                                          
                                          # Calculate Mean and Standard Error (SE)
                                          avg_score = np.mean(fold_scores)
