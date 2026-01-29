@@ -1419,7 +1419,6 @@ if df is not None:
                                      st.metric("Lambda Min", f"{opts['min']['lam']:.4f}", f"Score: {opts['min']['score']:.3f}")
                                      if st.button("Use Lambda Min", use_container_width=True):
                                          st.session_state.penalizer_val = float(opts['min']['lam'])
-                                         st.session_state['lambda_slider'] = float(opts['min']['lam']) # Force slider update
                                          st.rerun()
                                          
                                  with cols_sel[1]:
@@ -1427,7 +1426,6 @@ if df is not None:
                                      st.metric("Lambda 1SE", f"{opts['1se']['lam']:.4f}", f"Score: {opts['1se']['score']:.3f}")
                                      if st.button("Use Lambda 1SE", use_container_width=True):
                                          st.session_state.penalizer_val = float(opts['1se']['lam'])
-                                         st.session_state['lambda_slider'] = float(opts['1se']['lam']) # Force slider update
                                          st.rerun()
 
                     run_analysis = st.button("Run Multivariable Analysis")
