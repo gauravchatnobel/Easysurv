@@ -1840,6 +1840,10 @@ if df is not None:
                                         return (dframe[col] == val)
                                         
                         return None
+                    
+                    # Pre-calculate masks (Initialize to avoid UnboundLocalError)
+                    mask_high = pd.Series([False]*len(score_df), index=score_df.index)
+                    mask_low = pd.Series([False]*len(score_df), index=score_df.index)
 
                     # Check High Risk
                     for v in high_risk_vars:
