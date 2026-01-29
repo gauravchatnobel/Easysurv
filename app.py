@@ -1734,23 +1734,64 @@ if df is not None:
                     clean_col_map = {c: c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in score_df.columns}
                     score_df_renamed = score_df.rename(columns=clean_col_map)
                     
+                    # Smart Variable Matcher
+                    def find_variable_safely(v_name, dframe, dframe_renamed):
+                        # 1. Direct Match (Sanitized)
+                        if v_name in dframe_renamed.columns:
+                            col = dframe_renamed[v_name]
+                            if pd.api.types.is_numeric_dtype(col):
+                                return (col > 0)
+                            return col.astype(bool)
+                            
+                        # 2. Categorical Reconstruction (e.g., v_name="ICC_BCR::ABL1", col="ICC", val="BCR::ABL1")
+                        # We try to match v_name prefix to a column in dframe
+                        for col in dframe.columns:
+                            clean_col = col.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                            if v_name.startswith(clean_col + "_"):
+                                # Extracted value part
+                                val_part_sanitized = v_name[len(clean_col)+1:]
+                                
+                                # We need to find which value in the original column matches this sanitized value part
+                                # This is tricky because "::" might be "_" or not.
+                                # Let's iterate unique values in original col
+                                unique_vals = dframe[col].dropna().unique()
+                                for val in unique_vals:
+                                    val_sanitized = str(val).replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                    # Handle specialized characters if needed (Tab 2 logic might be more complex)
+                                    # But usually Tab 2 just does get_dummies with prefix.
+                                    
+                                    # get_dummies(prefix="ICC") -> "ICC_Value"
+                                    # So we check if v_name == clean_col + "_" + val_sanitized (or similar)
+                                    # Actually, get_dummies uses the original value string.
+                                    # But we sanitized the *result* columns in Tab 2 line 1459:
+                                    # [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')...]
+                                    
+                                    # So yes, we just need to replicate that chain.
+                                    candidate_name = clean_col + "_" + str(val).replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                    
+                                    if v_name == candidate_name:
+                                        # MATCH FOUND!
+                                        return (dframe[col] == val)
+                                        
+                        return None
+
                     # Check High Risk
                     for v in high_risk_vars:
-                        if v in score_df_renamed.columns:
-                            # Assume 1/True is "Present"
-                            # Handle numeric > 0
-                            if pd.api.types.is_numeric_dtype(score_df_renamed[v]):
-                                mask_high |= (score_df_renamed[v] > 0)
+                        series_match = find_variable_safely(v, score_df, score_df_renamed)
+                        if series_match is not None:
+                            mask_high |= series_match
                             cols_found += 1
                         else:
                             cols_missing.append(v)
 
                     # Check Low Risk
                     for v in low_risk_vars:
-                        if v in score_df_renamed.columns:
-                            if pd.api.types.is_numeric_dtype(score_df_renamed[v]):
-                                mask_low |= (score_df_renamed[v] > 0)
+                        series_match = find_variable_safely(v, score_df, score_df_renamed)
+                        if series_match is not None:
+                            mask_low |= series_match
                             cols_found += 1
+                        else:
+                            cols_missing.append(v)
 
                     # ASSIGN GROUPS
                     if "2-Tier" in system_type:
