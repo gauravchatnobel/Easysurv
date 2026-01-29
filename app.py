@@ -837,11 +837,39 @@ if df is not None:
                     st.caption(f"Reference Group: **{reference_group}** (All HRs are relative to this group)")
 
                 except Exception as e:
-                    st.error(f"Cox Model Error: {e}")
-                    st.info("Tip: This often happens if a group has too few events or perfectly predicts survival (separation).")
+                    # Auto-Fallback to Penalized Cox
+                    try:
+                        cph = CoxPHFitter(penalizer=0.1)
+                        cph.fit(cox_data, duration_col=time_col, event_col=event_col)
+                        
+                        st.warning("⚠️ **Convergence Warning**: Standard Cox model failed due to separation (perfect prediction or sparse events). Automatically applied **Penalized Cox (Ridge, lambda=0.1)** to alleviate this.")
+                        
+                        # Display Results (Same as above)
+                        summary_df = cph.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']]
+                        summary_df = summary_df.rename(columns={
+                            'exp(coef)': 'Hazard Ratio (HR)', 
+                            'exp(coef) lower 95%': 'Lower 95% CI', 
+                            'exp(coef) upper 95%': 'Upper 95% CI',
+                            'p': 'p-value'
+                        })
+                    
+                        st.dataframe(summary_df.style.format("{:.3f}"))
+                        st.session_state['uv_cox_summary'] = summary_df
+                        
+                        csv_cox = summary_df.to_csv().encode('utf-8')
+                        st.download_button(
+                            label="💾 Download Cox HR Table (Penalized)",
+                            data=csv_cox,
+                            file_name="cox_ph_table_penalized.csv",
+                            mime="text/csv"
+                        )
+                        st.caption(f"Reference Group: **{reference_group}**")
+                        
+                    except Exception as e2:
+                        st.error(f"Cox Model Error: {e}")
+                        st.info("Tip: This often happens if a group has too few events or perfectly predicts survival (separation). Even Penalized Cox could not resolve this.")
                 
-                except Exception as e:
-                    st.warning(f"Could not run Cox PH model: {e}")
+
                 
                 # --- MEDIAN SURVIVAL TABLE ---
                 st.subheader("Median Survival Time")
