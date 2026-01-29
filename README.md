@@ -47,7 +47,7 @@ A comprehensive, code-free platform for performing publication-ready survival an
 ### 6. 📄 Reporting
 *   **One-Click Report**: Generate a printer-friendly HTML report summarizing all your analyses, plots, and dataset statistics.
 
-### 7. Diagnostic & Prognostic Module (v2.0)
+### 7. Diagnostic & Prognostic Module
 *   **Diagnostic Metrics**: Calculate Sensitivity, Specificity, PPV, NPV, and Accuracy with **95% Wilson Score Confidence Intervals**.
 
 *   **Prognostic "Ladder"**: Compare the Harrell's C-Index of up to **3 models** (e.g., Clinical vs +Biomarker vs +Combined).
