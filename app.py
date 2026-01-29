@@ -204,6 +204,61 @@ if df is not None:
                     df[name] = np.where(final_mask, "Target Group", "Other")
                 except Exception as e:
                     st.error(f"Failed to create boolean variable {combo_def['name']}: {e}")
+
+            elif combo_def['type'] == 'risk_system':
+                try:
+                    # Re-apply Risk Stratification Logic
+                    r_name = combo_def['name']
+                    r_high = combo_def['high_vars']
+                    r_low = combo_def['low_vars']
+                    r_sys = combo_def['system'] # "2-Tier" or "3-Tier"
+                    
+                    # We need the find_variable_safely function here. 
+                    # Since it is defined inside Tab 3 later, we should move it to global or re-define/duplicate it here.
+                    # For safety/speed, let's include a lightweight version here.
+                    
+                    # Pre-calculate masks
+                    mask_high = pd.Series([False]*len(df), index=df.index)
+                    mask_low = pd.Series([False]*len(df), index=df.index)
+                    
+                    # Sanitize for matching
+                    clean_col_map = {c: c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in df.columns}
+                    df_renamed = df.rename(columns=clean_col_map)
+                    
+                    def find_var_persist(v_name, d, d_renamed):
+                        if v_name in d_renamed.columns:
+                            c = d_renamed[v_name]
+                            return (c > 0) if pd.api.types.is_numeric_dtype(c) else c.astype(bool)
+                        # Prefix match
+                        for col in d.columns:
+                            c_clean = col.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                            if v_name.startswith(c_clean + "_"):
+                                val_part = v_name[len(c_clean)+1:]
+                                # Loose match against values
+                                for val in d[col].dropna().unique():
+                                     v_san = str(val).replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                     if v_name == c_clean + "_" + v_san:
+                                         return (d[col] == val)
+                        return None
+
+                    for v in r_high:
+                         m = find_var_persist(v, df, df_renamed)
+                         if m is not None: mask_high |= m
+                    
+                    for v in r_low:
+                         m = find_var_persist(v, df, df_renamed)
+                         if m is not None: mask_low |= m
+                         
+                    # Assign
+                    if "2-Tier" in r_sys:
+                         df[r_name] = np.where(mask_high, "High Risk", "Standard Risk")
+                    else:
+                         conds = [mask_high, (~mask_high) & (mask_low)]
+                         choic = ["High Risk", "Low Risk"]
+                         df[r_name] = np.select(conds, choic, default="Intermediate Risk")
+                         
+                except Exception as e:
+                    st.error(f"Failed to rebuild Risk System {combo_def['name']}: {e}")
     
     # --- DATA FILTRATION ---
     # --- DATA FILTRATION ---
@@ -588,7 +643,7 @@ if df is not None:
         if landmark_info:
             st.info(landmark_info)
 
-        tab1, tab2, tab_risk, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["Univariable (KM)", "Multivariable (Cox)", "Genetic Risk System", "Competing Risks (CIF)", "🧬 Biomarker Optimum Threshold", "🧪 Variable Generation", "🔥 Correlations", "🎯 Diagnostic & Concordance", "📚 Methodology"])
+        tab1, tab2, tab_risk, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["Univariable (KM)", "Multivariable (Cox)", "Risk System Based on HR", "Competing Risks (CIF)", "🧬 Biomarker Optimum Threshold", "🧪 Variable Generation", "🔥 Correlations", "🎯 Diagnostic & Concordance", "📚 Methodology"])
 
         with tab1:
         
@@ -1612,7 +1667,7 @@ if df is not None:
                 st.info("Select at least one covariate variable (e.g., Age, Gender, Mutations) to begin.")
 
         with tab_risk:
-            st.subheader("🧬 Genetic Risk System Builder")
+            st.subheader("Risk System Based on HR")
             st.write("Stratify patients into Risk Groups based on the hazard ratios from your Multivariable Model.")
 
             if 'mv_summary_df' not in st.session_state:
@@ -1875,6 +1930,33 @@ if df is not None:
                                     
                             except Exception as e:
                                 st.error(f"Could not calculate stats: {e}")
+
+                        # --- 5. SAVE TO DATASET ---
+                        st.divider()
+                        st.subheader("💾 Save to Dataset")
+                        
+                        save_col_1, save_col_2 = st.columns([1, 1])
+                        with save_col_1:
+                            new_var_name = st.text_input("New Variable Name", value=f"Risk_Score_{system_type.split(' ')[0]}")
+                        with save_col_2:
+                            st.write("") 
+                            st.write("")
+                            if st.button("Add to Dataset as New Column", type="secondary"):
+                                # Add to custom_combinations to persist
+                                combo_entry = {
+                                    'type': 'risk_system',
+                                    'name': new_var_name,
+                                    'system': system_type,
+                                    'high_vars': high_risk_vars,
+                                    'low_vars': low_risk_vars
+                                }
+                                
+                                if 'custom_combinations' not in st.session_state:
+                                    st.session_state.custom_combinations = []
+                                    
+                                st.session_state.custom_combinations.append(combo_entry)
+                                st.success(f"Added **{new_var_name}** to dataset! You can now use it in Univariable Analysis.")
+                                st.rerun()
 
         with tab3:
             st.subheader("Competing Risks Analysis (Cumulative Incidence)")
