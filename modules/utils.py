@@ -2,12 +2,12 @@ import pandas as pd
 import streamlit as st
 
 @st.cache_data
-def load_data(file):
+def load_data(file, sheet_name=0):
     try:
         if file.name.endswith('.csv'):
             return pd.read_csv(file)
         else:
-            return pd.read_excel(file)
+            return pd.read_excel(file, sheet_name=sheet_name)
     except Exception as e:
         return None
 
