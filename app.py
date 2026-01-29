@@ -1371,7 +1371,7 @@ if df is not None:
                              with st.spinner(f"Running 5-Fold CV to find optimal Lambda for L1 Ratio = {l1_ratio}..."):
                                  try:
                                      from lifelines import CoxPHFitter
-                                     from sklearn.model_selection import StratifiedKFold
+                                     from sklearn.model_selection import KFold
                                      
                                      # Prepare Data (Silent Mode)
                                      tune_df = mv_df.copy()
@@ -1387,30 +1387,29 @@ if df is not None:
                                      tune_encoded.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in tune_encoded.columns]
                                      
                                      # Search Space (Refined to R glmnet defaults approx)
-                                     # 0.0001 to 10.0 (50 points) - Prevents over-crushing while allowing weak penalty
+                                     # 0.0001 to 10.0 (50 points)
                                      lambdas = np.logspace(np.log10(1e-4), np.log10(10.0), 50)
                                      
-                                     # Robust Stratification (StratifiedKFold)
-                                     kf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+                                     # Standard KFold (Matches glmnet default behavior)
+                                     kf = KFold(n_splits=5, shuffle=True, random_state=42)
                                      
                                      results = []
                                      
                                      for lam in lambdas:
                                          fold_scores = []
-                                         # Stratified Split needs the 'y' (event) argument to balance folds
-                                         # We stratify by *Event Occurrence* (event_col)
-                                         for train_idx, val_idx in kf.split(tune_encoded, tune_encoded[event_col]):
+                                         for train_idx, val_idx in kf.split(tune_encoded):
                                              train_data = tune_encoded.iloc[train_idx]
                                              val_data = tune_encoded.iloc[val_idx]
                                              
                                              cph_tune = CoxPHFitter(penalizer=lam, l1_ratio=l1_ratio)
                                              try:
                                                  cph_tune.fit(train_data, duration_col=time_col, event_col=event_col)
-                                                 # Concordance Index as score
-                                                 score = cph_tune.score(val_data, scoring_method="concordance_index")
-                                                 fold_scores.append(score)
+                                                 # LOG-LIKELIHOOD (Deviance) - Aligning with glmnet
+                                                 # Higher (closer to 0) is better.
+                                                 ll_score = cph_tune.score(val_data, scoring_method="log_likelihood")
+                                                 fold_scores.append(ll_score)
                                              except:
-                                                 pass # Skip failed folds/convergence errors (don't bias with 0.5)
+                                                 pass # Skip failed folds
                                          
                                          # Logic: Only accept if at least 3/5 folds succeeded
                                          if len(fold_scores) >= 3:
@@ -1419,8 +1418,8 @@ if df is not None:
                                               se_score = np.std(fold_scores) / np.sqrt(len(fold_scores))
                                               results.append({'lambda': lam, 'score': avg_score, 'se': se_score})
                                          else:
-                                              # If almost all failed, mark as unreliable (0.5)
-                                              results.append({'lambda': lam, 'score': 0.5, 'se': 0.0})
+                                              # Mark as unreliable (-infinity effectively)
+                                              results.append({'lambda': lam, 'score': -1e9, 'se': 0.0})
                                      
                                      res_df = pd.DataFrame(results)
                                      
@@ -1447,7 +1446,7 @@ if df is not None:
                                      
                                      ax_tune.set_xscale('log')
                                      ax_tune.set_xlabel("Lambda (Penalty Strength)")
-                                     ax_tune.set_ylabel("CV Concordance Index")
+                                     ax_tune.set_ylabel("CV Log-Likelihood (Deviance)")
                                      
                                      # Mark Min and 1SE
                                      ax_tune.axvline(x=lambda_min, color='g', linestyle='--', label=f'Min: {lambda_min:.3f}')
