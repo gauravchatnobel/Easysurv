@@ -1220,11 +1220,19 @@ if df is not None:
                          
                     # 2. Collinearity Check
                     high_corr = statistics.check_collinearity(mv_df, covariates)
+                    
+                    # Check VIF status as well
+                    max_vif = 0
+                    if vif_df is not None and not vif_df.empty:
+                        max_vif = vif_df['VIF'].max()
+
                     if high_corr:
                         st.warning(f"⚠️ **Multicollinearity Detected**: High correlation (>0.7) between: " + 
                                    ", ".join([f"{v1} & {v2} (r={val:.2f})" for v1, v2, val in high_corr]))
+                    elif max_vif > 5.0:
+                         st.warning(f"⚠️ **Multicollinearity Detected**: Max VIF is {max_vif:.2f} (> 5.0), indicating linear dependence between columns even if pairwise correlations are low.", icon="⚠️")
                     else:
-                        st.success("✅ No multicollinearity detected (Checked Numeric & Categorical).")
+                        st.success("✅ No multicollinearity detected (checked Pairwise Correlation & VIF).")
 
                     # Visual Reassurance (Heatmap & VIF)
                     with st.expander("🔍 Show Correlation Check (Heatmap & VIF)"):
