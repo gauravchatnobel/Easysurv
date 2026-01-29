@@ -604,22 +604,26 @@ if df is not None:
             hr_text = ""
             p_value_text = None # Initialize to avoid NameError
             if show_p_val_plot and group_col != "None" and len(df_clean[group_col].unique()) >= 2:
+                # Attempt Cox for plot? (Optional, maybe for future HR on plot)
                 try:
                     cox_df = df_clean[[time_col, event_col, group_col]].dropna()
                     cox_data_encoded = pd.get_dummies(cox_df, columns=[group_col], drop_first=True)
                     cox_data_encoded.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in cox_data_encoded.columns]
+                    # This might fail on separation, but we don't strictly need it for the p-value text anymore
                     cph_plot = CoxPHFitter()
                     cph_plot.fit(cox_data_encoded, duration_col=time_col, event_col=event_col)
-                    if len(df_clean[group_col].unique()) == 2:
-                         # For 2 groups, we might want to respect the reference group too, but usually it's just A vs B.
-                         # We'll rely on the main CoxPH section below for detailed HR.
-                         pass
-                
-                    # We will perform detailed stats below, just showing p-value on plot for now
-                    res = multivariate_logrank_test(df_clean[time_col], df_clean[group_col], df_clean[event_col])
-                    p_value_text = f"p = {res.p_value:.4f}"
                 except:
                     pass
+
+                # Calculate Log-Rank P-value (Robust)
+                try:
+                    res = multivariate_logrank_test(df_clean[time_col], df_clean[group_col], df_clean[event_col])
+                    if res.p_value < 0.0001:
+                        p_value_text = "p < 0.0001"
+                    else:
+                        p_value_text = f"p = {res.p_value:.4f}"
+                except:
+                    p_value_text = None
 
         
             # 1. Plotting
