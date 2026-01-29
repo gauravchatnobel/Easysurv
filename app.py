@@ -264,10 +264,8 @@ if df is not None:
         
         if "MRD_Status" in columns: default_group_idx = columns.index("MRD_Status") + 1
         
-    # --- USER REQUEST: Default to a random (first) variable instead of "None" if possible ---
-    # If default_group_idx is still 0 (None) and we have columns, default to index 1 (First Variable)
-    if default_group_idx == 0 and len(columns) > 0:
-        default_group_idx = 1
+    # User requested revert: "just make it blank with no error message by default"
+    # We keep default_group_idx as is (likely 0/"None" unless auto-detected above)
     # ----------------------------------------------------------------------------------------
 
     time_col = st.sidebar.selectbox("Time Column (Duration)", columns, index=default_time_idx)
