@@ -263,6 +263,12 @@ if df is not None:
         elif "Status" in columns: default_event_idx = columns.index("Status")
         
         if "MRD_Status" in columns: default_group_idx = columns.index("MRD_Status") + 1
+        
+    # --- USER REQUEST: Default to a random (first) variable instead of "None" if possible ---
+    # If default_group_idx is still 0 (None) and we have columns, default to index 1 (First Variable)
+    if default_group_idx == 0 and len(columns) > 0:
+        default_group_idx = 1
+    # ----------------------------------------------------------------------------------------
 
     time_col = st.sidebar.selectbox("Time Column (Duration)", columns, index=default_time_idx)
     event_col = st.sidebar.selectbox("Event Column (Status: 1=Event, 0=Censored)", columns, index=default_event_idx)
@@ -1024,9 +1030,7 @@ if df is not None:
                      bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box_main else None
                      ax.text(pval_x_main, pval_y_main, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
                 
-                if main_free_text:
-                     bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if main_text_box else None
-                     ax.text(main_text_x, main_text_y, main_free_text, transform=ax.transAxes, ha='center', va='center', bbox=bbox_props, fontsize=main_text_size)
+                # OLD Free Text Block Removed (Replaced by Multi-Annotation Loop Above)
                 
                 st.pyplot(fig)
 
