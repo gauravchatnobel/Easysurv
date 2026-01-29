@@ -1435,7 +1435,26 @@ if df is not None:
                             if use_penalizer:
                                 st.caption(f"Model: Penalized Cox (Lambda={final_penalizer:.4f}, L1 Ratio={final_l1})")
                                 
-                            st.dataframe(summary_mv.style.format("{:.3f}"))
+                            # Identify unstable rows for highlighting
+                            def highlight_unstable(row):
+                                # Helper to get original coef/se from model object based on index name
+                                try:
+                                    # row.name is the variable name
+                                    # Check original params in model
+                                    coef = cph_mv.params_[row.name]
+                                    se = cph_mv.standard_errors_[row.name]
+                                    
+                                    if abs(coef) > 10 or se > 5:
+                                        return ['background-color: rgba(255, 0, 0, 0.1)'] * len(row)
+                                except:
+                                    pass
+                                return [''] * len(row)
+
+                            st.dataframe(summary_mv.style.format("{:.3f}").apply(highlight_unstable, axis=1))
+                            
+                            # Add legend if needed
+                            if any((abs(cph_mv.params_) > 10) | (cph_mv.standard_errors_ > 5)):
+                                st.caption("🟥 **Red Background**: Indicates unstable estimates (Extreme Coef > 10 or SE > 5). Results likely unreliable due to separation.")
                             
                             # Save to Session State specifically for Narrator or Persistence
                             st.session_state['mv_summary_df'] = summary_mv
