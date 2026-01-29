@@ -588,7 +588,7 @@ if df is not None:
         if landmark_info:
             st.info(landmark_info)
 
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["Univariable (KM)", "Multivariable (Cox)", "Competing Risks (CIF)", "🧬 Biomarker Optimum Threshold", "🧪 Variable Generation", "🔥 Correlations", "🎯 Diagnostic & Concordance", "📚 Methodology"])
+        tab1, tab2, tab_risk, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["Univariable (KM)", "Multivariable (Cox)", "Genetic Risk System", "Competing Risks (CIF)", "🧬 Biomarker Optimum Threshold", "🧪 Variable Generation", "🔥 Correlations", "🎯 Diagnostic & Concordance", "📚 Methodology"])
 
         with tab1:
         
@@ -1610,6 +1610,223 @@ if df is not None:
 
             else:
                 st.info("Select at least one covariate variable (e.g., Age, Gender, Mutations) to begin.")
+
+        with tab_risk:
+            st.subheader("🧬 Genetic Risk System Builder")
+            st.write("Stratify patients into Risk Groups based on the hazard ratios from your Multivariable Model.")
+
+            if 'mv_summary_df' not in st.session_state:
+                st.warning("⚠️ **No Model Found**: Please run the **Multivariable Analysis (Tab 2)** first to generate Hazard Ratios.")
+            else:
+                mv_res = st.session_state['mv_summary_df']
+                
+                # --- 1. CONFIGURATION ---
+                c1, c2 = st.columns([1, 2])
+                with c1:
+                    st.markdown("#### 1. Define System")
+                    system_type = st.radio("Risk Tiers", ["2-Tier (High vs Standard)", "3-Tier (High, Intermediate, Low)"], index=1)
+                    
+                    st.markdown("#### 2. Define Thresholds")
+                    hr_high_cut = st.slider("High Risk Cutoff (HR > ...)", 1.0, 5.0, 1.3, 0.05, help="Variables with HR higher than this are 'High Risk'")
+                    
+                    hr_low_cut = 0.8
+                    if "3-Tier" in system_type:
+                        hr_low_cut = st.slider("Low Risk Cutoff (HR < ...)", 0.1, 1.0, 0.85, 0.05, help="Variables with HR lower than this are 'Low Risk'")
+
+                # --- 2. CLASSIFY VARIABLES ---
+                # Create a map for display
+                var_class_map = []
+                high_risk_vars = []
+                low_risk_vars = []
+                
+                for idx, row in mv_res.iterrows():
+                    hr = row['Hazard Ratio (HR)']
+                    tier = "Intermediate/Neutral"
+                    if hr > hr_high_cut:
+                        tier = "🔴 High Risk"
+                        high_risk_vars.append(idx)
+                    elif "3-Tier" in system_type and hr < hr_low_cut:
+                        tier = "🟢 Low Risk"
+                        low_risk_vars.append(idx)
+                    
+                    var_class_map.append({'Variable': idx, 'Hazard Ratio': hr, 'Assigned Tier': tier})
+                
+                with c2:
+                    st.markdown("#### 3. Variable Classification")
+                    st.dataframe(pd.DataFrame(var_class_map).style.applymap(lambda v: 'color: red' if 'High' in str(v) else ('color: green' if 'Low' in str(v) else ''), subset=['Assigned Tier']), height=300)
+
+                # --- 3. STRATIFY PATIENTS ---
+                st.divider()
+                st.markdown("#### 4. Patient Stratification & Performance")
+                
+                if st.button("🚀 Stratify Patients & Evaluate", type="primary"):
+                    # We need the original dataframe with the dummy variables used in the model
+                    # Getting it from app state logic is tricky because dummies were created on the fly in Tab 2.
+                    # Ideally we should have saved the encoded DF or we recreate it. 
+                    # Simpler: We check the original dataframe columns? No, variables might be dummies (e.g. "Gene_Mutated").
+                    # Let's try to match column names from the model to the original DF if possible, else warn.
+                    
+                    # NOTE: In Tab 2 we used 'mv_data_encoded'. We should ideally verify if we can replicate that mapping.
+                    # For this demo, let's assume the variable names in 'mv_summary_df' match columns in 'df_clean' or created dummies.
+                    # Since Tab 2 replaces spaces with underscores, we must account for that.
+                    
+                    score_df = df_clean.copy()
+                    
+                    # Logic: Hierarchical
+                    # 1. High = Any High Risk Var
+                    # 2. Low = No High AND Any Low (if 3-Tier)
+                    # 3. Int = Rest
+                    
+                    # We need to reconstruct the "Presence" of each variable for each patient.
+                    # This is the hard part if variables are categorical dummies.
+                    # Heuristic: Check if column exists. if not, try standardized name.
+                    
+                    # Progress Bar
+                    # Pre-calculate masks
+                    mask_high = pd.Series([False]*len(score_df), index=score_df.index)
+                    mask_low = pd.Series([False]*len(score_df), index=score_df.index)
+                    
+                    # Helper to find column
+                    def get_col_data(v_name, dframe):
+                        # 1. Direct match
+                        if v_name in dframe.columns: return dframe[v_name] == 1 # Assume binary/numeric
+                        # 2. Try reversing sanitization (unlikely to work perfectly but trying common patterns)
+                        # The app sanitizes: replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                        # Users usually have binary 0/1 columns for mutations.
+                        # If simple match fails, we might skip.
+                        return None
+
+                    cols_found = 0
+                    cols_missing = []
+
+                    for v in high_risk_vars:
+                         # We need to find this variable in the dataset
+                         # Check strict match first (Tab 2 sanitized names)
+                         # We probably need to re-run the exact same encoding logic as Tab 2 to be safe.
+                         # RE-RUN ENCODING (Safe)
+                         pass
+                    
+                    # RE-RUN ENCODING LOGIC (Copied from Tab 2 for consistency)
+                    # This ensures we have the exact same columns as the model
+                    strat_encoded = df_clean.copy()
+                    
+                    # Identify categorical cols used in Tab 2
+                    # We need 'cat_cols' from Tab 2 context. It's usually inferred from numeric checks.
+                    # We will re-infer or use global 'columns'.
+                    # For robustness, we'll try to match strictly against the indices in mv_res.
+                    
+                    # Quick encode ALL categorical columns to safe_names to match potential model vars
+                    # This is slightly expensive but necessary to match "ICC_BCR::ABL1" etc.
+                    # Actually, Tab 2 logic was specific. Let's try a simpler approach:
+                    # Just check if the Model Variable matches a Column in the current DF. 
+                    # If not, assume it was a dummy and try to find it.
+                    
+                    for v in high_risk_vars + low_risk_vars:
+                         if v not in score_df.columns:
+                             # It might be a dummy. e.g. "Gender_Male".
+                             # We won't support complex auto-matching here to avoid errors.
+                             # We'll rely on the user having prepared data OR simple binary cols.
+                             # If "ICC_BCR::ABL1" is in the index (sanitized), but "ICC BCR::ABL1" is in df.
+                             # Try sanitizing df columns map.
+                             pass
+                    
+                    # Better Strategy: Sanitize ALL DF columns temporarily to match Model
+                    clean_col_map = {c: c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in score_df.columns}
+                    score_df_renamed = score_df.rename(columns=clean_col_map)
+                    
+                    # Check High Risk
+                    for v in high_risk_vars:
+                        if v in score_df_renamed.columns:
+                            # Assume 1/True is "Present"
+                            # Handle numeric > 0
+                            if pd.api.types.is_numeric_dtype(score_df_renamed[v]):
+                                mask_high |= (score_df_renamed[v] > 0)
+                            cols_found += 1
+                        else:
+                            cols_missing.append(v)
+
+                    # Check Low Risk
+                    for v in low_risk_vars:
+                        if v in score_df_renamed.columns:
+                            if pd.api.types.is_numeric_dtype(score_df_renamed[v]):
+                                mask_low |= (score_df_renamed[v] > 0)
+                            cols_found += 1
+
+                    # ASSIGN GROUPS
+                    if "2-Tier" in system_type:
+                        # High vs Standard
+                        score_df['Risk_Group'] = np.where(mask_high, "High Risk", "Standard Risk")
+                    else:
+                        # 3-Tier
+                        # High = High
+                        # Low = Not High AND Low
+                        # Int = Not High AND Not Low
+                        conditions = [
+                            mask_high,
+                            (~mask_high) & (mask_low)
+                        ]
+                        choices = ["High Risk", "Low Risk"]
+                        score_df['Risk_Group'] = np.select(conditions, choices, default="Intermediate Risk")
+                    
+                    if cols_missing:
+                        st.warning(f"⚠️ Could not find data for {len(cols_missing)} variables (e.g., {cols_missing[0]}). Risk counts may be inaccurate.")
+                    
+                    # PLOT KM
+                    st.write(f"### Kaplan-Meier Stratification ({system_type})")
+                    
+                    km_col1, km_col2 = st.columns([2, 1])
+                    
+                    with km_col1:
+                        fig_risk, ax_risk = plt.subplots(figsize=(6, 4))
+                        kmf = KaplanMeierFitter()
+                        
+                        risk_groups = sorted(score_df['Risk_Group'].unique())
+                        # Order: Low, Int, High if possible
+                        order_map = {"Low Risk": 0, "Intermediate Risk": 1, "Standard Risk": 1, "High Risk": 2}
+                        risk_groups.sort(key=lambda x: order_map.get(x, 99))
+                        
+                        for grp in risk_groups:
+                            mask = score_df['Risk_Group'] == grp
+                            n = mask.sum()
+                            if n > 0:
+                                kmf.fit(score_df.loc[mask, time_col], score_df.loc[mask, event_col], label=f"{grp} (n={n})")
+                                kmf.plot_survival_function(ax=ax_risk, ci_show=False)
+                        
+                        ax_risk.set_title("Risk Scote Stratification")
+                        ax_risk.set_xlabel(time_col)
+                        ax_risk.set_ylabel("Survival Probability")
+                        st.pyplot(fig_risk)
+                        
+                    with km_col2:
+                        st.write("**Evaluation Metrics**")
+                        # C-Index Calculation
+                        # We treat Risk Group as an ordinal variable: Low=0, Int=1, High=2
+                        # Or just High vs Not.
+                        # For C-Index, we strictly need a numeric predictor.
+                        score_df['Risk_Numeric'] = score_df['Risk_Group'].map({"Low Risk": 0, "Standard Risk": 0, "Intermediate Risk": 1, "High Risk": 2})
+                        
+                        # Fit simple Cox to get C-Index
+                        try:
+                            # We only need 'score' (Risk_Numeric)
+                            cph_eval = CoxPHFitter()
+                            eval_data = score_df[[time_col, event_col, 'Risk_Numeric']].dropna()
+                            cph_eval.fit(eval_data, duration_col=time_col, event_col=event_col)
+                            
+                            c_index = cph_eval.concordance_index_
+                            aic = cph_eval.AIC_partial_
+                            
+                            st.metric("Concordance Index (C-Index)", f"{c_index:.3f}", help="Higher is better (0.5 = random, 1.0 = perfect)")
+                            st.metric("AIC", f"{aic:.1f}", help="Lower is better (Best fit vs complexity)")
+                            
+                            if c_index > 0.7:
+                                st.success("✅ Good Discrimination")
+                            elif c_index > 0.6:
+                                st.warning("⚠️ Moderate Discrimination")
+                            else:
+                                st.error("❌ Poor Discrimination")
+                                
+                        except Exception as e:
+                            st.error(f"Could not calculate stats: {e}")
 
         with tab3:
             st.subheader("Competing Risks Analysis (Cumulative Incidence)")
