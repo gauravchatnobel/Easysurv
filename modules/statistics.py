@@ -88,7 +88,7 @@ def calculate_wilson_ci(k, n, alpha=0.95):
     upper = (centre_adjusted_probability + z*adjusted_standard_deviation) / denominator
     return lower, upper
 
-def get_c_index_bootstrap(df, time_col, event_col, covariates, label="", n_boot=50):
+def get_c_index_bootstrap(df, time_col, event_col, covariates, label="", n_boot=50, penalizer=0.0, l1_ratio=0.0):
     """
     Fits Cox model and perform Bootstrap validation for C-Index estimation.
     Returns dictionary with result.
@@ -101,7 +101,7 @@ def get_c_index_bootstrap(df, time_col, event_col, covariates, label="", n_boot=
     d_enc.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in d_enc.columns]
     
     # Fit Main
-    cph = CoxPHFitter()
+    cph = CoxPHFitter(penalizer=penalizer, l1_ratio=l1_ratio)
     try:
         cph.fit(d_enc, duration_col=time_col, event_col=event_col)
         c_est = cph.concordance_index_
@@ -114,7 +114,7 @@ def get_c_index_bootstrap(df, time_col, event_col, covariates, label="", n_boot=
         # Resample
         d_boot = d_enc.sample(n=len(d_enc), replace=True)
         try:
-            cph_b = CoxPHFitter()
+            cph_b = CoxPHFitter(penalizer=penalizer, l1_ratio=l1_ratio)
             cph_b.fit(d_boot, duration_col=time_col, event_col=event_col)
             boot_cs.append(cph_b.concordance_index_)
         except:
