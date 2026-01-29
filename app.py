@@ -1329,14 +1329,14 @@ if df is not None:
                                      
                                      tune_encoded.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in tune_encoded.columns]
                                      
+                                     tune_encoded.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in tune_encoded.columns]
+                                     
                                      # Search Space
                                      lambdas = np.logspace(-3, 1, 20) # 0.001 to 10.0
-                                     scores = []
                                      
                                      kf = KFold(n_splits=5, shuffle=True, random_state=42)
                                      
-                                     best_score = -9999
-                                     best_lambda = 0.1
+                                     results = []
                                      
                                      for lam in lambdas:
                                          fold_scores = []
@@ -1353,34 +1353,80 @@ if df is not None:
                                              except:
                                                  fold_scores.append(0.5) # Fail fallback
                                          
+                                         # Calculate Mean and Standard Error (SE)
                                          avg_score = np.mean(fold_scores)
-                                         scores.append(avg_score)
-                                         
-                                         if avg_score > best_score:
-                                             best_score = avg_score
-                                             best_lambda = lam
+                                         se_score = np.std(fold_scores) / np.sqrt(len(fold_scores))
+                                         results.append({'lambda': lam, 'score': avg_score, 'se': se_score})
                                      
-                                     # Plot Tuning Result
-                                     fig_tune, ax_tune = plt.subplots(figsize=(6, 3))
-                                     ax_tune.plot(lambdas, scores, marker='o', linestyle='-')
+                                     res_df = pd.DataFrame(results)
+                                     
+                                     # 1. Find Best Score (Lambda Min)
+                                     best_idx = res_df['score'].idxmax()
+                                     best_row = res_df.iloc[best_idx]
+                                     lambda_min = best_row['lambda']
+                                     score_max = best_row['score']
+                                     se_at_max = best_row['se']
+                                     
+                                     # 2. Find Lambda 1SE (Largest lambda with score >= best_score - se_at_max)
+                                     # We want the simplest model (higher penalty -> larger lambda) that is "good enough"
+                                     target_score = score_max - se_at_max
+                                     
+                                     # Filter for candidates meeting the threshold
+                                     candidates = res_df[res_df['score'] >= target_score]
+                                     # Pick the largest lambda among them
+                                     lambda_1se = candidates['lambda'].max()
+                                     score_1se = candidates[candidates['lambda'] == lambda_1se]['score'].values[0]
+                                     
+                                     # Plot Tuning Result with Error Bars
+                                     fig_tune, ax_tune = plt.subplots(figsize=(7, 4))
+                                     ax_tune.errorbar(res_df['lambda'], res_df['score'], yerr=res_df['se'], fmt='-o', capsize=3, label='CV Score ± 1 SE')
+                                     
                                      ax_tune.set_xscale('log')
-                                     ax_tune.set_xlabel("Lambda (Log Scale)")
+                                     ax_tune.set_xlabel("Lambda (Penalty Strength)")
                                      ax_tune.set_ylabel("CV Concordance Index")
-                                     ax_tune.set_title(f"Optimal Lambda: {best_lambda:.3f} (Score: {best_score:.3f})")
-                                     ax_tune.axvline(x=best_lambda, color='r', linestyle='--')
+                                     
+                                     # Mark Min and 1SE
+                                     ax_tune.axvline(x=lambda_min, color='g', linestyle='--', label=f'Min: {lambda_min:.3f}')
+                                     ax_tune.axvline(x=lambda_1se, color='b', linestyle='--', label=f'1SE: {lambda_1se:.3f}')
+                                     
+                                     ax_tune.legend()
+                                     ax_tune.grid(True, which="both", ls="-", alpha=0.2)
+                                     
                                      st.session_state.auto_tune_plot = fig_tune
                                      
-                                     # UPDATE STATE
-                                     st.session_state.penalizer_val = float(best_lambda)
-                                     st.success(f"Optimal Lambda found: {best_lambda:.4f}")
+                                     # Store options in state to let user choose
+                                     st.session_state['tune_options'] = {
+                                         'min': {'lam': lambda_min, 'score': score_max},
+                                         '1se': {'lam': lambda_1se, 'score': score_1se}
+                                     }
                                      st.rerun()
-                                     
+
                                  except Exception as e:
                                      st.error(f"Auto-Tune Failed: {e}")
 
-                        # Show Tuning Plot if exists
+                        # Show Tuning Plot & Options if exists
                         if st.session_state.auto_tune_plot:
-                            st.pyplot(st.session_state.auto_tune_plot)
+                             st.pyplot(st.session_state.auto_tune_plot)
+                             
+                             if 'tune_options' in st.session_state:
+                                 opts = st.session_state['tune_options']
+                                 
+                                 st.write("### 🎯 Select Optimal Penalty")
+                                 cols_sel = st.columns(2)
+                                 
+                                 with cols_sel[0]:
+                                     st.success(f"**Option A: Best Accuracy**")
+                                     st.metric("Lambda Min", f"{opts['min']['lam']:.4f}", f"Score: {opts['min']['score']:.3f}")
+                                     if st.button("Use Lambda Min", use_container_width=True):
+                                         st.session_state.penalizer_val = float(opts['min']['lam'])
+                                         st.rerun()
+                                         
+                                 with cols_sel[1]:
+                                     st.info(f"**Option B: Most Robust (Recommended)**")
+                                     st.metric("Lambda 1SE", f"{opts['1se']['lam']:.4f}", f"Score: {opts['1se']['score']:.3f}")
+                                     if st.button("Use Lambda 1SE", use_container_width=True):
+                                         st.session_state.penalizer_val = float(opts['1se']['lam'])
+                                         st.rerun()
 
                     run_analysis = st.button("Run Multivariable Analysis")
                     
