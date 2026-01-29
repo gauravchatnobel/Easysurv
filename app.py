@@ -1415,15 +1415,12 @@ if df is not None:
                                          # Logic: Only accept if at least 3/5 folds succeeded
                                          if len(fold_scores) >= 3:
                                               avg_score = np.mean(fold_scores)
-                                              results.append({'lam': lam, 'score': avg_score})
+                                              # Standard Error = std / sqrt(n)
+                                              se_score = np.std(fold_scores) / np.sqrt(len(fold_scores))
+                                              results.append({'lambda': lam, 'score': avg_score, 'se': se_score})
                                          else:
                                               # If almost all failed, mark as unreliable (0.5)
-                                              results.append({'lam': lam, 'score': 0.5})
-                                         
-                                         # Calculate Mean and Standard Error (SE)
-                                         avg_score = np.mean(fold_scores)
-                                         se_score = np.std(fold_scores) / np.sqrt(len(fold_scores))
-                                         results.append({'lambda': lam, 'score': avg_score, 'se': se_score})
+                                              results.append({'lambda': lam, 'score': 0.5, 'se': 0.0})
                                      
                                      res_df = pd.DataFrame(results)
                                      
