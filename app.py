@@ -1411,22 +1411,23 @@ if df is not None:
                              if 'tune_options' in st.session_state:
                                  opts = st.session_state['tune_options']
                                  
+                                 # Helper Callback to Sync Slider
+                                 def update_lambda(val):
+                                     st.session_state.penalizer_val = float(val)
+                                     st.session_state['lambda_slider'] = float(val)
+                                 
                                  st.write("### 🎯 Select Optimal Penalty")
                                  cols_sel = st.columns(2)
                                  
                                  with cols_sel[0]:
                                      st.success(f"**Option A: Best Accuracy**")
                                      st.metric("Lambda Min", f"{opts['min']['lam']:.4f}", f"Score: {opts['min']['score']:.3f}")
-                                     if st.button("Use Lambda Min", use_container_width=True):
-                                         st.session_state.penalizer_val = float(opts['min']['lam'])
-                                         st.rerun()
+                                     st.button("Use Lambda Min", use_container_width=True, on_click=update_lambda, args=(opts['min']['lam'],))
                                          
                                  with cols_sel[1]:
                                      st.info(f"**Option B: Most Robust (Recommended)**")
                                      st.metric("Lambda 1SE", f"{opts['1se']['lam']:.4f}", f"Score: {opts['1se']['score']:.3f}")
-                                     if st.button("Use Lambda 1SE", use_container_width=True):
-                                         st.session_state.penalizer_val = float(opts['1se']['lam'])
-                                         st.rerun()
+                                     st.button("Use Lambda 1SE", use_container_width=True, on_click=update_lambda, args=(opts['1se']['lam'],))
 
                     run_analysis = st.button("Run Multivariable Analysis")
                     
