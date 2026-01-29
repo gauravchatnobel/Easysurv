@@ -162,7 +162,7 @@ def check_epv(df, event_col, covariates):
                 # Group by level and sum events
                 min_events = df.groupby(col)[event_col].sum().min()
                 if min_events < 5:
-                    sparse_warnings.append(f"⚠️ Categories in **{col}** have very few events (min={min_events}).")
+                    sparse_warnings.append(f"⚠️ Categories in **{col}** have very few events (min={min_events}). Consider enabling **Penalized Cox** in Advanced Options.")
             except:
                 pass
             
