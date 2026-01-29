@@ -249,12 +249,13 @@ if df is not None:
                          m = find_var_persist(v, df, df_renamed)
                          if m is not None: mask_low |= m
                          
-                     elif "2-Tier" in r_sys:
-                         df[r_name] = np.where(mask_high, "High Risk", "Standard Risk")
-                     else:
-                         conds = [mask_high, (~mask_high) & (mask_low)]
-                         choic = ["High Risk", "Low Risk"]
-                         df[r_name] = np.select(conds, choic, default="Intermediate Risk")
+                    # Assign
+                    if "2-Tier" in r_sys:
+                        df[r_name] = np.where(mask_high, "High Risk", "Standard Risk")
+                    else:
+                        conds = [mask_high, (~mask_high) & (mask_low)]
+                        choic = ["High Risk", "Low Risk"]
+                        df[r_name] = np.select(conds, choic, default="Intermediate Risk")
                      
                      st.toast(f"✅ Risk Variable '{r_name}' loaded successfully!", icon="🧬")
                          
