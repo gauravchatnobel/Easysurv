@@ -1770,17 +1770,22 @@ if df is not None:
                     
                     if cols_missing:
                         st.warning(f"⚠️ Could not find data for {len(cols_missing)} variables (e.g., {cols_missing[0]}). Risk counts may be inaccurate.")
-                    
+                        with st.expander("🕵️ Debug: Variable Matching"):
+                            st.write("**Missing Variants from Model:**", cols_missing)
+                            st.write("**Available Columns in Dataset (Sanitized):**", sorted(score_df_renamed.columns.tolist()))
+                            st.write("**Matching Tip**: Ensure your dataset columns match the names in the Multivariable Results.")
+
                     # PLOT KM
                     st.write(f"### Kaplan-Meier Stratification ({system_type})")
                     
                     km_col1, km_col2 = st.columns([2, 1])
                     
+                    risk_groups = sorted(score_df['Risk_Group'].unique())
+                    
                     with km_col1:
                         fig_risk, ax_risk = plt.subplots(figsize=(6, 4))
                         kmf = KaplanMeierFitter()
                         
-                        risk_groups = sorted(score_df['Risk_Group'].unique())
                         # Order: Low, Int, High if possible
                         order_map = {"Low Risk": 0, "Intermediate Risk": 1, "Standard Risk": 1, "High Risk": 2}
                         risk_groups.sort(key=lambda x: order_map.get(x, 99))
@@ -1799,34 +1804,36 @@ if df is not None:
                         
                     with km_col2:
                         st.write("**Evaluation Metrics**")
-                        # C-Index Calculation
-                        # We treat Risk Group as an ordinal variable: Low=0, Int=1, High=2
-                        # Or just High vs Not.
-                        # For C-Index, we strictly need a numeric predictor.
-                        score_df['Risk_Numeric'] = score_df['Risk_Group'].map({"Low Risk": 0, "Standard Risk": 0, "Intermediate Risk": 1, "High Risk": 2})
                         
-                        # Fit simple Cox to get C-Index
-                        try:
-                            # We only need 'score' (Risk_Numeric)
-                            cph_eval = CoxPHFitter()
-                            eval_data = score_df[[time_col, event_col, 'Risk_Numeric']].dropna()
-                            cph_eval.fit(eval_data, duration_col=time_col, event_col=event_col)
+                        if len(risk_groups) < 2:
+                             st.warning("⚠️ **Not enough groups**: All patients fell into a single risk tier. Cannot calculate discrimination statistics.")
+                             st.info("Try adjusting your HR thresholds or ensuring variables are correctly matched.")
+                        else:
+                            # C-Index Calculation
+                            score_df['Risk_Numeric'] = score_df['Risk_Group'].map({"Low Risk": 0, "Standard Risk": 0, "Intermediate Risk": 1, "High Risk": 2})
                             
-                            c_index = cph_eval.concordance_index_
-                            aic = cph_eval.AIC_partial_
-                            
-                            st.metric("Concordance Index (C-Index)", f"{c_index:.3f}", help="Higher is better (0.5 = random, 1.0 = perfect)")
-                            st.metric("AIC", f"{aic:.1f}", help="Lower is better (Best fit vs complexity)")
-                            
-                            if c_index > 0.7:
-                                st.success("✅ Good Discrimination")
-                            elif c_index > 0.6:
-                                st.warning("⚠️ Moderate Discrimination")
-                            else:
-                                st.error("❌ Poor Discrimination")
+                            # Fit simple Cox to get C-Index
+                            try:
+                                # We only need 'score' (Risk_Numeric)
+                                cph_eval = CoxPHFitter()
+                                eval_data = score_df[[time_col, event_col, 'Risk_Numeric']].dropna()
+                                cph_eval.fit(eval_data, duration_col=time_col, event_col=event_col)
                                 
-                        except Exception as e:
-                            st.error(f"Could not calculate stats: {e}")
+                                c_index = cph_eval.concordance_index_
+                                aic = cph_eval.AIC_partial_
+                                
+                                st.metric("Concordance Index (C-Index)", f"{c_index:.3f}", help="Higher is better (0.5 = random, 1.0 = perfect)")
+                                st.metric("AIC", f"{aic:.1f}", help="Lower is better (Best fit vs complexity)")
+                                
+                                if c_index > 0.7:
+                                    st.success("✅ Good Discrimination")
+                                elif c_index > 0.6:
+                                    st.warning("⚠️ Moderate Discrimination")
+                                else:
+                                    st.error("❌ Poor Discrimination")
+                                    
+                            except Exception as e:
+                                st.error(f"Could not calculate stats: {e}")
 
         with tab3:
             st.subheader("Competing Risks Analysis (Cumulative Incidence)")
