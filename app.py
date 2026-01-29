@@ -257,10 +257,10 @@ if df is not None:
                         choic = ["High Risk", "Low Risk"]
                         df[r_name] = np.select(conds, choic, default="Intermediate Risk")
                      
-                     st.toast(f"✅ Risk Variable '{r_name}' loaded successfully!", icon="🧬")
-                         
-                 except Exception as e:
-                     st.error(f"Failed to rebuild Risk System {combo_def['name']}: {e}")
+                    st.toast(f"✅ Risk Variable '{r_name}' loaded successfully!", icon="🧬")
+                        
+                except Exception as e:
+                    st.error(f"Failed to rebuild Risk System {combo_def['name']}: {e}")
     
     # --- DATA FILTRATION ---
     # --- DATA FILTRATION ---
