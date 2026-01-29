@@ -50,7 +50,19 @@ uploaded_file = st.sidebar.file_uploader("Upload Clinical Data (CSV/Excel)", typ
 df = None
 
 if uploaded_file:
-    df = utils.load_data(uploaded_file)
+    # Check for Excel file to support multi-sheet selection
+    sheet_name = 0
+    if uploaded_file.name.endswith(('.xlsx', '.xls')):
+        try:
+            xl_file = pd.ExcelFile(uploaded_file)
+            sheet_names = xl_file.sheet_names
+            if len(sheet_names) > 1:
+                st.sidebar.info(f"Multiple sheets detected within '{uploaded_file.name}'")
+                sheet_name = st.sidebar.selectbox("Select Excel Sheet", sheet_names, index=0)
+        except Exception as e:
+            st.sidebar.error(f"Error reading Excel sheets: {e}")
+
+    df = utils.load_data(uploaded_file, sheet_name=sheet_name)
 else:
     # --- LANDING PAGE ---
     st.markdown("""
