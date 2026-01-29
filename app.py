@@ -1257,16 +1257,128 @@ if df is not None:
                              else:
                                  st.info("Could not calculate VIF (Singular Matrix?).")
 
-                    st.markdown("#### 🔧 Advanced Options")
-                    use_penalizer = st.checkbox("Enable Penalized Cox (Ridge Regression)", help="Use L2 penalty to handle small sample sizes (low EPV), collinearity, or separation. This biases coefficients towards 0 but reduces variance.")
+
+                    st.markdown("#### 🔧 Advanced Options (Penalized Cox)")
+                    
+                    # --- EDUCATIONAL GUIDE ---
+                    with st.expander("📚 Guide: Which Penalty Should I Use?"):
+                        st.markdown("""
+                        **Penalized Cox Regression** is useful when you have **small sample sizes**, **many variables**, or **multicollinearity**.
+                        
+                        | Method | L1 Ratio | Best For... | What it does |
+                        | :--- | :---: | :--- | :--- |
+                        | **Ridge** | `0.0` | **Collinearity** & **Stability** | Keeps all variables but shrinks coefficients towards zero. Use when you want to keep all variables in the model but prevent overheating. |
+                        | **Lasso** | `1.0` | **Feature Selection** | Forces weak variables to be exactly zero. Use when you want to find the few variables that actually matter. |
+                        | **Elastic Net** | `0.5` | **Balance** | A mix of both. Selects variables (like Lasso) but handles correlated groups better (like Ridge). Good default if unsure. |
+                        """)
+                    
+                    use_penalizer = st.checkbox("Enable Penalized Cox (Elastic Net / Ridge / Lasso)", help="Use regularization to handle small sample sizes (low EPV), collinearity, or separation.", value=st.session_state.get('use_penalizer', False))
+                    
+                    # Initialize default values in session state if not present
+                    if 'l1_ratio_val' not in st.session_state: st.session_state.l1_ratio_val = 0.0
+                    if 'penalizer_val' not in st.session_state: st.session_state.penalizer_val = 0.1
+                    if 'auto_tune_plot' not in st.session_state: st.session_state.auto_tune_plot = None
+
+                    l1_ratio = 0.0
                     penalizer_value = 0.0
+
                     if use_penalizer:
-                        penalizer_value = st.slider("Penalizer Coefficient (Lambda)", 0.01, 1.0, 0.1, step=0.01, help="Higher values shrink coefficients more aggressively.")
+                        col_pen1, col_pen2 = st.columns(2)
+                        
+                        with col_pen1:
+                            st.markdown("**1. Select Penalty Type**")
+                            l1_ratio = st.slider("L1 Ratio (Mixing Parameter)", 0.0, 1.0, st.session_state.l1_ratio_val, step=0.1, key='l1_ratio_slider', help="0=Ridge, 1=Lasso, 0.5=Elastic Net")
+                            
+                            # Update session state
+                            st.session_state.l1_ratio_val = l1_ratio
+                            
+                            if l1_ratio == 0: st.caption("Currently: **Ridge Regression**")
+                            elif l1_ratio == 1: st.caption("Currently: **Lasso Regression**")
+                            else: st.caption(f"Currently: **Elastic Net** ({int(l1_ratio*100)}% L1, {int((1-l1_ratio)*100)}% L2)")
+                        
+                        with col_pen2:
+                            st.markdown("**2. Select Penalty Strength (Lambda)**")
+                            penalizer_value = st.slider("Penalizer (Lambda)", 0.0, 10.0, st.session_state.penalizer_val, step=0.01, key='lambda_slider', help="Higher values shrink coefficients more aggressively.")
+                            st.session_state.penalizer_val = penalizer_value
+
+                        # --- AUTO-TUNE FEATURE ---
+                        if st.button("✨ Auto-Tune Lambda (Cross-Validation)"):
+                             with st.spinner(f"Running 5-Fold CV to find optimal Lambda for L1 Ratio = {l1_ratio}..."):
+                                 try:
+                                     from lifelines import CoxPHFitter
+                                     from sklearn.model_selection import KFold
+                                     
+                                     # Prepare Data (Silent Mode)
+                                     tune_df = mv_df.copy()
+                                     # Encoder logic duplicate (quick & dirty for tuner)
+                                     tune_encoded = tune_df.drop(columns=cat_cols)
+                                     for col in cat_cols:
+                                         ref = categorical_refs.get(col)
+                                         dummies = pd.get_dummies(tune_df[col], prefix=col)
+                                         ref_col_name = f"{col}_{ref}"
+                                         if ref_col_name in dummies.columns: dummies = dummies.drop(columns=[ref_col_name])
+                                         tune_encoded = pd.concat([tune_encoded, dummies], axis=1)
+                                     
+                                     tune_encoded.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in tune_encoded.columns]
+                                     
+                                     # Search Space
+                                     lambdas = np.logspace(-3, 1, 20) # 0.001 to 10.0
+                                     scores = []
+                                     
+                                     kf = KFold(n_splits=5, shuffle=True, random_state=42)
+                                     
+                                     best_score = -9999
+                                     best_lambda = 0.1
+                                     
+                                     for lam in lambdas:
+                                         fold_scores = []
+                                         for train_idx, val_idx in kf.split(tune_encoded):
+                                             train_data = tune_encoded.iloc[train_idx]
+                                             val_data = tune_encoded.iloc[val_idx]
+                                             
+                                             cph_tune = CoxPHFitter(penalizer=lam, l1_ratio=l1_ratio)
+                                             try:
+                                                 cph_tune.fit(train_data, duration_col=time_col, event_col=event_col)
+                                                 # Concordance Index as score
+                                                 score = cph_tune.score(val_data, scoring_method="concordance_index")
+                                                 fold_scores.append(score)
+                                             except:
+                                                 fold_scores.append(0.5) # Fail fallback
+                                         
+                                         avg_score = np.mean(fold_scores)
+                                         scores.append(avg_score)
+                                         
+                                         if avg_score > best_score:
+                                             best_score = avg_score
+                                             best_lambda = lam
+                                     
+                                     # Plot Tuning Result
+                                     fig_tune, ax_tune = plt.subplots(figsize=(6, 3))
+                                     ax_tune.plot(lambdas, scores, marker='o', linestyle='-')
+                                     ax_tune.set_xscale('log')
+                                     ax_tune.set_xlabel("Lambda (Log Scale)")
+                                     ax_tune.set_ylabel("CV Concordance Index")
+                                     ax_tune.set_title(f"Optimal Lambda: {best_lambda:.3f} (Score: {best_score:.3f})")
+                                     ax_tune.axvline(x=best_lambda, color='r', linestyle='--')
+                                     st.session_state.auto_tune_plot = fig_tune
+                                     
+                                     # UPDATE STATE
+                                     st.session_state.penalizer_val = float(best_lambda)
+                                     st.success(f"Optimal Lambda found: {best_lambda:.4f}")
+                                     st.rerun()
+                                     
+                                 except Exception as e:
+                                     st.error(f"Auto-Tune Failed: {e}")
+
+                        # Show Tuning Plot if exists
+                        if st.session_state.auto_tune_plot:
+                            st.pyplot(st.session_state.auto_tune_plot)
 
                     run_analysis = st.button("Run Multivariable Analysis")
                     
                     if run_analysis:
                         st.session_state['mv_analysis_active'] = True
+                        st.session_state['use_penalizer'] = use_penalizer # Persist choice
                         
                     if st.session_state.get('mv_analysis_active', False):
                         try:
@@ -1290,25 +1402,31 @@ if df is not None:
                                 mv_data_encoded = pd.concat([mv_data_encoded, dummies], axis=1)
                             
                             # Sanitize Column Names for Lifelines/Stats (remove spaces/special chars)
-                            # This is important for formula strings but CoxPHFitter handles dataframe input well.
-                            # However, cleaner names are better for the plot.
                             mv_data_encoded.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in mv_data_encoded.columns]
                             
                             # Fit Model
-                            cph_mv = CoxPHFitter(penalizer=penalizer_value)
+                            # Use session state values to ensure consistency even after button click
+                            final_penalizer = st.session_state.penalizer_val if use_penalizer else 0.0
+                            final_l1 = st.session_state.l1_ratio_val if use_penalizer else 0.0
+                            
+                            cph_mv = CoxPHFitter(penalizer=final_penalizer, l1_ratio=final_l1)
                             cph_mv.fit(mv_data_encoded, duration_col=time_col, event_col=event_col)
                             
-                            # 3. Separation Check (Post-Analysis)
-                            sep_warnings = statistics.check_separation(cph_mv)
-                            if sep_warnings:
-                                for w in sep_warnings:
-                                    st.error(f"🛑 **Critical Statistical Issue**: {w}")
+                            # 3. Separation Check (Post-Analysis) -> Warning Only (Penalized handles it often)
+                            if not use_penalizer:
+                                sep_warnings = statistics.check_separation(cph_mv)
+                                if sep_warnings:
+                                    for w in sep_warnings:
+                                        st.error(f"🛑 **Critical Statistical Issue**: {w}")
                             
                             # Results Table
                             summary_mv = cph_mv.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']]
                             summary_mv.columns = ['Hazard Ratio (HR)', 'Lower 95%', 'Upper 95%', 'p-value']
                             
                             st.write("### Regression Results")
+                            if use_penalizer:
+                                st.caption(f"Model: Penalized Cox (Lambda={final_penalizer:.4f}, L1 Ratio={final_l1})")
+                                
                             st.dataframe(summary_mv.style.format("{:.3f}"))
                             
                             # Save to Session State specifically for Narrator or Persistence
@@ -2562,11 +2680,18 @@ if df is not None:
                               
 
                               
-                              with st.spinner("Bootstrapping C-Indices (n=50)..."):
-                                  res_a = statistics.get_c_index_bootstrap(df_clean, time_col, event_col, vars_a, "Model A")
-                                  res_b = statistics.get_c_index_bootstrap(df_clean, time_col, event_col, vars_b, "Model B")
-                                  res_c = statistics.get_c_index_bootstrap(df_clean, time_col, event_col, vars_c, "Model C")
+
+                              # Determine Penalties
+                              apply_penalty = st.checkbox(f"Apply Penalized Settings from Tab 2? (Lambda={st.session_state.get('penalizer_val', 0.1):.3f}, L1={st.session_state.get('l1_ratio_val', 0.0):.1f})", value=True)
                               
+                              penalizer = st.session_state.get('penalizer_val', 0.1) if apply_penalty else 0.0
+                              l1_ratio = st.session_state.get('l1_ratio_val', 0.0) if apply_penalty else 0.0
+                              
+                              with st.spinner("Bootstrapping C-Indices (n=50)..."):
+                                  res_a = statistics.get_c_index_bootstrap(df_clean, time_col, event_col, vars_a, "Model A", penalizer=penalizer, l1_ratio=l1_ratio)
+                                  res_b = statistics.get_c_index_bootstrap(df_clean, time_col, event_col, vars_b, "Model B", penalizer=penalizer, l1_ratio=l1_ratio)
+                                  res_c = statistics.get_c_index_bootstrap(df_clean, time_col, event_col, vars_c, "Model C", penalizer=penalizer, l1_ratio=l1_ratio)
+                                  
                               res_list = [r for r in [res_a, res_b, res_c] if r is not None]
                               
                               # SAVE TO SESSION STATE
