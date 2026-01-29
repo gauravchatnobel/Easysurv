@@ -1386,9 +1386,9 @@ if df is not None:
                                      
                                      tune_encoded.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in tune_encoded.columns]
                                      
-                                     # Search Space (Widened per feedback)
-                                     # 0.0001 to ~30.0 (30 points)
-                                     lambdas = np.logspace(-4, 1.5, 30)
+                                     # Search Space (Refined to R glmnet defaults approx)
+                                     # 0.0001 to 10.0 (50 points) - Prevents over-crushing while allowing weak penalty
+                                     lambdas = np.logspace(np.log10(1e-4), np.log10(10.0), 50)
                                      
                                      # Robust Stratification (StratifiedKFold)
                                      kf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
