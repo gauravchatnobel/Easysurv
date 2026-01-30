@@ -1342,7 +1342,7 @@ if df is not None:
                     # Initialize default values in session state if not present
                     if 'l1_ratio_val' not in st.session_state: st.session_state.l1_ratio_val = 0.0
                     if 'penalizer_val' not in st.session_state: st.session_state.penalizer_val = 0.1
-                    if 'auto_tune_plot' not in st.session_state: st.session_state.auto_tune_plot = None
+                    if 'auto_tune_plot_v2' not in st.session_state: st.session_state.auto_tune_plot_v2 = None
 
                     l1_ratio = 0.0
                     penalizer_value = 0.0
@@ -1455,7 +1455,7 @@ if df is not None:
                                      ax_tune.legend()
                                      ax_tune.grid(True, which="both", ls="-", alpha=0.2)
                                      
-                                     st.session_state.auto_tune_plot = fig_tune
+                                     st.session_state.auto_tune_plot_v2 = fig_tune
                                      
                                      # Store options in state to let user choose
                                      st.session_state['tune_options'] = {
@@ -1468,8 +1468,8 @@ if df is not None:
                                      st.error(f"Auto-Tune Failed: {e}")
 
                         # Show Tuning Plot & Options if exists
-                        if st.session_state.auto_tune_plot:
-                             st.pyplot(st.session_state.auto_tune_plot)
+                        if st.session_state.auto_tune_plot_v2:
+                             st.pyplot(st.session_state.auto_tune_plot_v2)
                              
                              if 'tune_options' in st.session_state:
                                  opts = st.session_state['tune_options']
