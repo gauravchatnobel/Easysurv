@@ -1340,7 +1340,7 @@ if df is not None:
                         | **Elastic Net** | `0.5` | **Balance** | A mix of both. Selects variables (like Lasso) but handles correlated groups better (like Ridge). Good default if unsure. |
                         """)
                     
-                    use_penalizer = st.checkbox("Enable Penalized Cox (Elastic Net / Ridge / Lasso)", help="Use regularization to handle small sample sizes (low EPV), collinearity, or separation.", value=st.session_state.get('use_penalizer', False))
+                    use_penalizer = st.checkbox("Enable Penalized Cox (Elastic Net / Ridge / Lasso)", help="Use regularization to handle small sample sizes (low EPV), collinearity, or separation.", value=False, key="use_penalizer_checkbox")
                     
                     # Initialize default values in session state if not present
                     if 'l1_ratio_val' not in st.session_state: st.session_state.l1_ratio_val = 0.0
