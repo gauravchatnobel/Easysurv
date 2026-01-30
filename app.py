@@ -1647,7 +1647,12 @@ if df is not None:
                                 mv_df_for_narrator = st.session_state.get('mv_summary_df', summary_mv)
                                 
                                 if st.button("Generate Summary Text (Multivariable)"):
-                                    mv_summary = "Multivariable analysis was performed using the Cox Proportional Hazards regression model to assess independent predictors of survival.\n\n"
+                                    if use_penalizer and penalizer_value > 0:
+                                        penalty_type = "Ridge" if l1_ratio == 0 else "Lasso" if l1_ratio == 1 else "Elastic Net"
+                                        mv_summary = f"Multivariable analysis was performed using **Penalized Cox Regression ({penalty_type})** to handle multicollinearity and prevent overfitting (Lambda={penalizer_value:.4f}, L1 Ratio={l1_ratio}). Coefficients were estimated using the maximum penalized partial likelihood.\n\n"
+                                    else:
+                                        mv_summary = "Multivariable analysis was performed using the standard Cox Proportional Hazards regression model to assess independent predictors of survival.\n\n"
+                                    
                                     mv_summary += "In the adjusted model, the following associations were observed:\n\n"
                                     
                                     # Iterate over rows
