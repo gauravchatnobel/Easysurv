@@ -886,8 +886,8 @@ if df is not None:
                     
                     # Save for AI Narrator
                     st.session_state['uv_cox_summary'] = summary_df
+                    st.session_state['uv_cox_method'] = "Standard Cox Proportional Hazards regression models"
                     
-                    # Download Cox Table
                     csv_cox = summary_df.to_csv().encode('utf-8')
                     st.download_button(
                         label="💾 Download Cox HR Table",
@@ -895,7 +895,7 @@ if df is not None:
                         file_name="cox_ph_table.csv",
                         mime="text/csv"
                     )
-                    st.caption(f"Reference Group: **{reference_group}** (All HRs are relative to this group)")
+                    st.caption(f"Reference Group: **{reference_group}**")
 
                 except Exception as e:
                     # Auto-Fallback to Penalized Cox
@@ -916,6 +916,7 @@ if df is not None:
                     
                         st.dataframe(summary_df.style.format("{:.3f}"))
                         st.session_state['uv_cox_summary'] = summary_df
+                        st.session_state['uv_cox_method'] = "Penalized Cox Regression (Ridge, Lambda=0.1) due to convergence failure in standard Cox"
                         
                         csv_cox = summary_df.to_csv().encode('utf-8')
                         st.download_button(
@@ -1062,8 +1063,10 @@ if df is not None:
                 st.subheader("🤖 AI Result Narrator")
                 if st.button("Generate Summary Text (Univariable)"):
                     # 1. Methods
+                    cox_method_text = st.session_state.get('uv_cox_method', 'Standard Cox Proportional Hazards regression models')
+                    
                     summary = "**Methods**\n"
-                    summary += "Survival estimates were calculated using the Kaplan-Meier method. Comparisons between groups were performed using the Log-rank test. Univariable associations were assessed using Cox Proportional Hazards regression models.\n\n"
+                    summary += f"Survival estimates were calculated using the Kaplan-Meier method. Comparisons between groups were performed using the Log-rank test. Univariable associations were assessed using {cox_method_text}.\n\n"
                     
                     # 2. Results
                     summary += "**Results**\n"
