@@ -374,6 +374,16 @@ if df is not None:
     
     # 1. Global Aesthetics
     st.sidebar.subheader("Global Theme & Typography")
+
+    # Narrator Journal Style
+    narrator_style_labels = narrator.get_style_labels()
+    narrator_style_name = st.sidebar.selectbox(
+        "Narrator Style",
+        list(narrator_style_labels.keys()),
+        format_func=lambda x: narrator_style_labels[x],
+        help="Controls how the AI Narrator formats p-values and confidence intervals in generated text."
+    )
+
     font_options = ["sans-serif", "serif", "monospace", "Arial", "Helvetica", "Times New Roman", "Courier New", "Verdana", "Comic Sans MS"]
     selected_font = st.sidebar.selectbox("Font Family", font_options, index=0)
     plt.rcParams['font.family'] = selected_font
@@ -1145,39 +1155,20 @@ if df is not None:
                 st.divider()
                 st.subheader("🤖 AI Result Narrator")
                 if st.button("Generate Summary Text (Univariable)"):
-                    # 1. Methods
-                    cox_method_text = st.session_state.get('uv_cox_method', 'Standard Cox Proportional Hazards regression models')
-                    
-                    summary = "**Methods**\n"
-                    summary += f"Survival estimates were calculated using the Kaplan-Meier method. Comparisons between groups were performed using the Log-rank test. Univariable associations were assessed using {cox_method_text}.\n\n"
-                    
-                    # 2. Results
-                    summary += "**Results**\n"
-                    
-                    # Log-rank
-                    sig_word = "significantly" if result.p_value < 0.05 else "not significantly"
-                    summary += f"The Kaplan-Meier survival analysis comparing groups defined by **{group_col}** ({', '.join([str(g) for g in groups])}) revealed that {group_col} was **{sig_word} associated with survival** (Log-rank test p={result.p_value:.4f}). "
-                    
-                    # Cox PH (if available)
-                    if 'uv_cox_summary' in st.session_state:
-                        summary += "In the univariable Cox regression:\n"
-                        cox_df = st.session_state['uv_cox_summary']
-                        for idx, row in cox_df.iterrows():
-                             hr = row['Hazard Ratio (HR)']
-                             p = row['p-value']
-                             ci_low = row['Lower 95% CI']
-                             ci_high = row['Upper 95% CI']
-                             summary += f"* **{idx}**: HR={hr:.2f} (95% CI {ci_low:.2f}-{ci_high:.2f}, p={p:.4f})\n"
-                    
-                    # 3. Median details
-                    med_details = []
-                    for dataItem in median_data:
-                        med_details.append(f"{dataItem['Group']} (Median: {dataItem['Median Survival']}, 95% CI: {dataItem['95% CI (Median)']})")
-                    
-                    summary += "\nMedian survival times were: " + "; ".join(med_details) + "."
-                    
+                    cox_method_text = st.session_state.get('uv_cox_method', 'Cox Proportional Hazards regression')
+                    cox_df = st.session_state.get('uv_cox_summary', None)
+
+                    summary = narrator.generate_univariable_narrative(
+                        group_col=group_col,
+                        groups=groups,
+                        logrank_p=result.p_value,
+                        cox_summary=cox_df,
+                        median_data=median_data,
+                        cox_method=cox_method_text,
+                        style_name=narrator_style_name,
+                    )
                     st.success("Summary Generated:")
-                    st.text_area("Copy this text:", value=summary, height=200)
+                    st.text_area("Copy this text:", value=summary, height=250)
 
             else:
                 # Single group
@@ -1686,32 +1677,24 @@ if df is not None:
                                 # --- AI NARRATOR (Multivariable) ---
                                 st.divider()
                                 st.write("### 🤖 AI Result Narrator")
-                                
-                                # Use session state DF if available (handles button consistency if needed)
+
                                 mv_df_for_narrator = st.session_state.get('mv_summary_df', summary_mv)
-                                
+
                                 if st.button("Generate Summary Text (Multivariable)"):
-                                    if use_penalizer and penalizer_value > 0:
-                                        penalty_type = "Ridge" if l1_ratio == 0 else "Lasso" if l1_ratio == 1 else "Elastic Net"
-                                        mv_summary = f"Multivariable analysis was performed using **Penalized Cox Regression ({penalty_type})** to handle multicollinearity and prevent overfitting (Lambda={penalizer_value:.4f}, L1 Ratio={l1_ratio}). Coefficients were estimated using the maximum penalized partial likelihood.\n\n"
-                                    else:
-                                        mv_summary = "Multivariable analysis was performed using the standard Cox Proportional Hazards regression model to assess independent predictors of survival.\n\n"
-                                    
-                                    mv_summary += "In the adjusted model, the following associations were observed:\n\n"
-                                    
-                                    # Iterate over rows
-                                    for idx, row in mv_df_for_narrator.iterrows():
-                                        hr = row['Hazard Ratio (HR)']
-                                        p = row['p-value']
-                                        ci_low = row['Lower 95%'] # Updated key
-                                        ci_high = row['Upper 95%'] # Updated key
-                                        
-                                        sig_txt = "significantly associated" if p < 0.05 else "not significantly associated"
-                                        
-                                        mv_summary += f"* **{idx}**: {sig_txt} with the event (HR={hr:.2f}, 95% CI {ci_low:.2f}-{ci_high:.2f}, p={p:.4f}).\n"
-                                        
+                                    n_patients = len(mv_df) if 'mv_df' in dir() else None
+                                    n_events = int(mv_df[event_col].sum()) if 'mv_df' in dir() else None
+
+                                    mv_narrative = narrator.generate_multivariable_narrative(
+                                        summary_df=mv_df_for_narrator,
+                                        use_penalizer=use_penalizer,
+                                        penalizer_value=st.session_state.get('penalizer_val', 0.0),
+                                        l1_ratio=st.session_state.get('l1_ratio_val', 0.0),
+                                        n_patients=n_patients,
+                                        n_events=n_events,
+                                        style_name=narrator_style_name,
+                                    )
                                     st.success("Summary Generated:")
-                                    st.text_area("Copy this text:", value=mv_summary, height=200)
+                                    st.text_area("Copy this text:", value=mv_narrative, height=250)
                             
                         except Exception as e:
                             st.error(f"Error running model: {e}")
@@ -2522,42 +2505,15 @@ if df is not None:
                 st.divider()
                 st.write("### 🤖 AI Result Narrator (Competing Risks)")
                 if st.button("Generate Summary Text (CIF)"):
-                     
-                     cif_summary = "Cumulative Incidence Functions (CIF) were estimated using the Aalen-Johansen method to account for competing risks. Comparisons were performed using the Fine-Gray subdistribution hazard model (Log-Likelihood Ratio Test).\n\n"
-                     cif_summary += "In the competing risks analysis:\n\n"
-                     
-                     # 1. Median Time Stats
-                     if cif_median_data:
-                         med_phrases = []
-                         for item in cif_median_data:
-                             med_phrases.append(f"{item['Group']} had a median time to incidence of {item['Median Time to Incidence']} (95% CI: {item['95% CI (Median)']})")
-                         cif_summary += "* **Median Time to Incidence**: " + "; ".join(med_phrases) + ".\n"
-                     
-                     # 2. Point in Time Stats
-                     if cif_est_data:
-                         cif_summary += f"* **Cumulative Incidence at {cif_target_time}**: "
-                         pit_phrases = []
-                         col_name_pit = f"Cumulative Incidence at {cif_target_time}"
-                         for item in cif_est_data:
-                             val = item.get(col_name_pit, "N/A")
-                             ci = item.get("95% CI", "")
-                             pit_phrases.append(f"{item['Group']} {val} (95% CI {ci})")
-                         cif_summary += "; ".join(pit_phrases) + ".\n"
-                     
-                     # 3. Fine-Gray Results
-                     if fg_summary is not None:
-                         cif_summary += "\n**Fine-Gray Regression Results** (accounting for competing risks):\n"
-                         for idx, row in fg_summary.iterrows():
-                             # Columns were renamed to ['Subdist HR', 'Lower 95%', 'Upper 95%', 'p-value']
-                             hr = row['Subdist HR']
-                             p = row['p-value']
-                             low = row['Lower 95%']
-                             high = row['Upper 95%']
-                             sig_txt = "significantly associated" if p < 0.05 else "not significantly associated"
-                             cif_summary += f"* **{idx}**: {sig_txt} with the cumulative incidence of the event (SHR={hr:.2f}, 95% CI {low:.2f}-{high:.2f}, p={p:.4f}).\n"
-                     
+                     cif_narrative = narrator.generate_cif_narrative(
+                         cif_median_data=cif_median_data if 'cif_median_data' in dir() else None,
+                         cif_est_data=cif_est_data if 'cif_est_data' in dir() else None,
+                         cif_target_time=cif_target_time if 'cif_target_time' in dir() else None,
+                         fg_summary=fg_summary if 'fg_summary' in dir() else None,
+                         style_name=narrator_style_name,
+                     )
                      st.success("Summary Generated:")
-                     st.text_area("Copy this text:", value=cif_summary, height=200)
+                     st.text_area("Copy this text:", value=cif_narrative, height=250)
 
     # --- TAB 4: BIOMARKER DISCOVERY ---
     if 'tab4' in locals() and df_clean is not None:
@@ -3133,7 +3089,7 @@ if df is not None:
                      st.divider()
                      st.subheader("🤖 AI Diagnostic Narrator")
                      if st.button("Generate Diagnostic Report"):
-                           narrative = narrator.generate_diagnostic_narrative(res)
+                           narrative = narrator.generate_diagnostic_narrative(res, style_name=narrator_style_name)
                            st.success("Report Generated:")
                            st.text_area("Copy Text:", narrative, height=150)
              
@@ -3271,7 +3227,7 @@ if df is not None:
                       st.divider()
                       st.subheader("🤖 AI Prognostic Narrator")
                       if st.button("Generate Prognostic Report"):
-                            narrative = narrator.generate_prognostic_narrative(res_list)
+                            narrative = narrator.generate_prognostic_narrative(res_list, style_name=narrator_style_name)
                             st.success("Report Generated:")
                             st.text_area("Copy Text:", narrative, height=150)
 
