@@ -13,13 +13,12 @@ except ImportError:
     sns = None
 
 # --- MODULE IMPORTS ---
-# --- MODULE IMPORTS ---
 try:
-    # Try absolute import first (if running from root)
     from survival_analysis.modules import utils, statistics, plotting, narrator
+    from survival_analysis.modules.validation import validate_dataset, format_validation_report
 except ImportError:
-    # Fallback to relative import (if running from inside survival_analysis/)
     from modules import utils, statistics, plotting, narrator
+    from modules.validation import validate_dataset, format_validation_report
 
 # Force reload to pick up hot-patches (guardrails)
 import importlib
@@ -303,11 +302,29 @@ if df is not None:
     st.subheader("Data Preview")
     st.dataframe(df.head())
 
+    # --- DATA VALIDATION ---
+    # Run validation checks on the uploaded data to catch issues early
+    with st.expander("Data Validation Report", expanded=False):
+        validation_issues = validate_dataset(df)
+        if not validation_issues:
+            st.success("No issues detected in the dataset.")
+        else:
+            errors, warnings, infos = format_validation_report(validation_issues)
+            if errors:
+                for e in errors:
+                    st.error(e)
+            if warnings:
+                for w in warnings:
+                    st.warning(w)
+            if infos:
+                for i in infos:
+                    st.info(i)
+
     # Column Selection
     columns = df.columns.tolist()
-    
+
     st.sidebar.subheader("Variable Selection")
-    
+
     # Time and Event columns
     # Time and Event columns
     # Smart Defaults for Demo
@@ -337,11 +354,20 @@ if df is not None:
     # We keep default_group_idx as is (likely 0/"None" unless auto-detected above)
     # ----------------------------------------------------------------------------------------
 
-    time_col = st.sidebar.selectbox("Time Column (Duration)", columns, index=default_time_idx)
-    event_col = st.sidebar.selectbox("Event Column (Status: 1=Event, 0=Censored)", columns, index=default_event_idx)
-    
+    time_col = st.sidebar.selectbox(
+        "Time Column (Duration)", columns, index=default_time_idx,
+        help="Select the column containing survival/follow-up time (e.g., OS_Months, PFS_Days). Must be numeric and >= 0."
+    )
+    event_col = st.sidebar.selectbox(
+        "Event Column (Status: 1=Event, 0=Censored)", columns, index=default_event_idx,
+        help="Select the column indicating whether the event occurred (1) or the patient was censored (0). For competing risks, use 0=censored, 1=event of interest, 2=competing event."
+    )
+
     # Grouping Variable
-    group_col = st.sidebar.selectbox("Grouping Variable (e.g., MRD Status)", ["None"] + columns, index=default_group_idx)
+    group_col = st.sidebar.selectbox(
+        "Grouping Variable (e.g., MRD Status)", ["None"] + columns, index=default_group_idx,
+        help="Select a categorical variable to compare groups (e.g., Treatment Arm, Risk Group). Leave as 'None' for overall analysis."
+    )
 
     # --- SIDEBAR CONFIGURATION ---
     st.sidebar.header("Configuration")
@@ -482,10 +508,11 @@ if df is not None:
     
     # --- REPORT GENERATOR ---
     st.sidebar.divider()
-    st.sidebar.subheader("📄 Report Generator")
+    st.sidebar.subheader("Report Generator")
     if st.sidebar.button("Generate HTML Report"):
         import base64
-        
+        from datetime import datetime
+
         def fig_to_base64(fig):
             buf = io.BytesIO()
             fig.savefig(buf, format='png', bbox_inches='tight', dpi=150)
@@ -495,68 +522,117 @@ if df is not None:
         # 1. Dataset stats
         n_rows, n_cols = df.shape if df is not None else (0,0)
         cols_list = ", ".join(df.columns) if df is not None else "None"
-        
-        # 2. Plots
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # 2. Analysis parameters
+        params_html = f"""
+        <table>
+            <tr><td><strong>Time Column</strong></td><td>{time_col}</td></tr>
+            <tr><td><strong>Event Column</strong></td><td>{event_col}</td></tr>
+            <tr><td><strong>Grouping Variable</strong></td><td>{group_col}</td></tr>
+            <tr><td><strong>Theme</strong></td><td>{selected_theme}</td></tr>
+        </table>
+        """
+
+        # 3. Plots
         img_km = ""
         if 'report_fig_km' in st.session_state:
              img_km = f'<img src="data:image/png;base64,{fig_to_base64(st.session_state["report_fig_km"])}" style="width:100%">'
         else:
              img_km = "<p><em>No Univariable Plot generated yet.</em></p>"
-             
+
         img_forest = ""
         if 'report_fig_forest' in st.session_state:
              img_forest = f'<img src="data:image/png;base64,{fig_to_base64(st.session_state["report_fig_forest"])}" style="width:100%">'
         else:
              img_forest = "<p><em>No Multivariable Forest Plot generated yet.</em></p>"
 
-        # 3. HTML Template
+        # 4. Cox results table
+        cox_table_html = ""
+        if 'uv_cox_summary' in st.session_state:
+            cox_df = st.session_state['uv_cox_summary']
+            cox_table_html = "<h3>Univariable Cox Results</h3>" + cox_df.to_html(float_format="%.3f")
+
+        mv_table_html = ""
+        if 'mv_summary_df' in st.session_state:
+            mv_df_report = st.session_state['mv_summary_df']
+            mv_table_html = "<h3>Multivariable Cox Results</h3>" + mv_df_report.to_html(float_format="%.3f")
+
+        # 5. Software versions
+        import importlib.metadata
+        def get_version_safe(pkg):
+            try:
+                return importlib.metadata.version(pkg)
+            except Exception:
+                return "N/A"
+
+        versions_html = "<table>"
+        for lib in ["lifelines", "pandas", "numpy", "scipy", "matplotlib", "streamlit"]:
+            versions_html += f"<tr><td>{lib}</td><td>{get_version_safe(lib)}</td></tr>"
+        versions_html += "</table>"
+
+        # 6. HTML Template
         html_report = f"""
         <html>
         <head>
             <title>EasySurv Analysis Report</title>
             <style>
-                body {{ font-family: sans-serif; max_width: 800px; margin: auto; padding: 20px; }}
+                body {{ font-family: 'Segoe UI', sans-serif; max-width: 900px; margin: auto; padding: 20px; }}
                 h1 {{ color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }}
                 h2 {{ color: #2c3e50; margin-top: 30px; border-bottom: 1px solid #ddd; }}
+                h3 {{ color: #34495e; }}
                 .section {{ margin-bottom: 40px; }}
                 .meta {{ color: #666; font-size: 0.9em; }}
+                table {{ border-collapse: collapse; width: 100%; margin: 10px 0; }}
+                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+                th {{ background-color: #f2f2f6; }}
+                tr:nth-child(even) {{ background-color: #f9f9f9; }}
             </style>
         </head>
         <body>
-            <h1>Survival Analysis Report</h1>
-            <p class="meta">Generated by EasySurv</p>
-            
+            <h1>EasySurv Analysis Report</h1>
+            <p class="meta">Generated: {timestamp} | EasySurv v2.0</p>
+
             <div class="section">
-                <h2>Dataset Overview</h2>
+                <h2>1. Dataset Overview</h2>
                 <p><strong>Rows:</strong> {n_rows} | <strong>Columns:</strong> {n_cols}</p>
                 <p><strong>Variables:</strong> {cols_list}</p>
             </div>
-            
+
             <div class="section">
-                <h2>1. Univariable Analysis</h2>
+                <h2>2. Analysis Parameters</h2>
+                {params_html}
+            </div>
+
+            <div class="section">
+                <h2>3. Univariable Analysis (Kaplan-Meier)</h2>
                 {img_km}
+                {cox_table_html}
             </div>
-            
+
             <div class="section">
-                <h2>2. Multivariable Analysis</h2>
+                <h2>4. Multivariable Analysis (Cox Regression)</h2>
                 {img_forest}
+                {mv_table_html}
             </div>
-            
+
+            <div class="section">
+                <h2>5. Reproducibility</h2>
+                <h3>Software Versions</h3>
+                {versions_html}
+                <p><em>Report these versions in your manuscript for reproducibility.</em></p>
+            </div>
+
             <div class="section">
                 <h2>Notes</h2>
-                <p>This report contains snapshots of the latest plots generated in your session.</p>
+                <p>This report contains snapshots of analyses from your session. Re-run the analysis with the same data and parameters to reproduce results.</p>
             </div>
         </body>
         </html>
         """
-        
-        # Download Button via a trick or standard st.download_button
-        # But we are inside a button... Nested buttons don't work well in Streamlit.
-        # However, saving it to session state and creating a download button *outside* is better.
-        # But st.download_button works if we just render it now.
-        
+
         b64_html = base64.b64encode(html_report.encode()).decode()
-        href = f'<a href="data:text/html;base64,{b64_html}" download="easysurv_report.html" target="_blank" style="text-decoration:none; color:white; background-color:#ff4b4b; padding:8px 16px; border-radius:5px;">⬇️ Download Report (HTML)</a>'
+        href = f'<a href="data:text/html;base64,{b64_html}" download="easysurv_report.html" target="_blank" style="text-decoration:none; color:white; background-color:#ff4b4b; padding:8px 16px; border-radius:5px;">Download Report (HTML)</a>'
         st.sidebar.markdown(href, unsafe_allow_html=True)
         st.sidebar.success("Report Ready! Click above.")
     
@@ -585,6 +661,13 @@ if df is not None:
             st.stop()
             
     
+    # Column-specific validation (runs after columns are selected)
+    col_validation_issues = validate_dataset(df_clean, time_col=time_col, event_col=event_col, group_col=group_col)
+    col_errors = [i for i in col_validation_issues if i["level"] == "error"]
+    if col_errors:
+        for err in col_errors:
+            st.error(err["message"])
+
     # Plot Background Color
     plot_bgcolor = st.sidebar.color_picker("Plot Background Color", "#FFFFFF")
 
@@ -1230,6 +1313,7 @@ if df is not None:
                     # --- STATISTICAL GUARDRAILS (Pre-Analysis) ---
                     st.divider()
                     st.markdown("#### 🛡️ Statistical Guardrails")
+                    st.caption("These checks help identify potential issues before running the model. [What is EPV?] Events Per Variable (EPV) is the ratio of observed events to model parameters. EPV < 10 indicates the model may be overfit.")
                     
                     # 1. Run Checks
                     epv_res = statistics.check_epv(mv_df, event_col, covariates)
@@ -1574,73 +1658,30 @@ if df is not None:
 
                             # Forest Plot
                             st.write("### Forest Plot")
-                            
-                            # Prepare Data for Plot
-                            plot_data = summary_mv.copy()
-                            plot_data = plot_data.sort_index(ascending=False) # Top to bottom on plot
-                            
-                            # Dynamic height
-                            fig_forest, ax_forest = plt.subplots(figsize=(10, max(4, len(plot_data) * 0.5 + 1)))
-                            
+
                             # Theme Color
                             forest_color = '#1f77b4'
                             if selected_theme in all_themes and len(all_themes[selected_theme]) > 0:
                                  forest_color = all_themes[selected_theme][0]
-                            elif selected_theme == "Custom":
-                                 pass # Use default blue or allow custom override? Basic blue is fine.
-                            
-                            y_pos = np.arange(len(plot_data))
-                            
-                            # Plot Points and Error Bars
-                            x_errs = [
-                                plot_data['Hazard Ratio (HR)'] - plot_data['Lower 95%'],  # Updated col names
-                                plot_data['Upper 95%'] - plot_data['Hazard Ratio (HR)']
-                            ]
-                            
-                            ax_forest.errorbar(plot_data['Hazard Ratio (HR)'], y_pos, xerr=x_errs, 
-                                               fmt='o', color=forest_color, ecolor='black', capsize=5, markersize=8)
-                            
-                            # Reference Line
-                            ax_forest.axvline(x=1, color='red', linestyle='--', linewidth=1)
-                            
-                            # Labels
-                            ax_forest.set_yticks(y_pos)
-                            ax_forest.set_yticklabels(plot_data.index, fontsize=10, fontweight='bold')
-                            ax_forest.set_xlabel("Hazard Ratio (95% CI)")
-                            ax_forest.set_title("Multivariable Cox Regression Results")
-                            
-                            # Grid
-                            ax_forest.grid(True, axis='x', linestyle=':', alpha=0.6)
-                            
-                            # Clean Spines
-                            ax_forest.spines['top'].set_visible(False)
-                            ax_forest.spines['right'].set_visible(False)
-                            ax_forest.spines['left'].set_visible(False)
-                            
+
+                            fig_forest = plotting.create_forest_plot(
+                                summary_mv,
+                                theme_color=forest_color,
+                                title="Multivariable Cox Regression Results",
+                            )
                             st.pyplot(fig_forest)
                             
                             # Save to session_state for Report
                             st.session_state['report_fig_forest'] = fig_forest
                             
                             # Download
-                            buf_forest = io.BytesIO()
-                            fig_forest.savefig(buf_forest, format="png", dpi=300, bbox_inches='tight')
-                            buf_forest.seek(0)
-                            
                             col1, col2, col3 = st.columns(3)
                             with col1:
-                                st.download_button("💾 Download Forest Plot (300 DPI)", buf_forest, "forest_plot_300dpi.png", "image/png")
+                                st.download_button("💾 Download Forest Plot (300 DPI)", plotting.save_plot_to_buffer(fig_forest, dpi=300), "forest_plot_300dpi.png", "image/png")
                             with col2:
-                                buf_forest_hi = io.BytesIO()
-                                fig_forest.savefig(buf_forest_hi, format="png", dpi=600, bbox_inches='tight')
-                                buf_forest_hi.seek(0)
-                                st.download_button("💾 Download High-Res Forest Plot (600 DPI)", buf_forest_hi, "forest_plot_600dpi.png", "image/png")
-
+                                st.download_button("💾 Download High-Res Forest Plot (600 DPI)", plotting.save_plot_to_buffer(fig_forest, dpi=600), "forest_plot_600dpi.png", "image/png")
                             with col3:
-                                buf_forest_pdf = io.BytesIO()
-                                fig_forest.savefig(buf_forest_pdf, format="pdf", bbox_inches='tight')
-                                buf_forest_pdf.seek(0)
-                                st.download_button("📄 Download Forest Plot (PDF)", buf_forest_pdf, "forest_plot.pdf", "application/pdf")
+                                st.download_button("📄 Download Forest Plot (PDF)", plotting.save_plot_to_buffer(fig_forest, fmt="pdf"), "forest_plot.pdf", "application/pdf")
                                 
                                 # --- AI NARRATOR (Multivariable) ---
                                 st.divider()

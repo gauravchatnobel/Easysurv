@@ -3,6 +3,19 @@ import numpy as np
 from lifelines import KaplanMeierFitter, CoxPHFitter
 from scipy.stats import norm
 
+try:
+    import streamlit as st
+    _HAS_STREAMLIT = True
+except ImportError:
+    _HAS_STREAMLIT = False
+
+
+def _cache_data(func):
+    """Apply st.cache_data if Streamlit is available, otherwise no-op."""
+    if _HAS_STREAMLIT:
+        return st.cache_data(show_spinner=False)(func)
+    return func
+
 def compute_fine_gray_weights(df, time_col, event_col, event_of_interest=1):
     """
     Prepares a dataset for Fine-Gray regression using Inverse Probability of Censoring Weighting (IPCW).
@@ -179,6 +192,7 @@ def check_epv(df, event_col, covariates):
         
     return result
 
+@_cache_data
 def get_correlation_matrix(df, covariates):
     """
     Returns the One-Hot Encoded correlation matrix for visualization.
@@ -196,6 +210,7 @@ def get_correlation_matrix(df, covariates):
     except Exception as e:
          return None
 
+@_cache_data
 def calculate_vif(df, covariates):
     """
     Calculates Variance Inflation Factor (VIF) for covariates.

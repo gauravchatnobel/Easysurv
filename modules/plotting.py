@@ -3,6 +3,7 @@ import matplotlib.transforms as mtransforms
 import pandas as pd
 import numpy as np
 
+
 def add_at_risk_counts(fitters, ax=None, y_shift=-0.25, colors=None, labels=None, fontsize=10):
     """
     Add a table of at-risk counts below the plot.
@@ -10,38 +11,38 @@ def add_at_risk_counts(fitters, ax=None, y_shift=-0.25, colors=None, labels=None
     """
     if ax is None:
         ax = plt.gca()
-    
+
     # Get ticks from the plot
     ticks = ax.get_xticks()
     # Filter ticks that make sense AND are within the current view limits
     view_min, view_max = ax.get_xlim()
     valid_ticks = [t for t in ticks if view_min <= t <= view_max]
-    
+
     # Configuration for layout
     row_height = 0.05
     start_y = y_shift
-    
+
     # Use a blended transform: X is data coords (so it matches ticks), Y is axes coords (so it stays absolute relative to plot bottom)
-    # We actually need two transforms: 
+    # We actually need two transforms:
     # 1. For data numbers: x=data, y=axes
     # 2. For row labels: x=axes (negative), y=axes
     trans_data_axes = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
-    
+
     for i, fitter in enumerate(fitters):
         y_pos = start_y - (i * row_height)
-        
+
         # 1. Plot Row Label (Left of Y-axis)
         # Use provided custom label if available, else fitter label
         lbl = labels[i] if labels and i < len(labels) else fitter._label
-        
+
         # Color resolution
         color = 'black'
         if colors and i < len(colors):
             color = colors[i]
-            
-        ax.text(-0.03, y_pos, lbl, transform=ax.transAxes, 
+
+        ax.text(-0.03, y_pos, lbl, transform=ax.transAxes,
                 ha='right', va='center', weight='bold', color=color, fontsize=fontsize)
-        
+
         # 2. Plot Counts at each tick
         for t in valid_ticks:
             # Calculate at risk
@@ -54,14 +55,129 @@ def add_at_risk_counts(fitters, ax=None, y_shift=-0.25, colors=None, labels=None
                 else:
                     last_row = sliced.iloc[-1]
                     val = last_row['at_risk'] - last_row['removed']
-            
+
             if isinstance(val, (pd.Series, np.ndarray, list)):
                 try:
                     val = val.item()
                 except:
                     pass
             val = int(val)
-            
+
             # Plot the number
-            ax.text(t, y_pos, str(val), transform=trans_data_axes, 
+            ax.text(t, y_pos, str(val), transform=trans_data_axes,
                     ha='center', va='center', color=color, fontsize=fontsize, weight='bold')
+
+
+def create_forest_plot(summary_df, theme_color='#1f77b4', title="Forest Plot",
+                       xlabel="Hazard Ratio (95% CI)", reference_line=1.0,
+                       figsize=None, label_fontsize=10):
+    """
+    Create a publication-quality forest plot from Cox regression summary.
+
+    Parameters
+    ----------
+    summary_df : pd.DataFrame
+        Must have columns: 'Hazard Ratio (HR)', 'Lower 95%', 'Upper 95%', 'p-value'.
+        Index = variable names.
+    theme_color : str
+        Color for plot elements.
+    title : str
+        Plot title.
+    xlabel : str
+        X-axis label.
+    reference_line : float
+        Where to draw the reference (null) line (1.0 for HR).
+    figsize : tuple or None
+        Figure size. Auto-calculated if None.
+    label_fontsize : int
+        Font size for variable labels.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    plot_data = summary_df.copy()
+    plot_data = plot_data.sort_index(ascending=False)
+
+    n_vars = len(plot_data)
+    if figsize is None:
+        figsize = (10, max(4, n_vars * 0.5 + 1))
+
+    fig, ax = plt.subplots(figsize=figsize)
+    y_pos = np.arange(n_vars)
+
+    hrs = plot_data['Hazard Ratio (HR)'].values
+    lowers = plot_data['Lower 95%'].values
+    uppers = plot_data['Upper 95%'].values
+    p_vals = plot_data['p-value'].values
+
+    # Error bars (must be positive distances from center)
+    xerr = [
+        np.abs(hrs - lowers),
+        np.abs(uppers - hrs),
+    ]
+
+    # Plot error bars
+    ax.errorbar(hrs, y_pos, xerr=xerr,
+                fmt='s', color=theme_color, ecolor='black',
+                capsize=5, markersize=8, linewidth=1.5)
+
+    # Reference line at HR=1
+    ax.axvline(x=reference_line, color='red', linestyle='--', linewidth=1, alpha=0.7)
+
+    # Variable labels on Y-axis
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(plot_data.index, fontsize=label_fontsize, fontweight='bold')
+
+    # HR annotations on the right side
+    for i, (hr, lo, hi, p) in enumerate(zip(hrs, lowers, uppers, p_vals)):
+        p_str = f"p<0.001" if p < 0.001 else f"p={p:.3f}"
+        annotation = f"{hr:.2f} ({lo:.2f}-{hi:.2f}) {p_str}"
+        # Place to the right of the plot
+        ax.annotate(annotation, xy=(1.02, y_pos[i]),
+                    xycoords=('axes fraction', 'data'),
+                    fontsize=8, va='center', ha='left',
+                    color='black')
+
+    ax.set_xlabel(xlabel)
+    ax.set_title(title, loc='left', fontweight='bold')
+
+    # Grid
+    ax.grid(True, axis='x', linestyle=':', alpha=0.6)
+
+    # Clean spines
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+
+    # Adjust limits
+    ax.set_ylim(-0.5, n_vars - 0.5 + 0.3)
+
+    # Make room for annotations on the right
+    fig.subplots_adjust(right=0.65)
+
+    return fig
+
+
+def save_plot_to_buffer(fig, fmt="png", dpi=300):
+    """
+    Save a matplotlib figure to an in-memory buffer.
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+    fmt : str
+        Output format ('png', 'pdf', etc.)
+    dpi : int
+        Resolution for raster formats.
+
+    Returns
+    -------
+    io.BytesIO
+    """
+    import io
+    buf = io.BytesIO()
+    fig.savefig(buf, format=fmt, dpi=dpi, bbox_inches='tight',
+                facecolor=fig.get_facecolor(), edgecolor='none')
+    buf.seek(0)
+    return buf
