@@ -1,3 +1,5 @@
+APP_VERSION = "2.1.0"  # V2 with narrator journal styles
+
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -37,6 +39,7 @@ add_at_risk_counts = plotting.add_at_risk_counts
 st.set_page_config(page_title="Survival Analysis Tool", layout="wide")
 
 st.title("EASYSURV: Interactive Survival Analysis Tool")
+st.caption(f"v{APP_VERSION}")
 
 # Sidebar - Configuration
 st.sidebar.header("Data Upload & Configuration")
@@ -376,13 +379,16 @@ if df is not None:
     st.sidebar.subheader("Global Theme & Typography")
 
     # Narrator Journal Style
-    narrator_style_labels = narrator.get_style_labels()
-    narrator_style_name = st.sidebar.selectbox(
-        "Narrator Style",
-        list(narrator_style_labels.keys()),
-        format_func=lambda x: narrator_style_labels[x],
-        help="Controls how the AI Narrator formats p-values and confidence intervals in generated text."
-    )
+    try:
+        narrator_style_labels = narrator.get_style_labels()
+        narrator_style_name = st.sidebar.selectbox(
+            "Narrator Journal Style",
+            list(narrator_style_labels.keys()),
+            format_func=lambda x: narrator_style_labels[x],
+            help="Choose how the AI Narrator formats p-values and confidence intervals. Standard works for most journals; NEJM and Lancet follow their specific conventions."
+        )
+    except Exception:
+        narrator_style_name = "Standard"
 
     font_options = ["sans-serif", "serif", "monospace", "Arial", "Helvetica", "Times New Roman", "Courier New", "Verdana", "Comic Sans MS"]
     selected_font = st.sidebar.selectbox("Font Family", font_options, index=0)
