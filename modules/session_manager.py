@@ -35,14 +35,22 @@ SAVEABLE_STATE_KEYS = [
     "use_penalizer",
     "l1_ratio_val",
     "penalizer_val",
-    # Multivariable flag
+    "lambda_slider",
+    # Multivariable analysis
     "mv_analysis_active",
+    "uv_cox_method",
+    "tune_options",
     # Competing risks two-column setup
     "two_col_cif_time",
     "two_col_cif_event",
     "two_col_cif_interest",
     # Optimal cutoff
     "optimal_cut",
+    # Diagnostic / Prognostic results
+    "diag_results",
+    "prog_results",
+    # Covariate selections (for restoring multivariable tab)
+    "_saved_covariates",
 ]
 
 # These session_state keys hold DataFrames that should be saved as CSV
@@ -104,6 +112,9 @@ SIDEBAR_CONFIG_KEYS = {
     "show_p_val_box_cif": True,
     "pval_x_cif": 0.95,
     "pval_y_cif": 0.2,
+    # Theme / colors
+    "selected_theme": "Default",
+    "plot_bgcolor": "#FFFFFF",
     # Analysis settings
     "landmark_time": 0.0,
     "target_time": 24.0,
@@ -199,10 +210,19 @@ def save_session(df, sidebar_config, session_state, notes=""):
             if key in sidebar_config:
                 session["sidebar"][key] = sidebar_config[key]
 
-    # Save dynamic group labels (label_{group_name})
+    # Save dynamic group labels, colors, and reference groups
     for key, val in sidebar_config.items():
-        if key.startswith("label_") or key.startswith("ref_"):
+        if key.startswith("label_") or key.startswith("ref_") or key.startswith("color_"):
             session["sidebar"][key] = val
+
+    # Also scan session_state for dynamic widget keys not in sidebar_config
+    # (color_*, label_*, ref_* are set automatically by Streamlit widget keys)
+    for key in list(session_state.keys()):
+        if isinstance(key, str) and (
+            key.startswith("color_") or key.startswith("label_") or key.startswith("ref_")
+        ):
+            if key not in session["sidebar"]:
+                session["sidebar"][key] = session_state[key]
 
     # 3. Session state (serialisable scalars / lists / dicts)
     session["state"] = {}

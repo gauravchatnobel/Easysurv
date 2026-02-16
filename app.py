@@ -573,7 +573,9 @@ if df is not None:
     all_themes = utils.all_themes
     theme_names = ["Default"] + list(utils.journal_themes.keys()) + list(utils.fun_themes.keys()) + ["Custom"]
     
-    selected_theme = st.sidebar.selectbox("Choose Theme", theme_names)
+    _r_theme = _restored_default("selected_theme", "Default")
+    _theme_idx = theme_names.index(_r_theme) if _r_theme in theme_names else 0
+    selected_theme = st.sidebar.selectbox("Choose Theme", theme_names, index=_theme_idx)
     
     # --- DOWNLOAD MODIFIED DATA (At bottom of sidebar) ---
     st.sidebar.divider()
@@ -616,6 +618,8 @@ if df is not None:
             "table_height": table_height,
             "show_censored": show_censored,
             "show_ci": show_ci,
+            "selected_theme": selected_theme,
+            "plot_bgcolor": plot_bgcolor,
         }
         session_json = save_session(
             df=df,
@@ -801,7 +805,7 @@ if df is not None:
             st.error(err["message"])
 
     # Plot Background Color
-    plot_bgcolor = st.sidebar.color_picker("Plot Background Color", "#FFFFFF")
+    plot_bgcolor = st.sidebar.color_picker("Plot Background Color", _restored_default("plot_bgcolor", "#FFFFFF"))
 
     # --- GLOBAL LANDMARK & ZOOM ---
     st.sidebar.divider()
@@ -1373,7 +1377,11 @@ if df is not None:
             # 1. Select Covariates
             # Exclude Time and Event columns from options
             covariate_options = [c for c in columns if c not in [time_col, event_col]]
-            covariates = st.multiselect("Select Covariates for Analysis", covariate_options)
+            _restored_covariates = st.session_state.get("_saved_covariates", [])
+            _default_covariates = [c for c in _restored_covariates if c in covariate_options]
+            covariates = st.multiselect("Select Covariates for Analysis", covariate_options, default=_default_covariates)
+            # Persist for session save
+            st.session_state["_saved_covariates"] = covariates
             
             if covariates:
                 # --- STRUCTURAL REDUNDANCY CHECK (Gap 2) ---
