@@ -28,6 +28,7 @@ fun_themes = {
     "Hollywood Equine": ["#2C3E50", "#D35400", "#2980B9", "#C0392B", "#bdc3c7", "#F39C12"],
     "Prehistoric One": ["#5D4037", "#D84315", "#388E3C", "#FBC02D", "#455A64", "#212121"],
     "Alien Biosphere": ["#FFB7E1", "#8DE581", "#7DFAFF", "#D78E38", "#596025", "#304245"], # Scavengers Reign
+    "Fractured Timeline": ["#5C3D6E", "#E6A550", "#4DA8A0", "#C97B8B", "#7B8FA1", "#2E1F3E"], # Rotoscope dreamscape
     "Alien Flora": ["#F4EBD0", "#D66853", "#3C505D", "#7D9D9C", "#212D40", "#A8C686"],
     "Neon Acid": ["#FF00FF", "#00FF00", "#0000FF", "#FFFF00", "#00FFFF", "#FF0000"],
     "Cyber Grid": ["#2F5061", "#4291C7", "#D57FBE", "#E45D5C", "#FFAE91", "#F9DB57", "#FFFFD0"],
