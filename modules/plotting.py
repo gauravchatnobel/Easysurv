@@ -115,10 +115,10 @@ def add_at_risk_counts(fitters, ax=None, y_shift=-0.25, colors=None, labels=None
 
 def add_survival_annotations(fitters, ax, colors=None, labels=None,
                              show_median=False, show_x_year=False, x_year_time=None,
-                             annotation_fontsize=9, line_style='--', line_alpha=0.5,
-                             is_cif=False):
+                             line_style='--', line_alpha=0.5, is_cif=False):
     """
     Add auto-computed survival milestone annotations to a KM or CIF plot.
+    Draws clean dashed drop-lines only (no text labels on axes).
 
     Parameters
     ----------
@@ -133,7 +133,6 @@ def add_survival_annotations(fitters, ax, colors=None, labels=None,
         Draw dashed lines at a specific timepoint.
     x_year_time : float
         The timepoint for X-year survival annotation.
-    annotation_fontsize : int
     line_style : str
     line_alpha : float
     is_cif : bool
@@ -142,9 +141,7 @@ def add_survival_annotations(fitters, ax, colors=None, labels=None,
     if not fitters:
         return
 
-    trans = mtransforms.blended_transform_factory(ax.transData, ax.transData)
     view_min, view_max = ax.get_xlim()
-    y_min_view, y_max_view = ax.get_ylim()
 
     # --- Median survival lines ---
     if show_median:
@@ -175,16 +172,11 @@ def add_survival_annotations(fitters, ax, colors=None, labels=None,
                 continue
 
             # Vertical line from curve down to x-axis
-            ax.plot([median_t, median_t], [0 if not is_cif else 0, median_y],
+            ax.plot([median_t, median_t], [0, median_y],
                     linestyle=line_style, color=color, linewidth=1, alpha=line_alpha)
             # Horizontal line from y-axis to curve
             ax.plot([0, median_t], [median_y, median_y],
                     linestyle=line_style, color=color, linewidth=1, alpha=line_alpha)
-            # Label at the bottom
-            ax.annotate(f'{median_t:.1f}', xy=(median_t, 0),
-                        xytext=(0, -8), textcoords='offset points',
-                        ha='center', va='top', fontsize=annotation_fontsize,
-                        color=color, weight='bold')
 
     # --- X-year survival lines ---
     if show_x_year and x_year_time is not None:
@@ -193,10 +185,8 @@ def add_survival_annotations(fitters, ax, colors=None, labels=None,
             # Vertical reference line at the timepoint
             ax.axvline(x=t, color='gray', linestyle=':', linewidth=0.8, alpha=0.4)
 
-            annotation_texts = []
             for i, fitter in enumerate(fitters):
                 color = colors[i] if colors and i < len(colors) else f'C{i}'
-                lbl = labels[i] if labels and i < len(labels) else fitter._label
 
                 if is_cif:
                     cdf = fitter.cumulative_density_
@@ -224,16 +214,6 @@ def add_survival_annotations(fitters, ax, colors=None, labels=None,
                 # Horizontal line from y-axis to the curve at this timepoint
                 ax.plot([0, t], [y_val, y_val],
                         linestyle=line_style, color=color, linewidth=1, alpha=line_alpha)
-
-                pct = y_val * 100
-                annotation_texts.append((y_val, color, lbl, pct))
-
-            # Place annotations on y-axis side
-            for y_val, color, lbl, pct in annotation_texts:
-                ax.annotate(f'{pct:.1f}%', xy=(0, y_val),
-                            xytext=(-5, 0), textcoords='offset points',
-                            ha='right', va='center', fontsize=annotation_fontsize,
-                            color=color, weight='bold')
 
 
 def create_forest_plot(summary_df, theme_color='#1f77b4', title="Forest Plot",
