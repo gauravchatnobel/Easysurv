@@ -18,9 +18,11 @@ except ImportError:
 try:
     from survival_analysis.modules import utils, statistics, plotting, narrator
     from survival_analysis.modules.validation import validate_dataset, format_validation_report
+    from survival_analysis.modules.session_manager import save_session, load_session, get_session_filename, SIDEBAR_CONFIG_KEYS
 except ImportError:
     from modules import utils, statistics, plotting, narrator
     from modules.validation import validate_dataset, format_validation_report
+    from modules.session_manager import save_session, load_session, get_session_filename, SIDEBAR_CONFIG_KEYS
 
 # Force reload to pick up hot-patches (guardrails)
 import importlib
@@ -46,6 +48,53 @@ st.sidebar.header("Data Upload & Configuration")
 
 st.sidebar.warning("⚠️ **Security Note**: Do not upload identifiable patient data / PHI. This tool runs locally/in-memory, but standard data privacy hygiene applies.")
 uploaded_file = st.sidebar.file_uploader("Upload Clinical Data (CSV/Excel)", type=["csv", "xlsx"])
+
+# --- SESSION MANAGEMENT ---
+with st.sidebar.expander("Save / Load Session", expanded=False):
+    # Load session
+    session_file = st.file_uploader(
+        "Load a saved session",
+        type=["easysurv"],
+        key="_session_file_upload",
+        help="Upload a previously saved .easysurv session file to restore your analysis."
+    )
+    if session_file is not None and not st.session_state.get("_session_loaded"):
+        try:
+            raw = session_file.read().decode("utf-8")
+            restored = load_session(raw)
+            st.session_state["_restored_session"] = restored
+            # Restore the dataset
+            if restored["df"] is not None:
+                st.session_state["_restored_df"] = restored["df"]
+            # Restore session state values
+            for key, val in restored["state"].items():
+                st.session_state[key] = val
+            # Restore DataFrames in session state
+            for key, df_val in restored["state_dataframes"].items():
+                st.session_state[key] = df_val
+            # Store sidebar config for widgets to pick up
+            st.session_state["_restored_sidebar"] = restored["sidebar"]
+            st.session_state["_session_loaded"] = True
+            saved_at = restored.get("saved_at", "unknown")
+            notes = restored.get("notes", "")
+            st.success(f"Session restored (saved {saved_at})")
+            if notes:
+                st.info(f"Notes: {notes}")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Failed to load session: {e}")
+
+    # Save session placeholder — the actual button is rendered later once df and config are available
+    if st.session_state.get("_session_save_data"):
+        session_json = st.session_state["_session_save_data"]
+        filename = st.session_state.get("_session_save_filename", "session.easysurv")
+        st.download_button(
+            label="Download Session File",
+            data=session_json,
+            file_name=filename,
+            mime="application/json",
+            key="_session_download",
+        )
 
 
 
@@ -132,6 +181,16 @@ else:
                      break
         except:
              pass
+
+# Check for session-restored dataframe
+if df is None and "_restored_df" in st.session_state:
+    df = st.session_state["_restored_df"]
+
+# Helper to get restored sidebar config defaults
+def _restored_default(key, fallback):
+    """Return restored value if a session was just loaded, otherwise return fallback."""
+    restored = st.session_state.get("_restored_sidebar", {})
+    return restored.get(key, fallback)
 
 if df is not None:
 
@@ -329,33 +388,36 @@ if df is not None:
     st.sidebar.subheader("Variable Selection")
 
     # Time and Event columns
-    # Time and Event columns
-    # Smart Defaults for Demo
+    # Smart Defaults: session restore > demo defaults > intelligent column matching
     default_time_idx = 0
     default_event_idx = 0
     default_group_idx = 0
-    
-    if st.session_state.get('demo_loaded', False):
+
+    # Check for session-restored column selections first
+    _r_time = _restored_default("time_col", None)
+    _r_event = _restored_default("event_col", None)
+    _r_group = _restored_default("group_col", None)
+
+    if _r_time and _r_time in columns:
+        default_time_idx = columns.index(_r_time)
+    elif st.session_state.get('demo_loaded', False):
         if "OS_Months" in columns:
             default_time_idx = columns.index("OS_Months")
         if "Event_Occurred" in columns:
             default_event_idx = columns.index("Event_Occurred")
         if "Treatment_Arm" in columns:
-            # +1 because "None" is at index 0
             default_group_idx = columns.index("Treatment_Arm") + 1
     else:
-        # Standard intelligent defaults
         if "OS_Days" in columns: default_time_idx = columns.index("OS_Days")
         elif "Time" in columns: default_time_idx = columns.index("Time")
-        
         if "OS_Status" in columns: default_event_idx = columns.index("OS_Status")
         elif "Status" in columns: default_event_idx = columns.index("Status")
-        
         if "MRD_Status" in columns: default_group_idx = columns.index("MRD_Status") + 1
-        
-    # User requested revert: "just make it blank with no error message by default"
-    # We keep default_group_idx as is (likely 0/"None" unless auto-detected above)
-    # ----------------------------------------------------------------------------------------
+
+    if _r_event and _r_event in columns:
+        default_event_idx = columns.index(_r_event)
+    if _r_group and _r_group in (["None"] + columns):
+        default_group_idx = (["None"] + columns).index(_r_group)
 
     time_col = st.sidebar.selectbox(
         "Time Column (Duration)", columns, index=default_time_idx,
@@ -381,9 +443,13 @@ if df is not None:
     # Narrator Journal Style
     try:
         narrator_style_labels = narrator.get_style_labels()
+        _style_keys = list(narrator_style_labels.keys())
+        _r_style = _restored_default("narrator_style_name", "Standard")
+        _style_idx = _style_keys.index(_r_style) if _r_style in _style_keys else 0
         narrator_style_name = st.sidebar.selectbox(
             "Narrator Journal Style",
-            list(narrator_style_labels.keys()),
+            _style_keys,
+            index=_style_idx,
             format_func=lambda x: narrator_style_labels[x],
             help="Choose how the AI Narrator formats p-values and confidence intervals. Standard works for most journals; NEJM and Lancet follow their specific conventions."
         )
@@ -391,26 +457,28 @@ if df is not None:
         narrator_style_name = "Standard"
 
     font_options = ["sans-serif", "serif", "monospace", "Arial", "Helvetica", "Times New Roman", "Courier New", "Verdana", "Comic Sans MS"]
-    selected_font = st.sidebar.selectbox("Font Family", font_options, index=0)
+    _r_font = _restored_default("selected_font", "sans-serif")
+    _font_idx = font_options.index(_r_font) if _r_font in font_options else 0
+    selected_font = st.sidebar.selectbox("Font Family", font_options, index=_font_idx)
     plt.rcParams['font.family'] = selected_font
-    
+
     # Title customizations (Shared)
-    title_fontsize = st.sidebar.slider("Title Font Size", 10, 30, 20)
-    title_bold = st.sidebar.checkbox("Bold Title", value=True)
+    title_fontsize = st.sidebar.slider("Title Font Size", 10, 30, int(_restored_default("title_fontsize", 20)))
+    title_bold = st.sidebar.checkbox("Bold Title", value=_restored_default("title_bold", True))
     title_fontweight = 'bold' if title_bold else 'normal'
 
     p_val_fontsize = 12 # Default
 
-    axes_fontsize = st.sidebar.number_input("Axes/Tick Font Size", min_value=6, value=12)
-    legend_fontsize = st.sidebar.number_input("Legend Font Size", min_value=6, value=10)
-    line_width = st.sidebar.slider("Line Width", 0.5, 5.0, 1.5)
-    
+    axes_fontsize = st.sidebar.number_input("Axes/Tick Font Size", min_value=6, value=int(_restored_default("axes_fontsize", 12)))
+    legend_fontsize = st.sidebar.number_input("Legend Font Size", min_value=6, value=int(_restored_default("legend_fontsize", 10)))
+    line_width = st.sidebar.slider("Line Width", 0.5, 5.0, float(_restored_default("line_width", 1.5)))
+
     # Global Plot Configuration (Elements affecting all plots)
     st.sidebar.subheader("Global Plot Configuration")
-    show_risk_table = st.sidebar.checkbox("Show At-Risk Table", value=True)
-    table_height = st.sidebar.slider("Table Offset", -0.5, -0.1, -0.25, 0.05) if show_risk_table else -0.25
-    show_censored = st.sidebar.checkbox("Show Censored Ticks", value=True)
-    show_ci = st.sidebar.checkbox("Show 95% CI", value=True)
+    show_risk_table = st.sidebar.checkbox("Show At-Risk Table", value=_restored_default("show_risk_table", True))
+    table_height = st.sidebar.slider("Table Offset", -0.5, -0.1, float(_restored_default("table_height", -0.25)), 0.05) if show_risk_table else -0.25
+    show_censored = st.sidebar.checkbox("Show Censored Ticks", value=_restored_default("show_censored", True))
+    show_ci = st.sidebar.checkbox("Show 95% CI", value=_restored_default("show_ci", True))
     
     # 2. Main Plot Settings (Kaplan-Meier)
     with st.sidebar.expander("Main Plot Settings (KM)", expanded=False):
@@ -522,6 +590,54 @@ if df is not None:
             help="Download the dataset including all new variables created in this session."
         )
     
+    # --- SAVE SESSION ---
+    st.sidebar.divider()
+    st.sidebar.subheader("Save Session")
+    session_notes = st.sidebar.text_input(
+        "Session Notes (optional)",
+        value="",
+        placeholder="e.g., OS analysis with MRD stratification",
+        help="Add a note to help you remember what this session contains."
+    )
+    if st.sidebar.button("Save Current Session", type="secondary"):
+        # Collect current sidebar config
+        current_sidebar = {
+            "time_col": time_col,
+            "event_col": event_col,
+            "group_col": group_col,
+            "narrator_style_name": narrator_style_name,
+            "selected_font": selected_font,
+            "title_fontsize": title_fontsize,
+            "title_bold": title_bold,
+            "axes_fontsize": axes_fontsize,
+            "legend_fontsize": legend_fontsize,
+            "line_width": line_width,
+            "show_risk_table": show_risk_table,
+            "table_height": table_height,
+            "show_censored": show_censored,
+            "show_ci": show_ci,
+        }
+        session_json = save_session(
+            df=df,
+            sidebar_config=current_sidebar,
+            session_state=st.session_state,
+            notes=session_notes,
+        )
+        filename = get_session_filename(session_notes)
+        st.session_state["_session_save_data"] = session_json
+        st.session_state["_session_save_filename"] = filename
+        st.rerun()
+
+    if st.session_state.get("_session_save_data"):
+        st.sidebar.download_button(
+            label="Download .easysurv File",
+            data=st.session_state["_session_save_data"],
+            file_name=st.session_state.get("_session_save_filename", "session.easysurv"),
+            mime="application/json",
+            key="_sidebar_session_download",
+        )
+        st.sidebar.caption("Click above to download your session file.")
+
     # --- REPORT GENERATOR ---
     st.sidebar.divider()
     st.sidebar.subheader("Report Generator")
