@@ -462,46 +462,50 @@ if df is not None:
     selected_font = st.sidebar.selectbox("Font Family", font_options, index=_font_idx)
     plt.rcParams['font.family'] = selected_font
 
-    # Title customizations (Shared)
-    title_fontsize = st.sidebar.slider("Title Font Size", 10, 30, int(_restored_default("title_fontsize", 20)))
-    title_bold = st.sidebar.checkbox("Bold Title", value=_restored_default("title_bold", True))
+    with st.sidebar.expander("Font Sizes & Line Width", expanded=False):
+        # Title customizations (Shared)
+        title_fontsize = st.slider("Title Font Size", 10, 30, int(_restored_default("title_fontsize", 20)))
+        title_bold = st.checkbox("Bold Title", value=_restored_default("title_bold", True))
+        axes_fontsize = st.number_input("Axes/Tick Font Size", min_value=6, value=int(_restored_default("axes_fontsize", 12)))
+        legend_fontsize = st.number_input("Legend Font Size", min_value=6, value=int(_restored_default("legend_fontsize", 10)))
+        line_width = st.slider("Line Width", 0.5, 5.0, float(_restored_default("line_width", 1.5)))
     title_fontweight = 'bold' if title_bold else 'normal'
 
     p_val_fontsize = 12 # Default
 
-    axes_fontsize = st.sidebar.number_input("Axes/Tick Font Size", min_value=6, value=int(_restored_default("axes_fontsize", 12)))
-    legend_fontsize = st.sidebar.number_input("Legend Font Size", min_value=6, value=int(_restored_default("legend_fontsize", 10)))
-    line_width = st.sidebar.slider("Line Width", 0.5, 5.0, float(_restored_default("line_width", 1.5)))
-
     # Global Plot Configuration (Elements affecting all plots)
     st.sidebar.subheader("Global Plot Configuration")
+    show_censored = st.sidebar.checkbox("Show Censored Ticks", value=_restored_default("show_censored", True))
+    show_ci = st.sidebar.checkbox("Show 95% CI", value=_restored_default("show_ci", True))
     show_risk_table = st.sidebar.checkbox("Show At-Risk Table", value=_restored_default("show_risk_table", True))
     if show_risk_table:
-        _risk_table_options = ["At-risk only", "At-risk with censored (n censored)"]
-        _r_risk_fmt = _restored_default("risk_table_format", "At-risk only")
-        _risk_fmt_idx = _risk_table_options.index(_r_risk_fmt) if _r_risk_fmt in _risk_table_options else 0
-        risk_table_format = st.sidebar.radio(
-            "At-Risk Table Format",
-            _risk_table_options,
-            index=_risk_fmt_idx,
-            help="'At-risk with censored' shows cumulative censored count in brackets, e.g. 85 (3). Common in JCO/NEJM publications."
-        )
-        show_censored_in_table = (risk_table_format == _risk_table_options[1])
-        table_height = st.sidebar.slider("Table Offset", -0.5, -0.1, float(_restored_default("table_height", -0.25)), 0.05)
-        risk_table_title = st.sidebar.checkbox("Show Table Title", value=_restored_default("risk_table_title", False),
-                                                help="Adds a title row (e.g. 'No. at risk') above the table.")
-        risk_table_fontsize = st.sidebar.number_input("Table Font Size", min_value=6, max_value=20,
-                                                       value=int(_restored_default("risk_table_fontsize", 10)), step=1)
-        risk_table_bold = st.sidebar.checkbox("Bold Table Text", value=_restored_default("risk_table_bold", True))
+        with st.sidebar.expander("At-Risk Table Options", expanded=False):
+            _risk_table_options = ["At-risk only", "At-risk with censored (n censored)"]
+            _r_risk_fmt = _restored_default("risk_table_format", "At-risk only")
+            _risk_fmt_idx = _risk_table_options.index(_r_risk_fmt) if _r_risk_fmt in _risk_table_options else 0
+            risk_table_format = st.radio(
+                "Format",
+                _risk_table_options,
+                index=_risk_fmt_idx,
+                help="'At-risk with censored' shows cumulative censored count in brackets, e.g. 85 (3). Common in JCO/NEJM publications."
+            )
+            show_censored_in_table = (risk_table_format == _risk_table_options[1])
+            table_height = st.slider("Table Offset (Y)", -0.5, -0.1, float(_restored_default("table_height", -0.25)), 0.05)
+            risk_table_label_pad = st.slider("Label Gap", -0.25, -0.02, float(_restored_default("risk_table_label_pad", -0.10)), 0.01,
+                                              help="Horizontal gap between group labels and the first data column. More negative = wider gap.")
+            risk_table_title = st.checkbox("Show Table Title", value=_restored_default("risk_table_title", False),
+                                            help="Adds a title row (e.g. 'No. at risk') above the table.")
+            risk_table_fontsize = st.number_input("Font Size", min_value=6, max_value=20,
+                                                   value=int(_restored_default("risk_table_fontsize", 10)), step=1)
+            risk_table_bold = st.checkbox("Bold Text", value=_restored_default("risk_table_bold", True))
     else:
         show_censored_in_table = False
         risk_table_format = "At-risk only"
         table_height = -0.25
+        risk_table_label_pad = -0.10
         risk_table_title = False
         risk_table_fontsize = 10
         risk_table_bold = True
-    show_censored = st.sidebar.checkbox("Show Censored Ticks", value=_restored_default("show_censored", True))
-    show_ci = st.sidebar.checkbox("Show 95% CI", value=_restored_default("show_ci", True))
     
     # 2. Main Plot Settings (Kaplan-Meier)
     with st.sidebar.expander("Main Plot Settings (KM)", expanded=False):
@@ -586,11 +590,8 @@ if df is not None:
                 if c_txt:
                     cif_annotations.append({'text': c_txt, 'x': c_x, 'y': c_y, 'size': c_sz, 'box': c_box})
         
-    # Theme Selection (moved to bottom or keep global)
+    # Color Theme Selection
     st.sidebar.subheader("Color Theme")
-
-    # Theme Selection
-    st.sidebar.subheader("Aesthetics & Themes")
     
     # Use themes from utils
     all_themes = utils.all_themes
@@ -640,6 +641,7 @@ if df is not None:
             "show_risk_table": show_risk_table,
             "risk_table_format": risk_table_format,
             "table_height": table_height,
+            "risk_table_label_pad": risk_table_label_pad,
             "risk_table_title": risk_table_title,
             "risk_table_fontsize": risk_table_fontsize,
             "risk_table_bold": risk_table_bold,
@@ -1014,7 +1016,7 @@ if df is not None:
                     # Custom add_at_risk_counts integration
                     # We need fitters for all to use add_at_risk_counts
                     # fitters list already populated above
-                    add_at_risk_counts(fitters, ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels, show_censored_counts=show_censored_in_table, bold=risk_table_bold, show_title=risk_table_title, fontsize=risk_table_fontsize)
+                    add_at_risk_counts(fitters, ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels, show_censored_counts=show_censored_in_table, bold=risk_table_bold, show_title=risk_table_title, fontsize=risk_table_fontsize, label_pad=risk_table_label_pad)
 
                 # Apply Custom Label
                 ax.set_title(main_title, fontsize=title_fontsize, weight=title_fontweight)
@@ -1429,7 +1431,7 @@ if df is not None:
                     plot_colors = [color] if color else None
                     plot_labels = ["All Patients"]
                     # from lifelines.plotting import add_at_risk_counts (REMOVED due to bug)
-                    add_at_risk_counts([kmf_all], ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels, show_censored_counts=show_censored_in_table, bold=risk_table_bold, show_title=risk_table_title, fontsize=risk_table_fontsize)
+                    add_at_risk_counts([kmf_all], ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels, show_censored_counts=show_censored_in_table, bold=risk_table_bold, show_title=risk_table_title, fontsize=risk_table_fontsize, label_pad=risk_table_label_pad)
             
                 # Apply Custom Label
                 ax.set_title(main_title, fontsize=title_fontsize, weight=title_fontweight)
@@ -2606,7 +2608,7 @@ if df is not None:
                      ax_cif.text(pval_x_cif, pval_y_cif, fg_p_value_text, transform=ax_cif.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
                 # Add Risk Table
                 if show_risk_table:
-                    add_at_risk_counts(cif_fitters, ax=ax_cif, y_shift=table_height, colors=cif_colors, labels=cif_labels, show_censored_counts=show_censored_in_table, bold=risk_table_bold, show_title=risk_table_title, fontsize=risk_table_fontsize)
+                    add_at_risk_counts(cif_fitters, ax=ax_cif, y_shift=table_height, colors=cif_colors, labels=cif_labels, show_censored_counts=show_censored_in_table, bold=risk_table_bold, show_title=risk_table_title, fontsize=risk_table_fontsize, label_pad=risk_table_label_pad)
                 
                 ax_cif.set_xlabel(x_label, fontsize=axes_fontsize)
                 if cif_y_label:

@@ -6,7 +6,7 @@ import numpy as np
 
 def add_at_risk_counts(fitters, ax=None, y_shift=-0.25, colors=None, labels=None,
                        fontsize=10, show_censored_counts=False, bold=True,
-                       show_title=False, label_pad=-0.12):
+                       show_title=False, label_pad=-0.10):
     """
     Add a table of at-risk counts below the plot.
     Re-implemented using ax.text for perfect alignment with X-axis ticks.
