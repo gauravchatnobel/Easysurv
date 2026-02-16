@@ -1047,6 +1047,47 @@ if df is not None:
                     )
 
 
+                # At-Risk Counts Table (downloadable)
+                if show_risk_table and fitters:
+                    with st.expander("At-Risk Counts Table (for manuscripts)", expanded=False):
+                        import math
+                        time_points = sorted(set(
+                            t for f in fitters
+                            for t in f.timeline
+                            if t >= 0
+                        ))
+                        # Sample at regular intervals based on tick_interval
+                        if tick_interval > 0:
+                            max_t = max(time_points) if time_points else 0
+                            sampled_times = [i * tick_interval for i in range(int(max_t / tick_interval) + 1)]
+                        else:
+                            sampled_times = time_points[:20]
+
+                        risk_rows = {}
+                        for f in fitters:
+                            counts = []
+                            for t in sampled_times:
+                                idx = f.timeline[f.timeline <= t]
+                                if len(idx) > 0:
+                                    closest = idx.max()
+                                    n_at_risk = int(f.event_table.loc[:closest, 'at_risk'].iloc[-1]) if closest in f.event_table.index else 0
+                                else:
+                                    n_at_risk = int(f.event_table['at_risk'].iloc[0]) if len(f.event_table) > 0 else 0
+                                counts.append(n_at_risk)
+                            risk_rows[f._label] = counts
+
+                        risk_df = pd.DataFrame(risk_rows, index=[f"{t:.0f}" for t in sampled_times])
+                        risk_df.index.name = "Time"
+                        st.dataframe(risk_df.T)
+                        csv_risk = risk_df.T.to_csv().encode('utf-8')
+                        st.download_button(
+                            label="💾 Download At-Risk Table (CSV)",
+                            data=csv_risk,
+                            file_name="at_risk_counts.csv",
+                            mime="text/csv",
+                            key="download_risk_table",
+                        )
+
                 # 2. Statistics (Cox PH / Logrank)
                 st.divider()
                 st.subheader("Statistical Analysis")
@@ -1091,18 +1132,44 @@ if df is not None:
                     # Standard CoxPH without penalizer to get unbiased estimates
                     cph = CoxPHFitter() 
                     cph.fit(cox_data, duration_col=time_col, event_col=event_col)
-                
+
+                    # PH Assumption Test (Univariable)
+                    try:
+                        from io import StringIO
+                        import contextlib
+                        ph_buf = StringIO()
+                        with contextlib.redirect_stdout(ph_buf):
+                            cph.check_assumptions(cox_data, p_value_threshold=0.05, show_plots=False)
+                        ph_output = ph_buf.getvalue()
+                        if ph_output and "proportional hazard" in ph_output.lower():
+                            with st.expander("⚠️ Proportional Hazards Assumption", expanded=True):
+                                st.warning(
+                                    "**The proportional hazards assumption may be violated.** "
+                                    "The hazard ratio may not be constant over time. Consider landmark analysis or time-varying covariates."
+                                )
+                                st.code(ph_output, language=None)
+                        else:
+                            with st.expander("Proportional Hazards Assumption", expanded=False):
+                                st.success("No PH violation detected (Schoenfeld residuals, p>0.05).")
+                    except Exception:
+                        pass
+
                     # 3. Display Results
                     summary_df = cph.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']]
                     summary_df = summary_df.rename(columns={
-                        'exp(coef)': 'Hazard Ratio (HR)', 
-                        'exp(coef) lower 95%': 'Lower 95% CI', 
+                        'exp(coef)': 'Hazard Ratio (HR)',
+                        'exp(coef) lower 95%': 'Lower 95% CI',
                         'exp(coef) upper 95%': 'Upper 95% CI',
                         'p': 'p-value'
                     })
                 
-                    st.dataframe(summary_df.style.format("{:.3f}"))
-                    
+                    def _highlight_significant(row):
+                        if row['p-value'] < 0.05:
+                            return ['background-color: rgba(0, 180, 0, 0.1)'] * len(row)
+                        return [''] * len(row)
+                    st.dataframe(summary_df.style.format("{:.3f}").apply(_highlight_significant, axis=1))
+                    st.caption("🟩 Green: statistically significant (p<0.05)")
+
                     # Save for AI Narrator
                     st.session_state['uv_cox_summary'] = summary_df
                     st.session_state['uv_cox_method'] = "Standard Cox Proportional Hazards regression models"
@@ -1293,8 +1360,8 @@ if df is not None:
                         cox_method=cox_method_text,
                         style_name=narrator_style_name,
                     )
-                    st.success("Summary Generated:")
-                    st.text_area("Copy this text:", value=summary, height=250)
+                    st.success("Summary Generated (click the copy icon to copy):")
+                    st.code(summary, language=None)
 
             else:
                 # Single group
@@ -1744,7 +1811,29 @@ if df is not None:
                                 if sep_warnings:
                                     for w in sep_warnings:
                                         st.error(f"🛑 **Critical Statistical Issue**: {w}")
-                            
+
+                            # 4. Proportional Hazards Assumption Test (Schoenfeld Residuals)
+                            try:
+                                from io import StringIO
+                                import contextlib
+                                ph_buf = StringIO()
+                                with contextlib.redirect_stdout(ph_buf):
+                                    ph_results = cph_mv.check_assumptions(mv_data_encoded, p_value_threshold=0.05, show_plots=False)
+                                ph_output = ph_buf.getvalue()
+                                if ph_output and "proportional hazard" in ph_output.lower():
+                                    with st.expander("⚠️ Proportional Hazards Assumption Test", expanded=True):
+                                        st.warning(
+                                            "**One or more covariates may violate the proportional hazards assumption.** "
+                                            "This means the hazard ratio for that variable is not constant over time. "
+                                            "Consider: time-varying covariates, stratified Cox model, or restricted mean survival time (RMST)."
+                                        )
+                                        st.code(ph_output, language=None)
+                                else:
+                                    with st.expander("Proportional Hazards Assumption Test", expanded=False):
+                                        st.success("No violations of the proportional hazards assumption detected (Schoenfeld residuals test, p>0.05 for all covariates).")
+                            except Exception:
+                                pass  # Silently skip if PH test fails (e.g., too few events)
+
                             # Results Table
                             summary_mv = cph_mv.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']]
                             summary_mv.columns = ['Hazard Ratio (HR)', 'Lower 95%', 'Upper 95%', 'p-value']
@@ -1753,26 +1842,29 @@ if df is not None:
                             if use_penalizer:
                                 st.caption(f"Model: Penalized Cox (Lambda={final_penalizer:.4f}, L1 Ratio={final_l1})")
                                 
-                            # Identify unstable rows for highlighting
+                            # Identify unstable + significant rows for highlighting
                             def highlight_unstable(row):
-                                # Helper to get original coef/se from model object based on index name
                                 try:
-                                    # row.name is the variable name
-                                    # Check original params in model
                                     coef = cph_mv.params_[row.name]
                                     se = cph_mv.standard_errors_[row.name]
-                                    
                                     if abs(coef) > 10 or se > 5:
                                         return ['background-color: rgba(255, 0, 0, 0.1)'] * len(row)
                                 except:
                                     pass
+                                if row['p-value'] < 0.05:
+                                    return ['background-color: rgba(0, 180, 0, 0.1)'] * len(row)
                                 return [''] * len(row)
 
                             st.dataframe(summary_mv.style.format("{:.3f}").apply(highlight_unstable, axis=1))
                             
-                            # Add legend if needed
+                            # Add legend
+                            legend_parts = []
                             if any((abs(cph_mv.params_) > 10) | (cph_mv.standard_errors_ > 5)):
-                                st.caption("🟥 **Red Background**: Indicates unstable estimates (Extreme Coef > 10 or SE > 5). Results likely unreliable due to separation.")
+                                legend_parts.append("🟥 Red = unstable estimates (coef>10 or SE>5)")
+                            if any(summary_mv['p-value'] < 0.05):
+                                legend_parts.append("🟩 Green = statistically significant (p<0.05)")
+                            if legend_parts:
+                                st.caption(" | ".join(legend_parts))
                             
                             # Save to Session State specifically for Narrator or Persistence
                             st.session_state['mv_summary_df'] = summary_mv
@@ -1823,9 +1915,9 @@ if df is not None:
                                         n_events=n_events,
                                         style_name=narrator_style_name,
                                     )
-                                    st.success("Summary Generated:")
-                                    st.text_area("Copy this text:", value=mv_narrative, height=250)
-                            
+                                    st.success("Summary Generated (click the copy icon to copy):")
+                                    st.code(mv_narrative, language=None)
+
                         except Exception as e:
                             st.error(f"Error running model: {e}")
                             st.info("Ensure you are not including variables that perfectly predict the outcome (separation).")
@@ -2642,8 +2734,8 @@ if df is not None:
                          fg_summary=fg_summary if 'fg_summary' in dir() else None,
                          style_name=narrator_style_name,
                      )
-                     st.success("Summary Generated:")
-                     st.text_area("Copy this text:", value=cif_narrative, height=250)
+                     st.success("Summary Generated (click the copy icon to copy):")
+                     st.code(cif_narrative, language=None)
 
     # --- TAB 4: BIOMARKER DISCOVERY ---
     if 'tab4' in locals() and df_clean is not None:
@@ -2862,6 +2954,15 @@ if df is not None:
                          
                          if best_cut is not None:
                              st.success(f"**Optimal Cutoff Found:** {best_cut:.2f} (p = {best_p:.5f})")
+                             st.warning(
+                                 "**Methodological Note:** This cutoff was selected by testing multiple thresholds and choosing "
+                                 "the one with the smallest p-value. This is an **exploratory, data-driven** approach that inflates "
+                                 "the false-positive rate. The p-value shown above is **not adjusted for multiple comparisons** and "
+                                 "should not be reported as a confirmatory result. "
+                                 "For publication, consider: (1) validating this cutoff in an independent cohort, "
+                                 "(2) using a pre-specified cutoff based on clinical rationale, or "
+                                 "(3) reporting this as hypothesis-generating only."
+                             )
                              
                              # Store in session state for plotting and saving
                              st.session_state.optimal_cut = {
@@ -3220,9 +3321,9 @@ if df is not None:
                      st.subheader("🤖 AI Diagnostic Narrator")
                      if st.button("Generate Diagnostic Report"):
                            narrative = narrator.generate_diagnostic_narrative(res, style_name=narrator_style_name)
-                           st.success("Report Generated:")
-                           st.text_area("Copy Text:", narrative, height=150)
-             
+                           st.success("Report Generated (click the copy icon to copy):")
+                           st.code(narrative, language=None)
+
              elif diag_mode == "Prognostic Model Comparison (C-Index)":
                  st.write("Compare the discriminative power (C-index) of up to 3 models with 95% Confidence Intervals (Bootstrapped).")
                  
@@ -3358,8 +3459,8 @@ if df is not None:
                       st.subheader("🤖 AI Prognostic Narrator")
                       if st.button("Generate Prognostic Report"):
                             narrative = narrator.generate_prognostic_narrative(res_list, style_name=narrator_style_name)
-                            st.success("Report Generated:")
-                            st.text_area("Copy Text:", narrative, height=150)
+                            st.success("Report Generated (click the copy icon to copy):")
+                            st.code(narrative, language=None)
 
          with tab8:
              st.subheader("📚 Reproducibility & Citations")
