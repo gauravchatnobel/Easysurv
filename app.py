@@ -488,10 +488,18 @@ if df is not None:
         )
         show_censored_in_table = (risk_table_format == _risk_table_options[1])
         table_height = st.sidebar.slider("Table Offset", -0.5, -0.1, float(_restored_default("table_height", -0.25)), 0.05)
+        risk_table_title = st.sidebar.checkbox("Show Table Title", value=_restored_default("risk_table_title", False),
+                                                help="Adds a title row (e.g. 'No. at risk') above the table.")
+        risk_table_fontsize = st.sidebar.number_input("Table Font Size", min_value=6, max_value=20,
+                                                       value=int(_restored_default("risk_table_fontsize", 10)), step=1)
+        risk_table_bold = st.sidebar.checkbox("Bold Table Text", value=_restored_default("risk_table_bold", True))
     else:
         show_censored_in_table = False
         risk_table_format = "At-risk only"
         table_height = -0.25
+        risk_table_title = False
+        risk_table_fontsize = 10
+        risk_table_bold = True
     show_censored = st.sidebar.checkbox("Show Censored Ticks", value=_restored_default("show_censored", True))
     show_ci = st.sidebar.checkbox("Show 95% CI", value=_restored_default("show_ci", True))
     
@@ -632,6 +640,9 @@ if df is not None:
             "show_risk_table": show_risk_table,
             "risk_table_format": risk_table_format,
             "table_height": table_height,
+            "risk_table_title": risk_table_title,
+            "risk_table_fontsize": risk_table_fontsize,
+            "risk_table_bold": risk_table_bold,
             "show_censored": show_censored,
             "show_ci": show_ci,
             "selected_theme": selected_theme,
@@ -1003,7 +1014,7 @@ if df is not None:
                     # Custom add_at_risk_counts integration
                     # We need fitters for all to use add_at_risk_counts
                     # fitters list already populated above
-                    add_at_risk_counts(fitters, ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels, show_censored_counts=show_censored_in_table)
+                    add_at_risk_counts(fitters, ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels, show_censored_counts=show_censored_in_table, bold=risk_table_bold, show_title=risk_table_title, fontsize=risk_table_fontsize)
 
                 # Apply Custom Label
                 ax.set_title(main_title, fontsize=title_fontsize, weight=title_fontweight)
@@ -1418,7 +1429,7 @@ if df is not None:
                     plot_colors = [color] if color else None
                     plot_labels = ["All Patients"]
                     # from lifelines.plotting import add_at_risk_counts (REMOVED due to bug)
-                    add_at_risk_counts([kmf_all], ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels, show_censored_counts=show_censored_in_table)
+                    add_at_risk_counts([kmf_all], ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels, show_censored_counts=show_censored_in_table, bold=risk_table_bold, show_title=risk_table_title, fontsize=risk_table_fontsize)
             
                 # Apply Custom Label
                 ax.set_title(main_title, fontsize=title_fontsize, weight=title_fontweight)
@@ -2595,7 +2606,7 @@ if df is not None:
                      ax_cif.text(pval_x_cif, pval_y_cif, fg_p_value_text, transform=ax_cif.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
                 # Add Risk Table
                 if show_risk_table:
-                    add_at_risk_counts(cif_fitters, ax=ax_cif, y_shift=table_height, colors=cif_colors, labels=cif_labels, show_censored_counts=show_censored_in_table)
+                    add_at_risk_counts(cif_fitters, ax=ax_cif, y_shift=table_height, colors=cif_colors, labels=cif_labels, show_censored_counts=show_censored_in_table, bold=risk_table_bold, show_title=risk_table_title, fontsize=risk_table_fontsize)
                 
                 ax_cif.set_xlabel(x_label, fontsize=axes_fontsize)
                 if cif_y_label:

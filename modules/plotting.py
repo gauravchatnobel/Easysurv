@@ -5,7 +5,8 @@ import numpy as np
 
 
 def add_at_risk_counts(fitters, ax=None, y_shift=-0.25, colors=None, labels=None,
-                       fontsize=10, show_censored_counts=False):
+                       fontsize=10, show_censored_counts=False, bold=True,
+                       show_title=False, label_pad=-0.12):
     """
     Add a table of at-risk counts below the plot.
     Re-implemented using ax.text for perfect alignment with X-axis ticks.
@@ -27,6 +28,14 @@ def add_at_risk_counts(fitters, ax=None, y_shift=-0.25, colors=None, labels=None
     show_censored_counts : bool
         If True, display format is "n_at_risk (n_censored)" matching
         JCO/NEJM publication style.
+    bold : bool
+        Whether table text uses bold weight.
+    show_title : bool
+        If True, adds a title row above the table (e.g. "No. at risk"
+        or "No. at risk (censored)").
+    label_pad : float
+        X position for row labels in axes fraction. More negative = more
+        space between labels and the first data column. Default -0.12.
     """
     if ax is None:
         ax = plt.gca()
@@ -40,9 +49,18 @@ def add_at_risk_counts(fitters, ax=None, y_shift=-0.25, colors=None, labels=None
     # Configuration for layout
     row_height = 0.05
     start_y = y_shift
+    font_weight = 'bold' if bold else 'normal'
 
     # Blended transform: X is data coords (matches ticks), Y is axes coords
     trans_data_axes = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
+
+    # Optional title row
+    if show_title:
+        title_text = "No. at risk (censored)" if show_censored_counts else "No. at risk"
+        ax.text(label_pad, start_y, title_text, transform=ax.transAxes,
+                ha='right', va='center', weight='bold', color='black',
+                fontsize=fontsize, style='italic')
+        start_y -= row_height
 
     for i, fitter in enumerate(fitters):
         y_pos = start_y - (i * row_height)
@@ -55,8 +73,8 @@ def add_at_risk_counts(fitters, ax=None, y_shift=-0.25, colors=None, labels=None
         if colors and i < len(colors):
             color = colors[i]
 
-        ax.text(-0.03, y_pos, lbl, transform=ax.transAxes,
-                ha='right', va='center', weight='bold', color=color, fontsize=fontsize)
+        ax.text(label_pad, y_pos, lbl, transform=ax.transAxes,
+                ha='right', va='center', weight=font_weight, color=color, fontsize=fontsize)
 
         # 2. Plot Counts at each tick
         for t in valid_ticks:
@@ -91,7 +109,8 @@ def add_at_risk_counts(fitters, ax=None, y_shift=-0.25, colors=None, labels=None
 
             # Plot the number
             ax.text(t, y_pos, display_text, transform=trans_data_axes,
-                    ha='center', va='center', color=color, fontsize=fontsize, weight='bold')
+                    ha='center', va='center', color=color, fontsize=fontsize,
+                    weight=font_weight)
 
 
 def create_forest_plot(summary_df, theme_color='#1f77b4', title="Forest Plot",

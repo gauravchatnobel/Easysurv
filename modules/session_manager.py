@@ -79,6 +79,9 @@ SIDEBAR_CONFIG_KEYS = {
     "show_risk_table": True,
     "risk_table_format": "At-risk only",
     "table_height": -0.25,
+    "risk_table_title": False,
+    "risk_table_fontsize": 10,
+    "risk_table_bold": True,
     "show_censored": True,
     "show_ci": True,
     # Main KM plot settings
