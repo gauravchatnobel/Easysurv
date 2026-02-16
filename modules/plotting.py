@@ -113,6 +113,129 @@ def add_at_risk_counts(fitters, ax=None, y_shift=-0.25, colors=None, labels=None
                     weight=font_weight)
 
 
+def add_survival_annotations(fitters, ax, colors=None, labels=None,
+                             show_median=False, show_x_year=False, x_year_time=None,
+                             annotation_fontsize=9, line_style='--', line_alpha=0.5,
+                             is_cif=False):
+    """
+    Add auto-computed survival milestone annotations to a KM or CIF plot.
+
+    Parameters
+    ----------
+    fitters : list
+        Fitted KaplanMeierFitter or AalenJohansenFitter objects.
+    ax : matplotlib Axes
+    colors : list of str
+    labels : list of str
+    show_median : bool
+        Draw dashed lines at median survival (KM) or median CIF time.
+    show_x_year : bool
+        Draw dashed lines at a specific timepoint.
+    x_year_time : float
+        The timepoint for X-year survival annotation.
+    annotation_fontsize : int
+    line_style : str
+    line_alpha : float
+    is_cif : bool
+        If True, treats fitters as CIF (cumulative incidence) curves.
+    """
+    if not fitters:
+        return
+
+    trans = mtransforms.blended_transform_factory(ax.transData, ax.transData)
+    view_min, view_max = ax.get_xlim()
+    y_min_view, y_max_view = ax.get_ylim()
+
+    # --- Median survival lines ---
+    if show_median:
+        # Draw horizontal reference at 0.5 (KM) or find median CIF
+        if not is_cif:
+            ax.axhline(y=0.5, color='gray', linestyle=':', linewidth=0.8, alpha=0.4)
+
+        for i, fitter in enumerate(fitters):
+            color = colors[i] if colors and i < len(colors) else f'C{i}'
+            lbl = labels[i] if labels and i < len(labels) else fitter._label
+
+            if is_cif:
+                # For CIF: median is when cumulative incidence first exceeds 0.5
+                cdf = fitter.cumulative_density_
+                col = cdf.columns[0]
+                crossed = cdf[cdf[col] >= 0.5]
+                if crossed.empty:
+                    continue
+                median_t = crossed.index[0]
+                median_y = 0.5
+            else:
+                median_t = fitter.median_survival_time_
+                if pd.isna(median_t) or np.isinf(median_t):
+                    continue
+                median_y = 0.5
+
+            if median_t > view_max:
+                continue
+
+            # Vertical line from curve down to x-axis
+            ax.plot([median_t, median_t], [0 if not is_cif else 0, median_y],
+                    linestyle=line_style, color=color, linewidth=1, alpha=line_alpha)
+            # Horizontal line from y-axis to curve
+            ax.plot([0, median_t], [median_y, median_y],
+                    linestyle=line_style, color=color, linewidth=1, alpha=line_alpha)
+            # Label at the bottom
+            ax.annotate(f'{median_t:.1f}', xy=(median_t, 0),
+                        xytext=(0, -8), textcoords='offset points',
+                        ha='center', va='top', fontsize=annotation_fontsize,
+                        color=color, weight='bold')
+
+    # --- X-year survival lines ---
+    if show_x_year and x_year_time is not None:
+        t = x_year_time
+        if t <= view_max:
+            # Vertical reference line at the timepoint
+            ax.axvline(x=t, color='gray', linestyle=':', linewidth=0.8, alpha=0.4)
+
+            annotation_texts = []
+            for i, fitter in enumerate(fitters):
+                color = colors[i] if colors and i < len(colors) else f'C{i}'
+                lbl = labels[i] if labels and i < len(labels) else fitter._label
+
+                if is_cif:
+                    cdf = fitter.cumulative_density_
+                    col = cdf.columns[0]
+                    # Interpolate to get value at time t
+                    if t in cdf.index:
+                        y_val = cdf.loc[t, col]
+                    else:
+                        combined = cdf.index.union([t]).sort_values()
+                        interp = cdf[col].reindex(combined).interpolate(method='index')
+                        y_val = interp.loc[t]
+                else:
+                    sf = fitter.survival_function_
+                    col = sf.columns[0]
+                    if t in sf.index:
+                        y_val = sf.loc[t, col]
+                    else:
+                        combined = sf.index.union([t]).sort_values()
+                        interp = sf[col].reindex(combined).interpolate(method='index')
+                        y_val = interp.loc[t]
+
+                if pd.isna(y_val):
+                    continue
+
+                # Horizontal line from y-axis to the curve at this timepoint
+                ax.plot([0, t], [y_val, y_val],
+                        linestyle=line_style, color=color, linewidth=1, alpha=line_alpha)
+
+                pct = y_val * 100
+                annotation_texts.append((y_val, color, lbl, pct))
+
+            # Place annotations on y-axis side
+            for y_val, color, lbl, pct in annotation_texts:
+                ax.annotate(f'{pct:.1f}%', xy=(0, y_val),
+                            xytext=(-5, 0), textcoords='offset points',
+                            ha='right', va='center', fontsize=annotation_fontsize,
+                            color=color, weight='bold')
+
+
 def create_forest_plot(summary_df, theme_color='#1f77b4', title="Forest Plot",
                        xlabel="Hazard Ratio (95% CI)", reference_line=1.0,
                        figsize=None, label_fontsize=10):

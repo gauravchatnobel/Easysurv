@@ -34,6 +34,7 @@ except:
 # Wrappers to maintain compatibility if functions were called directly
 compute_fine_gray_weights = statistics.compute_fine_gray_weights
 add_at_risk_counts = plotting.add_at_risk_counts
+add_survival_annotations = plotting.add_survival_annotations
 
 
 
@@ -539,6 +540,17 @@ if df is not None:
         pval_x_main = st.slider("P-val X (Main)", 0.0, 1.0, 0.95)
         pval_y_main = st.slider("P-val Y (Main)", 0.0, 1.0, 0.05)
 
+        st.markdown("### Auto Annotations")
+        show_median_main = st.checkbox("Show Median Survival", value=False, key="show_median_main",
+                                        help="Draw dashed drop-lines at median survival for each group")
+        show_x_year_main = st.checkbox("Show X-year Survival", value=False, key="show_x_year_main",
+                                        help="Draw dashed lines at a specific timepoint showing survival %")
+        x_year_time_main = None
+        if show_x_year_main:
+            x_year_time_main = st.number_input("Timepoint", min_value=0.0, value=36.0, step=6.0,
+                                                key="x_year_time_main",
+                                                help="e.g. 24 for 2-year, 36 for 3-year, 60 for 5-year survival")
+
         st.markdown("### Free Text Annotations")
         main_annotations = []
         for i in range(1, 6):
@@ -548,7 +560,7 @@ if df is not None:
                 m_y = st.slider(f"Y ({i})", 0.0, 1.0, 0.5, key=f"main_y_{i}")
                 m_sz = st.number_input(f"Size ({i})", min_value=6, value=12, key=f"main_sz_{i}")
                 m_box = st.checkbox(f"Box ({i})", value=False, key=f"main_bx_{i}")
-                
+
                 if m_txt:
                     main_annotations.append({'text': m_txt, 'x': m_x, 'y': m_y, 'size': m_sz, 'box': m_box})
 
@@ -577,6 +589,16 @@ if df is not None:
         pval_x_cif = st.slider("P-val X (CIF)", 0.0, 1.0, 0.95)
         pval_y_cif = st.slider("P-val Y (CIF)", 0.0, 1.0, 0.2)
         
+        st.markdown("### Auto Annotations")
+        show_median_cif = st.checkbox("Show Median CIF Time", value=False, key="show_median_cif",
+                                       help="Draw dashed drop-lines where cumulative incidence reaches 50%")
+        show_x_year_cif = st.checkbox("Show X-year Cumulative Incidence", value=False, key="show_x_year_cif",
+                                       help="Draw dashed lines at a specific timepoint showing cumulative incidence %")
+        x_year_time_cif = None
+        if show_x_year_cif:
+            x_year_time_cif = st.number_input("Timepoint (CIF)", min_value=0.0, value=36.0, step=6.0,
+                                               key="x_year_time_cif")
+
         st.markdown("### Free Text Annotations")
         cif_annotations = []
         for i in range(1, 6):
@@ -586,7 +608,7 @@ if df is not None:
                 c_y = st.slider(f"Y ({i})", 0.0, 1.0, 0.5, key=f"cif_y_{i}")
                 c_sz = st.number_input(f"Size ({i})", min_value=6, value=12, key=f"cif_sz_{i}")
                 c_box = st.checkbox(f"Box ({i})", value=False, key=f"cif_bx_{i}")
-                
+
                 if c_txt:
                     cif_annotations.append({'text': c_txt, 'x': c_x, 'y': c_y, 'size': c_sz, 'box': c_box})
         
@@ -893,7 +915,7 @@ if df is not None:
         if landmark_info:
             st.info(landmark_info)
 
-        tab1, tab2, tab_risk, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["Univariable (KM)", "Multivariable (Cox)", "Risk System Based on HR", "Competing Risks (CIF)", "🧬 Biomarker Optimum Threshold", "🧪 Variable Generation", "🔥 Correlations", "🎯 Diagnostic & Concordance", "📚 Methodology"])
+        tab1, tab2, tab_risk, tab3, tab_composite, tab4, tab5, tab6, tab7, tab8 = st.tabs(["Univariable (KM)", "Multivariable (Cox)", "Risk System Based on HR", "Competing Risks (CIF)", "📊 Composite Figure", "🧬 Biomarker Optimum Threshold", "🧪 Variable Generation", "🔥 Correlations", "🎯 Diagnostic & Concordance", "📚 Methodology"])
 
         with tab1:
         
@@ -1018,6 +1040,12 @@ if df is not None:
                     # fitters list already populated above
                     add_at_risk_counts(fitters, ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels, show_censored_counts=show_censored_in_table, bold=risk_table_bold, show_title=risk_table_title, fontsize=risk_table_fontsize, label_pad=risk_table_label_pad)
 
+                # Auto-annotations (median / X-year survival)
+                if show_median_main or show_x_year_main:
+                    add_survival_annotations(fitters, ax=ax, colors=plot_colors, labels=plot_labels,
+                                             show_median=show_median_main, show_x_year=show_x_year_main,
+                                             x_year_time=x_year_time_main)
+
                 # Apply Custom Label
                 ax.set_title(main_title, fontsize=title_fontsize, weight=title_fontweight)
                 ax.set_xlabel(x_label, fontsize=axes_fontsize)
@@ -1039,8 +1067,9 @@ if df is not None:
                 
                 st.pyplot(fig)
                 
-                # Save to session_state for Report
+                # Save to session_state for Report & Composite
                 st.session_state['report_fig_km'] = fig
+                st.session_state['composite_km_title'] = main_title
 
                 # DOWNLOAD BUTTON
                 buf = io.BytesIO()
@@ -1432,7 +1461,14 @@ if df is not None:
                     plot_labels = ["All Patients"]
                     # from lifelines.plotting import add_at_risk_counts (REMOVED due to bug)
                     add_at_risk_counts([kmf_all], ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels, show_censored_counts=show_censored_in_table, bold=risk_table_bold, show_title=risk_table_title, fontsize=risk_table_fontsize, label_pad=risk_table_label_pad)
-            
+
+                # Auto-annotations (median / X-year survival)
+                if show_median_main or show_x_year_main:
+                    _ann_colors = [color] if color else None
+                    add_survival_annotations([kmf_all], ax=ax, colors=_ann_colors, labels=["All Patients"],
+                                             show_median=show_median_main, show_x_year=show_x_year_main,
+                                             x_year_time=x_year_time_main)
+
                 # Apply Custom Label
                 ax.set_title(main_title, fontsize=title_fontsize, weight=title_fontweight)
                 ax.set_xlabel(x_label, fontsize=axes_fontsize)
@@ -1451,8 +1487,12 @@ if df is not None:
                      ax.text(pval_x_main, pval_y_main, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
                 
                 # OLD Free Text Block Removed (Replaced by Multi-Annotation Loop Above)
-                
+
                 st.pyplot(fig)
+
+                # Save to session_state for Report & Composite
+                st.session_state['report_fig_km'] = fig
+                st.session_state['composite_km_title'] = main_title
 
                 # DOWNLOAD BUTTON
                 buf = io.BytesIO()
@@ -2609,7 +2649,13 @@ if df is not None:
                 # Add Risk Table
                 if show_risk_table:
                     add_at_risk_counts(cif_fitters, ax=ax_cif, y_shift=table_height, colors=cif_colors, labels=cif_labels, show_censored_counts=show_censored_in_table, bold=risk_table_bold, show_title=risk_table_title, fontsize=risk_table_fontsize, label_pad=risk_table_label_pad)
-                
+
+                # Auto-annotations (median CIF / X-year cumulative incidence)
+                if show_median_cif or show_x_year_cif:
+                    add_survival_annotations(cif_fitters, ax=ax_cif, colors=cif_colors, labels=cif_labels,
+                                             show_median=show_median_cif, show_x_year=show_x_year_cif,
+                                             x_year_time=x_year_time_cif, is_cif=True)
+
                 ax_cif.set_xlabel(x_label, fontsize=axes_fontsize)
                 if cif_y_label:
                     ax_cif.set_ylabel(cif_y_label, fontsize=axes_fontsize)
@@ -2629,7 +2675,11 @@ if df is not None:
 
 
                 st.pyplot(fig_cif)
-                
+
+                # Save to session_state for Composite
+                st.session_state['report_fig_cif'] = fig_cif
+                st.session_state['composite_cif_title'] = cif_title
+
                 # Download
                 buf_cif = io.BytesIO()
                 fig_cif.savefig(buf_cif, format="png", dpi=300, bbox_inches='tight', facecolor=fig_cif.get_facecolor(), edgecolor='none')
@@ -2787,6 +2837,146 @@ if df is not None:
                      )
                      st.success("Summary Generated (click the copy icon to copy):")
                      st.code(cif_narrative, language=None)
+
+    # --- COMPOSITE FIGURE TAB ---
+    if 'tab_composite' in locals():
+        with tab_composite:
+            st.header("Composite Figure")
+            st.write("Combine 2-3 plots from your analysis into a single publication-ready panel figure (e.g. Figure 1A, 1B, 1C).")
+
+            # Collect available plots
+            _available_plots = {}
+            if 'report_fig_km' in st.session_state:
+                _km_title = st.session_state.get('composite_km_title', 'Kaplan-Meier')
+                _available_plots[f"KM: {_km_title}"] = st.session_state['report_fig_km']
+            if 'report_fig_cif' in st.session_state:
+                _cif_title = st.session_state.get('composite_cif_title', 'Cumulative Incidence')
+                _available_plots[f"CIF: {_cif_title}"] = st.session_state['report_fig_cif']
+            if 'report_fig_forest' in st.session_state:
+                _available_plots["Forest Plot"] = st.session_state['report_fig_forest']
+
+            if len(_available_plots) < 2:
+                st.info("Generate at least 2 plots (in the Univariable KM, Competing Risks, or Multivariable Cox tabs) to create a composite figure. Currently available: " + (", ".join(_available_plots.keys()) if _available_plots else "none"))
+            else:
+                _plot_keys = list(_available_plots.keys())
+                selected_panels = st.multiselect(
+                    "Select plots to include (2-3 panels)",
+                    _plot_keys,
+                    default=_plot_keys[:min(3, len(_plot_keys))],
+                    max_selections=3,
+                    help="Select 2-3 plots to arrange as panels A, B, C"
+                )
+
+                if len(selected_panels) >= 2:
+                    _layout_options = {
+                        2: ["Side by side (1x2)", "Stacked (2x1)"],
+                        3: ["Row (1x3)", "Top 1 + Bottom 2 (T-shape)", "Stacked (3x1)"],
+                    }
+                    n = len(selected_panels)
+                    layout = st.radio("Layout", _layout_options[n], horizontal=True)
+
+                    panel_labels = st.checkbox("Show panel labels (A, B, C)", value=True)
+                    comp_fontsize = st.number_input("Panel label size", min_value=12, max_value=36, value=18)
+
+                    if st.button("Generate Composite Figure", type="primary"):
+                        # Render each source figure to an image buffer
+                        panel_images = []
+                        for key in selected_panels:
+                            src_fig = _available_plots[key]
+                            buf = io.BytesIO()
+                            src_fig.savefig(buf, format='png', dpi=300, bbox_inches='tight',
+                                            facecolor=src_fig.get_facecolor(), edgecolor='none')
+                            buf.seek(0)
+                            panel_images.append(plt.imread(buf))
+
+                        # Determine grid shape
+                        if n == 2:
+                            if "1x2" in layout:
+                                nrows, ncols = 1, 2
+                            else:
+                                nrows, ncols = 2, 1
+                        else:  # n == 3
+                            if "1x3" in layout:
+                                nrows, ncols = 1, 3
+                            elif "T-shape" in layout:
+                                nrows, ncols = 2, 2  # special case
+                            else:
+                                nrows, ncols = 3, 1
+
+                        is_t_shape = (n == 3 and "T-shape" in layout)
+
+                        if is_t_shape:
+                            fig_comp, axes = plt.subplots(2, 2, figsize=(20, 12))
+                            # Top-left: panel A spans full top row visually
+                            axes[0, 0].imshow(panel_images[0])
+                            axes[0, 0].axis('off')
+                            axes[0, 1].axis('off')  # hide top-right
+                            axes[0, 1].set_visible(False)
+                            # Merge top row: remove the axes and use a single axes spanning both cols
+                            fig_comp.delaxes(axes[0, 0])
+                            fig_comp.delaxes(axes[0, 1])
+                            ax_top = fig_comp.add_subplot(2, 1, 1)
+                            ax_top.imshow(panel_images[0])
+                            ax_top.axis('off')
+                            if panel_labels:
+                                ax_top.text(0.02, 0.98, 'A', transform=ax_top.transAxes,
+                                            fontsize=comp_fontsize, weight='bold', va='top')
+
+                            axes[1, 0].imshow(panel_images[1])
+                            axes[1, 0].axis('off')
+                            if panel_labels:
+                                axes[1, 0].text(0.02, 0.98, 'B', transform=axes[1, 0].transAxes,
+                                                fontsize=comp_fontsize, weight='bold', va='top')
+
+                            axes[1, 1].imshow(panel_images[2])
+                            axes[1, 1].axis('off')
+                            if panel_labels:
+                                axes[1, 1].text(0.02, 0.98, 'C', transform=axes[1, 1].transAxes,
+                                                fontsize=comp_fontsize, weight='bold', va='top')
+                        else:
+                            fig_comp, axes = plt.subplots(nrows, ncols, figsize=(10 * ncols, 6 * nrows))
+                            if n == 1:
+                                axes = [axes]
+                            elif nrows == 1 or ncols == 1:
+                                axes = axes.flatten()
+
+                            labels_abc = ['A', 'B', 'C']
+                            for idx, (key, img) in enumerate(zip(selected_panels, panel_images)):
+                                axes[idx].imshow(img)
+                                axes[idx].axis('off')
+                                if panel_labels:
+                                    axes[idx].text(0.02, 0.98, labels_abc[idx], transform=axes[idx].transAxes,
+                                                   fontsize=comp_fontsize, weight='bold', va='top')
+
+                        fig_comp.patch.set_facecolor(plot_bgcolor)
+                        fig_comp.tight_layout(pad=1.0)
+
+                        st.pyplot(fig_comp)
+
+                        # Download buttons
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            buf_comp = io.BytesIO()
+                            fig_comp.savefig(buf_comp, format="png", dpi=300, bbox_inches='tight',
+                                             facecolor=fig_comp.get_facecolor(), edgecolor='none')
+                            buf_comp.seek(0)
+                            st.download_button("💾 Download (300 DPI)", buf_comp, "composite_figure_300dpi.png", "image/png")
+                        with col2:
+                            buf_comp_hi = io.BytesIO()
+                            fig_comp.savefig(buf_comp_hi, format="png", dpi=600, bbox_inches='tight',
+                                             facecolor=fig_comp.get_facecolor(), edgecolor='none')
+                            buf_comp_hi.seek(0)
+                            st.download_button("💾 Download (600 DPI)", buf_comp_hi, "composite_figure_600dpi.png", "image/png")
+                        with col3:
+                            buf_comp_pdf = io.BytesIO()
+                            fig_comp.savefig(buf_comp_pdf, format="pdf", bbox_inches='tight',
+                                             facecolor=fig_comp.get_facecolor(), edgecolor='none')
+                            buf_comp_pdf.seek(0)
+                            st.download_button("📄 Download (PDF)", buf_comp_pdf, "composite_figure.pdf", "application/pdf")
+
+                        plt.close(fig_comp)
+                else:
+                    st.warning("Select at least 2 plots to create a composite figure.")
 
     # --- TAB 4: BIOMARKER DISCOVERY ---
     if 'tab4' in locals() and df_clean is not None:
