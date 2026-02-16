@@ -4,10 +4,29 @@ import pandas as pd
 import numpy as np
 
 
-def add_at_risk_counts(fitters, ax=None, y_shift=-0.25, colors=None, labels=None, fontsize=10):
+def add_at_risk_counts(fitters, ax=None, y_shift=-0.25, colors=None, labels=None,
+                       fontsize=10, show_censored_counts=False):
     """
     Add a table of at-risk counts below the plot.
     Re-implemented using ax.text for perfect alignment with X-axis ticks.
+
+    Parameters
+    ----------
+    fitters : list
+        List of fitted KaplanMeierFitter (or AalenJohansenFitter) objects.
+    ax : matplotlib Axes
+        Target axes.
+    y_shift : float
+        Vertical offset for the table (axes fraction).
+    colors : list of str
+        Colors for each fitter row.
+    labels : list of str
+        Custom labels for each fitter.
+    fontsize : int
+        Font size for table text.
+    show_censored_counts : bool
+        If True, display format is "n_at_risk (n_censored)" matching
+        JCO/NEJM publication style.
     """
     if ax is None:
         ax = plt.gca()
@@ -22,17 +41,13 @@ def add_at_risk_counts(fitters, ax=None, y_shift=-0.25, colors=None, labels=None
     row_height = 0.05
     start_y = y_shift
 
-    # Use a blended transform: X is data coords (so it matches ticks), Y is axes coords (so it stays absolute relative to plot bottom)
-    # We actually need two transforms:
-    # 1. For data numbers: x=data, y=axes
-    # 2. For row labels: x=axes (negative), y=axes
+    # Blended transform: X is data coords (matches ticks), Y is axes coords
     trans_data_axes = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
 
     for i, fitter in enumerate(fitters):
         y_pos = start_y - (i * row_height)
 
         # 1. Plot Row Label (Left of Y-axis)
-        # Use provided custom label if available, else fitter label
         lbl = labels[i] if labels and i < len(labels) else fitter._label
 
         # Color resolution
@@ -45,26 +60,37 @@ def add_at_risk_counts(fitters, ax=None, y_shift=-0.25, colors=None, labels=None
 
         # 2. Plot Counts at each tick
         for t in valid_ticks:
-            # Calculate at risk
+            # Calculate at-risk count
             if t in fitter.event_table.index:
-                val = fitter.event_table.loc[t, 'at_risk']
+                at_risk = fitter.event_table.loc[t, 'at_risk']
             else:
                 sliced = fitter.event_table.loc[:t]
                 if sliced.empty:
-                    val = fitter.event_table['at_risk'].iloc[0]
+                    at_risk = fitter.event_table['at_risk'].iloc[0]
                 else:
                     last_row = sliced.iloc[-1]
-                    val = last_row['at_risk'] - last_row['removed']
+                    at_risk = last_row['at_risk'] - last_row['removed']
 
-            if isinstance(val, (pd.Series, np.ndarray, list)):
+            if isinstance(at_risk, (pd.Series, np.ndarray, list)):
                 try:
-                    val = val.item()
+                    at_risk = at_risk.item()
                 except:
                     pass
-            val = int(val)
+            at_risk = int(at_risk)
+
+            # Calculate cumulative censored count up to this time
+            if show_censored_counts:
+                sliced_cens = fitter.event_table.loc[:t]
+                if not sliced_cens.empty and 'censored' in sliced_cens.columns:
+                    cum_censored = int(sliced_cens['censored'].sum())
+                else:
+                    cum_censored = 0
+                display_text = f"{at_risk} ({cum_censored})"
+            else:
+                display_text = str(at_risk)
 
             # Plot the number
-            ax.text(t, y_pos, str(val), transform=trans_data_axes,
+            ax.text(t, y_pos, display_text, transform=trans_data_axes,
                     ha='center', va='center', color=color, fontsize=fontsize, weight='bold')
 
 

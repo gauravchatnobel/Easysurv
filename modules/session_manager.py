@@ -77,6 +77,7 @@ SIDEBAR_CONFIG_KEYS = {
     "line_width": 1.5,
     # Global plot config
     "show_risk_table": True,
+    "risk_table_format": "At-risk only",
     "table_height": -0.25,
     "show_censored": True,
     "show_ci": True,

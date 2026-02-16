@@ -476,7 +476,22 @@ if df is not None:
     # Global Plot Configuration (Elements affecting all plots)
     st.sidebar.subheader("Global Plot Configuration")
     show_risk_table = st.sidebar.checkbox("Show At-Risk Table", value=_restored_default("show_risk_table", True))
-    table_height = st.sidebar.slider("Table Offset", -0.5, -0.1, float(_restored_default("table_height", -0.25)), 0.05) if show_risk_table else -0.25
+    if show_risk_table:
+        _risk_table_options = ["At-risk only", "At-risk with censored (n censored)"]
+        _r_risk_fmt = _restored_default("risk_table_format", "At-risk only")
+        _risk_fmt_idx = _risk_table_options.index(_r_risk_fmt) if _r_risk_fmt in _risk_table_options else 0
+        risk_table_format = st.sidebar.radio(
+            "At-Risk Table Format",
+            _risk_table_options,
+            index=_risk_fmt_idx,
+            help="'At-risk with censored' shows cumulative censored count in brackets, e.g. 85 (3). Common in JCO/NEJM publications."
+        )
+        show_censored_in_table = (risk_table_format == _risk_table_options[1])
+        table_height = st.sidebar.slider("Table Offset", -0.5, -0.1, float(_restored_default("table_height", -0.25)), 0.05)
+    else:
+        show_censored_in_table = False
+        risk_table_format = "At-risk only"
+        table_height = -0.25
     show_censored = st.sidebar.checkbox("Show Censored Ticks", value=_restored_default("show_censored", True))
     show_ci = st.sidebar.checkbox("Show 95% CI", value=_restored_default("show_ci", True))
     
@@ -615,6 +630,7 @@ if df is not None:
             "legend_fontsize": legend_fontsize,
             "line_width": line_width,
             "show_risk_table": show_risk_table,
+            "risk_table_format": risk_table_format,
             "table_height": table_height,
             "show_censored": show_censored,
             "show_ci": show_ci,
@@ -987,8 +1003,8 @@ if df is not None:
                     # Custom add_at_risk_counts integration
                     # We need fitters for all to use add_at_risk_counts
                     # fitters list already populated above
-                    add_at_risk_counts(fitters, ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels)
-                
+                    add_at_risk_counts(fitters, ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels, show_censored_counts=show_censored_in_table)
+
                 # Apply Custom Label
                 ax.set_title(main_title, fontsize=title_fontsize, weight=title_fontweight)
                 ax.set_xlabel(x_label, fontsize=axes_fontsize)
@@ -1050,7 +1066,6 @@ if df is not None:
                 # At-Risk Counts Table (downloadable)
                 if show_risk_table and fitters:
                     with st.expander("At-Risk Counts Table (for manuscripts)", expanded=False):
-                        import math
                         time_points = sorted(set(
                             t for f in fitters
                             for t in f.timeline
@@ -1064,8 +1079,10 @@ if df is not None:
                             sampled_times = time_points[:20]
 
                         risk_rows = {}
+                        censored_rows = {}
                         for f in fitters:
                             counts = []
+                            cens_counts = []
                             for t in sampled_times:
                                 idx = f.timeline[f.timeline <= t]
                                 if len(idx) > 0:
@@ -1074,12 +1091,33 @@ if df is not None:
                                 else:
                                     n_at_risk = int(f.event_table['at_risk'].iloc[0]) if len(f.event_table) > 0 else 0
                                 counts.append(n_at_risk)
+                                # Cumulative censored up to time t
+                                sliced = f.event_table.loc[:t]
+                                cum_cens = int(sliced['censored'].sum()) if (not sliced.empty and 'censored' in sliced.columns) else 0
+                                cens_counts.append(cum_cens)
                             risk_rows[f._label] = counts
+                            censored_rows[f._label] = cens_counts
 
                         risk_df = pd.DataFrame(risk_rows, index=[f"{t:.0f}" for t in sampled_times])
                         risk_df.index.name = "Time"
-                        st.dataframe(risk_df.T)
-                        csv_risk = risk_df.T.to_csv().encode('utf-8')
+
+                        if show_censored_in_table:
+                            cens_df = pd.DataFrame(censored_rows, index=[f"{t:.0f}" for t in sampled_times])
+                            cens_df.index.name = "Time"
+                            # Display combined format
+                            combined = risk_df.astype(str) + " (" + cens_df.astype(str) + ")"
+                            st.caption("Format: n at risk (cumulative censored)")
+                            st.dataframe(combined.T)
+                            # For download, provide both tables
+                            full_download = pd.concat([
+                                risk_df.T.rename(lambda x: f"At-Risk t={x}", axis=1),
+                                cens_df.T.rename(lambda x: f"Censored t={x}", axis=1),
+                            ], axis=1)
+                            csv_risk = full_download.to_csv().encode('utf-8')
+                        else:
+                            st.dataframe(risk_df.T)
+                            csv_risk = risk_df.T.to_csv().encode('utf-8')
+
                         st.download_button(
                             label="💾 Download At-Risk Table (CSV)",
                             data=csv_risk,
@@ -1380,7 +1418,7 @@ if df is not None:
                     plot_colors = [color] if color else None
                     plot_labels = ["All Patients"]
                     # from lifelines.plotting import add_at_risk_counts (REMOVED due to bug)
-                    add_at_risk_counts([kmf_all], ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels)
+                    add_at_risk_counts([kmf_all], ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels, show_censored_counts=show_censored_in_table)
             
                 # Apply Custom Label
                 ax.set_title(main_title, fontsize=title_fontsize, weight=title_fontweight)
@@ -2557,7 +2595,7 @@ if df is not None:
                      ax_cif.text(pval_x_cif, pval_y_cif, fg_p_value_text, transform=ax_cif.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
                 # Add Risk Table
                 if show_risk_table:
-                    add_at_risk_counts(cif_fitters, ax=ax_cif, y_shift=table_height, colors=cif_colors, labels=cif_labels)
+                    add_at_risk_counts(cif_fitters, ax=ax_cif, y_shift=table_height, colors=cif_colors, labels=cif_labels, show_censored_counts=show_censored_in_table)
                 
                 ax_cif.set_xlabel(x_label, fontsize=axes_fontsize)
                 if cif_y_label:
