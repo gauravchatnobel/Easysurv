@@ -473,7 +473,8 @@ if df is not None:
         line_width = st.slider("Line Width", 0.5, 5.0, float(_restored_default("line_width", 1.5)))
     title_fontweight = 'bold' if title_bold else 'normal'
 
-    p_val_fontsize = 12 # Default
+    p_val_fontsize_main = 12  # Default, overridden below in sidebar
+    p_val_fontsize_cif = 12   # Default, overridden below in sidebar
 
     # Global Plot Configuration (Elements affecting all plots)
     st.sidebar.subheader("Global Plot Configuration")
@@ -540,6 +541,8 @@ if df is not None:
         show_p_val_box_main = st.checkbox("Box P-value (Main)", value=True)
         pval_x_main = st.slider("P-val X (Main)", 0.0, 1.0, 0.95)
         pval_y_main = st.slider("P-val Y (Main)", 0.0, 1.0, 0.05)
+        p_val_fontsize_main = st.number_input("P-value font size", min_value=6, max_value=24, value=12,
+                                                key="p_val_fontsize_main")
 
         st.markdown("### Auto Annotations")
         show_median_main = st.checkbox("Show Median Survival Lines", value=False, key="show_median_main",
@@ -563,6 +566,7 @@ if df is not None:
         est_label_fontsize_main = 9
         est_label_textcolor_main = "theme"
         est_label_bold_main = True
+        est_label_gap_main = 0.12
         if est_label_mode_main != "Off":
             est_label_param_main = st.text_input("Parameter name", value="OS", key="est_label_param_main",
                                                   help="e.g. OS, RFS, EFS, DFS, PFS")
@@ -581,6 +585,10 @@ if df is not None:
                                                  help="Black makes estimates more readable; group names stay in theme color.")
             est_label_textcolor_main = "black" if est_label_textcolor_main == "Black" else "theme"
             est_label_bold_main = st.checkbox("Bold labels", value=True, key="est_label_bold_main")
+            if est_label_placement_main in ("top", "bottom"):
+                est_label_gap_main = st.slider("Label gap", 0.05, 0.35, 0.12, 0.01,
+                                                key="est_label_gap_main",
+                                                help="Horizontal gap between group name and estimate text. Increase for long group names.")
 
         st.markdown("### Free Text Annotations")
         main_annotations = []
@@ -619,6 +627,8 @@ if df is not None:
         show_p_val_box_cif = st.checkbox("Box P-value (CIF)", value=True)
         pval_x_cif = st.slider("P-val X (CIF)", 0.0, 1.0, 0.95)
         pval_y_cif = st.slider("P-val Y (CIF)", 0.0, 1.0, 0.2)
+        p_val_fontsize_cif = st.number_input("P-value font size (CIF)", min_value=6, max_value=24, value=12,
+                                               key="p_val_fontsize_cif")
         
         st.markdown("### Auto Annotations")
         show_median_cif = st.checkbox("Show Median CIF Lines", value=False, key="show_median_cif",
@@ -641,6 +651,7 @@ if df is not None:
         est_label_fontsize_cif = 9
         est_label_textcolor_cif = "theme"
         est_label_bold_cif = True
+        est_label_gap_cif = 0.12
         if est_label_mode_cif != "Off":
             est_label_param_cif = st.text_input("Parameter name (CIF)", value="CIR", key="est_label_param_cif",
                                                  help="e.g. CIR, CI of relapse, CI of NRM")
@@ -659,6 +670,10 @@ if df is not None:
                                                 help="Black makes estimates more readable; group names stay in theme color.")
             est_label_textcolor_cif = "black" if est_label_textcolor_cif == "Black" else "theme"
             est_label_bold_cif = st.checkbox("Bold labels (CIF)", value=True, key="est_label_bold_cif")
+            if est_label_placement_cif in ("top", "bottom"):
+                est_label_gap_cif = st.slider("Label gap (CIF)", 0.05, 0.35, 0.12, 0.01,
+                                               key="est_label_gap_cif",
+                                               help="Horizontal gap between group name and estimate text.")
 
         st.markdown("### Free Text Annotations")
         cif_annotations = []
@@ -1092,7 +1107,7 @@ if df is not None:
                 # P-value and Legend if applicable (Single group usually no legend needed unless CI)
                 if show_p_val_plot and p_value_text:
                      bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box_main else None
-                     ax.text(pval_x_main, pval_y_main, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
+                     ax.text(pval_x_main, pval_y_main, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize_main)
 
                 # Risk Table logic (basic implementation using lifelines built-in if possible, or custom)
                 if show_risk_table:
@@ -1116,7 +1131,8 @@ if df is not None:
                                         placement=est_label_placement_main,
                                         fontsize=est_label_fontsize_main,
                                         text_color=est_label_textcolor_main,
-                                        bold=est_label_bold_main)
+                                        bold=est_label_bold_main,
+                                        label_gap=est_label_gap_main)
 
                 # Apply Custom Label
                 ax.set_title(main_title, fontsize=title_fontsize, weight=title_fontweight)
@@ -1560,7 +1576,8 @@ if df is not None:
                                         placement=est_label_placement_main,
                                         fontsize=est_label_fontsize_main,
                                         text_color=est_label_textcolor_main,
-                                        bold=est_label_bold_main)
+                                        bold=est_label_bold_main,
+                                        label_gap=est_label_gap_main)
 
                 # Apply Custom Label
                 ax.set_title(main_title, fontsize=title_fontsize, weight=title_fontweight)
@@ -1577,8 +1594,8 @@ if df is not None:
                 
                 if show_p_val_plot and p_value_text:
                      bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box_main else None
-                     ax.text(pval_x_main, pval_y_main, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
-                
+                     ax.text(pval_x_main, pval_y_main, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize_main)
+
                 # OLD Free Text Block Removed (Replaced by Multi-Annotation Loop Above)
 
                 st.pyplot(fig)
@@ -2631,7 +2648,7 @@ if df is not None:
                 # Display P-value on Plot
                 if show_p_val_plot_cif and fg_p_value_text:
                      bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box_cif else None
-                     ax_cif.text(pval_x_cif, pval_y_cif, fg_p_value_text, transform=ax_cif.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
+                     ax_cif.text(pval_x_cif, pval_y_cif, fg_p_value_text, transform=ax_cif.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize_cif)
 
                 if group_col != "None" and group_col in cif_df.columns:
                     if groups_ordered:
@@ -2745,7 +2762,7 @@ if df is not None:
                 
                 if show_p_val_plot_cif and fg_p_value_text:
                      bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box_cif else None
-                     ax_cif.text(pval_x_cif, pval_y_cif, fg_p_value_text, transform=ax_cif.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
+                     ax_cif.text(pval_x_cif, pval_y_cif, fg_p_value_text, transform=ax_cif.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize_cif)
                 # Add Risk Table
                 if show_risk_table:
                     add_at_risk_counts(cif_fitters, ax=ax_cif, y_shift=table_height, colors=cif_colors, labels=cif_labels, show_censored_counts=show_censored_in_table, bold=risk_table_bold, show_title=risk_table_title, fontsize=risk_table_fontsize, label_pad=risk_table_label_pad)
@@ -2765,7 +2782,8 @@ if df is not None:
                                         placement=est_label_placement_cif,
                                         fontsize=est_label_fontsize_cif, is_cif=True,
                                         text_color=est_label_textcolor_cif,
-                                        bold=est_label_bold_cif)
+                                        bold=est_label_bold_cif,
+                                        label_gap=est_label_gap_cif)
 
                 ax_cif.set_xlabel(x_label, fontsize=axes_fontsize)
                 if cif_y_label:

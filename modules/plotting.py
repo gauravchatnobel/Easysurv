@@ -277,7 +277,7 @@ def _get_median_with_ci(fitter, is_cif=False):
 def add_estimate_labels(fitters, ax, colors=None, labels=None,
                         mode='timepoint', timepoint=36.0, param_name='OS',
                         placement='on_curve', fontsize=9, is_cif=False,
-                        text_color='theme', bold=True):
+                        text_color='theme', bold=True, label_gap=0.12):
     """
     Add auto-computed survival/CIF estimate text labels on the plot.
 
@@ -306,6 +306,9 @@ def add_estimate_labels(fitters, ax, colors=None, labels=None,
         for top/bottom placement).
     bold : bool
         Whether label text uses bold weight.
+    label_gap : float
+        Horizontal gap between group name and estimate text in axes
+        fraction (for top/bottom placement). Increase for long names.
     """
     if not fitters:
         return
@@ -395,7 +398,7 @@ def add_estimate_labels(fitters, ax, colors=None, labels=None,
         line_spacing = 0.045 * (fontsize / 9.0)
         x_pos = 0.35
         # Estimate x offset for the estimate text (after group name)
-        x_est_offset = 0.12
+        x_est_offset = label_gap
 
         for idx, item in enumerate(texts):
             y_pos = y_start - (idx * line_spacing)
