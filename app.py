@@ -561,6 +561,7 @@ if df is not None:
         est_label_time_main = 36.0
         est_label_placement_main = "on_curve"
         est_label_fontsize_main = 9
+        est_label_textcolor_main = "theme"
         if est_label_mode_main != "Off":
             est_label_param_main = st.text_input("Parameter name", value="OS", key="est_label_param_main",
                                                   help="e.g. OS, RFS, EFS, DFS, PFS")
@@ -573,6 +574,11 @@ if df is not None:
             est_label_placement_main = {"On curve": "on_curve", "Top of plot": "top", "Bottom of plot": "bottom"}[est_label_placement_main]
             est_label_fontsize_main = st.number_input("Label font size", min_value=6, max_value=20, value=9,
                                                        key="est_label_fontsize_main")
+            _tc_options = ["Theme color", "Black"]
+            est_label_textcolor_main = st.radio("Estimate text color", _tc_options,
+                                                 index=0, key="est_label_textcolor_main", horizontal=True,
+                                                 help="Black makes estimates more readable; group names stay in theme color.")
+            est_label_textcolor_main = "black" if est_label_textcolor_main == "Black" else "theme"
 
         st.markdown("### Free Text Annotations")
         main_annotations = []
@@ -631,6 +637,7 @@ if df is not None:
         est_label_time_cif = 36.0
         est_label_placement_cif = "on_curve"
         est_label_fontsize_cif = 9
+        est_label_textcolor_cif = "theme"
         if est_label_mode_cif != "Off":
             est_label_param_cif = st.text_input("Parameter name (CIF)", value="CIR", key="est_label_param_cif",
                                                  help="e.g. CIR, CI of relapse, CI of NRM")
@@ -643,6 +650,11 @@ if df is not None:
             est_label_placement_cif = {"On curve": "on_curve", "Top of plot": "top", "Bottom of plot": "bottom"}[est_label_placement_cif]
             est_label_fontsize_cif = st.number_input("Label font size (CIF)", min_value=6, max_value=20, value=9,
                                                       key="est_label_fontsize_cif")
+            _tc_options_cif = ["Theme color", "Black"]
+            est_label_textcolor_cif = st.radio("Estimate text color (CIF)", _tc_options_cif,
+                                                index=0, key="est_label_textcolor_cif", horizontal=True,
+                                                help="Black makes estimates more readable; group names stay in theme color.")
+            est_label_textcolor_cif = "black" if est_label_textcolor_cif == "Black" else "theme"
 
         st.markdown("### Free Text Annotations")
         cif_annotations = []
@@ -1098,7 +1110,8 @@ if df is not None:
                                         mode=_est_mode, timepoint=est_label_time_main,
                                         param_name=est_label_param_main,
                                         placement=est_label_placement_main,
-                                        fontsize=est_label_fontsize_main)
+                                        fontsize=est_label_fontsize_main,
+                                        text_color=est_label_textcolor_main)
 
                 # Apply Custom Label
                 ax.set_title(main_title, fontsize=title_fontsize, weight=title_fontweight)
@@ -1540,7 +1553,8 @@ if df is not None:
                                         mode=_est_mode, timepoint=est_label_time_main,
                                         param_name=est_label_param_main,
                                         placement=est_label_placement_main,
-                                        fontsize=est_label_fontsize_main)
+                                        fontsize=est_label_fontsize_main,
+                                        text_color=est_label_textcolor_main)
 
                 # Apply Custom Label
                 ax.set_title(main_title, fontsize=title_fontsize, weight=title_fontweight)
@@ -2743,7 +2757,8 @@ if df is not None:
                                         mode=_est_mode_cif, timepoint=est_label_time_cif,
                                         param_name=est_label_param_cif,
                                         placement=est_label_placement_cif,
-                                        fontsize=est_label_fontsize_cif, is_cif=True)
+                                        fontsize=est_label_fontsize_cif, is_cif=True,
+                                        text_color=est_label_textcolor_cif)
 
                 ax_cif.set_xlabel(x_label, fontsize=axes_fontsize)
                 if cif_y_label:

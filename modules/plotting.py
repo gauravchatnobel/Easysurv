@@ -270,7 +270,8 @@ def _get_median_with_ci(fitter, is_cif=False):
 
 def add_estimate_labels(fitters, ax, colors=None, labels=None,
                         mode='timepoint', timepoint=36.0, param_name='OS',
-                        placement='on_curve', fontsize=9, is_cif=False):
+                        placement='on_curve', fontsize=9, is_cif=False,
+                        text_color='theme'):
     """
     Add auto-computed survival/CIF estimate text labels on the plot.
 
@@ -293,6 +294,10 @@ def add_estimate_labels(fitters, ax, colors=None, labels=None,
         'bottom' — grouped list near bottom-left of the plot.
     fontsize : int
     is_cif : bool
+    text_color : str
+        'theme' — estimate text uses the group's theme color.
+        'black' — estimate text in black (group names stay in theme color
+        for top/bottom placement).
     """
     if not fitters:
         return
@@ -342,13 +347,16 @@ def add_estimate_labels(fitters, ax, colors=None, labels=None,
     if not texts:
         return
 
+    _use_black = (text_color == 'black')
+
     if placement == 'on_curve':
         for item in texts:
+            _col = 'black' if _use_black else item['color']
             ax.annotate(
                 item['text'],
                 xy=(item['x_curve'], item['y_curve']),
                 xytext=(8, 8), textcoords='offset points',
-                fontsize=fontsize, color=item['color'], weight='bold',
+                fontsize=fontsize, color=_col, weight='bold',
                 ha='left', va='bottom'
             )
 
@@ -357,12 +365,19 @@ def add_estimate_labels(fitters, ax, colors=None, labels=None,
         y_start = 0.95 if placement == 'top' else 0.15
         line_spacing = 0.045 * (fontsize / 9.0)
         x_pos = 0.35
+        # Estimate x offset for the estimate text (after group name)
+        x_est_offset = 0.12
 
         for idx, item in enumerate(texts):
             y_pos = y_start - (idx * line_spacing)
-            line_text = f"{item['label']}    {item['text']}"
-            ax.text(x_pos, y_pos, line_text, transform=ax.transAxes,
+            # Group name always in theme color
+            ax.text(x_pos, y_pos, item['label'], transform=ax.transAxes,
                     fontsize=fontsize, color=item['color'], weight='bold',
+                    ha='left', va='top')
+            # Estimate text in chosen color
+            _col = 'black' if _use_black else item['color']
+            ax.text(x_pos + x_est_offset, y_pos, item['text'], transform=ax.transAxes,
+                    fontsize=fontsize, color=_col, weight='bold',
                     ha='left', va='top')
 
 
