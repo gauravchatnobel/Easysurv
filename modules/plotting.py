@@ -244,28 +244,34 @@ def _get_survival_at_time(fitter, t, is_cif=False):
 
 
 def _get_median_with_ci(fitter, is_cif=False):
-    """Get median survival time and 95% CI."""
+    """Get median survival time and 95% CI. Returns 'NR' strings for not reached."""
+    med_t = None
+    ci_lo = None
+    ci_hi = None
+
     if is_cif:
         cdf = fitter.cumulative_density_
         col = cdf.columns[0]
         crossed = cdf[cdf[col] >= 0.5]
-        if crossed.empty:
-            return None, None, None
-        median_t = crossed.index[0]
-        # CI for median is harder for CIF; use point estimate only
-        return float(median_t), None, None
+        if not crossed.empty:
+            med_t = float(crossed.index[0])
+        # CI for CIF median is not directly available
     else:
-        median_t = fitter.median_survival_time_
-        if pd.isna(median_t) or np.isinf(median_t):
-            return None, None, None
-        # Get CI from the confidence interval of the median
+        raw_med = fitter.median_survival_time_
+        if not (pd.isna(raw_med) or np.isinf(raw_med)):
+            med_t = float(raw_med)
         try:
             ci = fitter.confidence_interval_median_survival_time_
-            ci_lo = float(ci.iloc[0, 0]) if not pd.isna(ci.iloc[0, 0]) else None
-            ci_hi = float(ci.iloc[0, 1]) if not pd.isna(ci.iloc[0, 1]) else None
+            v_lo = ci.iloc[0, 0]
+            v_hi = ci.iloc[0, 1]
+            if not (pd.isna(v_lo) or np.isinf(v_lo)):
+                ci_lo = float(v_lo)
+            if not (pd.isna(v_hi) or np.isinf(v_hi)):
+                ci_hi = float(v_hi)
         except Exception:
-            ci_lo, ci_hi = None, None
-        return float(median_t), ci_lo, ci_hi
+            pass
+
+    return med_t, ci_lo, ci_hi
 
 
 def add_estimate_labels(fitters, ax, colors=None, labels=None,
@@ -311,15 +317,31 @@ def add_estimate_labels(fitters, ax, colors=None, labels=None,
 
         if mode == 'median':
             med, ci_lo, ci_hi = _get_median_with_ci(fitter, is_cif=is_cif)
-            if med is None:
-                continue
-            if ci_lo is not None and ci_hi is not None:
-                txt = f"Median {param_name} {med:.1f} (95%CI {ci_lo:.1f}-{ci_hi:.1f})"
+            med_str = f"{med:.1f}" if med is not None else "NR"
+            ci_lo_str = f"{ci_lo:.1f}" if ci_lo is not None else "NR"
+            ci_hi_str = f"{ci_hi:.1f}" if ci_hi is not None else "NR"
+            if ci_lo is not None or ci_hi is not None:
+                txt = f"Median {param_name} {med_str} (95%CI {ci_lo_str}-{ci_hi_str})"
             else:
-                txt = f"Median {param_name} {med:.1f}"
-            # For on_curve placement, place at median time, y=0.5
-            y_curve = 0.5
-            x_curve = med
+                txt = f"Median {param_name} {med_str}"
+            # For on_curve: place at the curve's actual position near the median
+            if med is not None:
+                # Get actual survival value at a point just after median
+                # for natural vertical separation between groups
+                nudge_t = med + (view_max - view_min) * 0.02
+                est_at_med, _, _ = _get_survival_at_time(fitter, nudge_t, is_cif=is_cif)
+                y_curve = est_at_med if est_at_med is not None else 0.5
+                x_curve = med
+            else:
+                # Median not reached — place at last observed time on the curve
+                if is_cif:
+                    curve = fitter.cumulative_density_
+                else:
+                    curve = fitter.survival_function_
+                last_t = curve.index[-1]
+                last_y = float(curve.iloc[-1, 0])
+                x_curve = min(last_t, view_max * 0.75)
+                y_curve = last_y
         else:  # timepoint
             t = timepoint
             if t > view_max:
