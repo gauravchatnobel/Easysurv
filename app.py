@@ -1215,22 +1215,31 @@ if df is not None:
 
                     # PH Assumption Test (Univariable)
                     try:
-                        from io import StringIO
-                        import contextlib
-                        ph_buf = StringIO()
-                        with contextlib.redirect_stdout(ph_buf):
-                            cph.check_assumptions(cox_data, p_value_threshold=0.05, show_plots=False)
-                        ph_output = ph_buf.getvalue()
-                        if ph_output and "proportional hazard" in ph_output.lower():
-                            with st.expander("⚠️ Proportional Hazards Assumption", expanded=True):
+                        from lifelines.statistics import proportional_hazard_test
+                        ph_result = proportional_hazard_test(cph, cox_data, time_transform='rank')
+                        ph_summary = ph_result.summary
+                        any_violation = (ph_summary['p'] < 0.05).any()
+
+                        _ph_label = "⚠️ Proportional Hazards Assumption" if any_violation else "Proportional Hazards Assumption"
+                        with st.expander(_ph_label, expanded=any_violation):
+                            # Display per-variable table
+                            ph_display = ph_summary[['test_statistic', 'p']].copy()
+                            ph_display.columns = ['Chi-squared', 'p-value']
+                            ph_display['Result'] = ph_display['p-value'].apply(
+                                lambda p: "⚠️ Violated (p<0.05)" if p < 0.05 else "OK"
+                            )
+                            st.dataframe(ph_display.style.format({'Chi-squared': '{:.3f}', 'p-value': '{:.4f}'}))
+
+                            if any_violation:
+                                violated = ph_summary[ph_summary['p'] < 0.05].index.get_level_values(0).tolist()
                                 st.warning(
-                                    "**The proportional hazards assumption may be violated.** "
-                                    "The hazard ratio may not be constant over time. Consider landmark analysis or time-varying covariates."
+                                    f"**PH assumption violated for: {', '.join(violated)}.** "
+                                    "The hazard ratio for these variables may not be constant over time. "
+                                    "Consider: landmark analysis, time-varying covariates, or restricted mean survival time (RMST)."
                                 )
-                                st.code(ph_output, language=None)
-                        else:
-                            with st.expander("Proportional Hazards Assumption", expanded=False):
-                                st.success("No PH violation detected (Schoenfeld residuals, p>0.05).")
+                            else:
+                                st.success("PH assumption satisfied for all covariates (Schoenfeld residuals test, p>0.05).")
+                            st.caption("Test: Schoenfeld residuals with rank time transform")
                     except Exception:
                         pass
 
@@ -1905,23 +1914,30 @@ if df is not None:
 
                             # 4. Proportional Hazards Assumption Test (Schoenfeld Residuals)
                             try:
-                                from io import StringIO
-                                import contextlib
-                                ph_buf = StringIO()
-                                with contextlib.redirect_stdout(ph_buf):
-                                    ph_results = cph_mv.check_assumptions(mv_data_encoded, p_value_threshold=0.05, show_plots=False)
-                                ph_output = ph_buf.getvalue()
-                                if ph_output and "proportional hazard" in ph_output.lower():
-                                    with st.expander("⚠️ Proportional Hazards Assumption Test", expanded=True):
+                                from lifelines.statistics import proportional_hazard_test
+                                ph_result_mv = proportional_hazard_test(cph_mv, mv_data_encoded, time_transform='rank')
+                                ph_summary_mv = ph_result_mv.summary
+                                any_violation_mv = (ph_summary_mv['p'] < 0.05).any()
+
+                                _ph_label_mv = "⚠️ Proportional Hazards Assumption Test" if any_violation_mv else "Proportional Hazards Assumption Test"
+                                with st.expander(_ph_label_mv, expanded=any_violation_mv):
+                                    ph_display_mv = ph_summary_mv[['test_statistic', 'p']].copy()
+                                    ph_display_mv.columns = ['Chi-squared', 'p-value']
+                                    ph_display_mv['Result'] = ph_display_mv['p-value'].apply(
+                                        lambda p: "⚠️ Violated (p<0.05)" if p < 0.05 else "OK"
+                                    )
+                                    st.dataframe(ph_display_mv.style.format({'Chi-squared': '{:.3f}', 'p-value': '{:.4f}'}))
+
+                                    if any_violation_mv:
+                                        violated_mv = ph_summary_mv[ph_summary_mv['p'] < 0.05].index.get_level_values(0).tolist()
                                         st.warning(
-                                            "**One or more covariates may violate the proportional hazards assumption.** "
-                                            "This means the hazard ratio for that variable is not constant over time. "
+                                            f"**PH assumption violated for: {', '.join(violated_mv)}.** "
+                                            "The hazard ratio for these variables may not be constant over time. "
                                             "Consider: time-varying covariates, stratified Cox model, or restricted mean survival time (RMST)."
                                         )
-                                        st.code(ph_output, language=None)
-                                else:
-                                    with st.expander("Proportional Hazards Assumption Test", expanded=False):
-                                        st.success("No violations of the proportional hazards assumption detected (Schoenfeld residuals test, p>0.05 for all covariates).")
+                                    else:
+                                        st.success("PH assumption satisfied for all covariates (Schoenfeld residuals test, p>0.05).")
+                                    st.caption("Test: Schoenfeld residuals with rank time transform")
                             except Exception:
                                 pass  # Silently skip if PH test fails (e.g., too few events)
 
