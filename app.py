@@ -562,6 +562,7 @@ if df is not None:
         est_label_placement_main = "on_curve"
         est_label_fontsize_main = 9
         est_label_textcolor_main = "theme"
+        est_label_bold_main = True
         if est_label_mode_main != "Off":
             est_label_param_main = st.text_input("Parameter name", value="OS", key="est_label_param_main",
                                                   help="e.g. OS, RFS, EFS, DFS, PFS")
@@ -579,6 +580,7 @@ if df is not None:
                                                  index=0, key="est_label_textcolor_main", horizontal=True,
                                                  help="Black makes estimates more readable; group names stay in theme color.")
             est_label_textcolor_main = "black" if est_label_textcolor_main == "Black" else "theme"
+            est_label_bold_main = st.checkbox("Bold labels", value=True, key="est_label_bold_main")
 
         st.markdown("### Free Text Annotations")
         main_annotations = []
@@ -638,6 +640,7 @@ if df is not None:
         est_label_placement_cif = "on_curve"
         est_label_fontsize_cif = 9
         est_label_textcolor_cif = "theme"
+        est_label_bold_cif = True
         if est_label_mode_cif != "Off":
             est_label_param_cif = st.text_input("Parameter name (CIF)", value="CIR", key="est_label_param_cif",
                                                  help="e.g. CIR, CI of relapse, CI of NRM")
@@ -655,6 +658,7 @@ if df is not None:
                                                 index=0, key="est_label_textcolor_cif", horizontal=True,
                                                 help="Black makes estimates more readable; group names stay in theme color.")
             est_label_textcolor_cif = "black" if est_label_textcolor_cif == "Black" else "theme"
+            est_label_bold_cif = st.checkbox("Bold labels (CIF)", value=True, key="est_label_bold_cif")
 
         st.markdown("### Free Text Annotations")
         cif_annotations = []
@@ -1111,7 +1115,8 @@ if df is not None:
                                         param_name=est_label_param_main,
                                         placement=est_label_placement_main,
                                         fontsize=est_label_fontsize_main,
-                                        text_color=est_label_textcolor_main)
+                                        text_color=est_label_textcolor_main,
+                                        bold=est_label_bold_main)
 
                 # Apply Custom Label
                 ax.set_title(main_title, fontsize=title_fontsize, weight=title_fontweight)
@@ -1554,7 +1559,8 @@ if df is not None:
                                         param_name=est_label_param_main,
                                         placement=est_label_placement_main,
                                         fontsize=est_label_fontsize_main,
-                                        text_color=est_label_textcolor_main)
+                                        text_color=est_label_textcolor_main,
+                                        bold=est_label_bold_main)
 
                 # Apply Custom Label
                 ax.set_title(main_title, fontsize=title_fontsize, weight=title_fontweight)
@@ -2758,7 +2764,8 @@ if df is not None:
                                         param_name=est_label_param_cif,
                                         placement=est_label_placement_cif,
                                         fontsize=est_label_fontsize_cif, is_cif=True,
-                                        text_color=est_label_textcolor_cif)
+                                        text_color=est_label_textcolor_cif,
+                                        bold=est_label_bold_cif)
 
                 ax_cif.set_xlabel(x_label, fontsize=axes_fontsize)
                 if cif_y_label:

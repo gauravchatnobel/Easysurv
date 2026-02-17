@@ -277,7 +277,7 @@ def _get_median_with_ci(fitter, is_cif=False):
 def add_estimate_labels(fitters, ax, colors=None, labels=None,
                         mode='timepoint', timepoint=36.0, param_name='OS',
                         placement='on_curve', fontsize=9, is_cif=False,
-                        text_color='theme'):
+                        text_color='theme', bold=True):
     """
     Add auto-computed survival/CIF estimate text labels on the plot.
 
@@ -304,6 +304,8 @@ def add_estimate_labels(fitters, ax, colors=None, labels=None,
         'theme' — estimate text uses the group's theme color.
         'black' — estimate text in black (group names stay in theme color
         for top/bottom placement).
+    bold : bool
+        Whether label text uses bold weight.
     """
     if not fitters:
         return
@@ -320,20 +322,24 @@ def add_estimate_labels(fitters, ax, colors=None, labels=None,
             med_str = f"{med:.1f}" if med is not None else "NR"
             ci_lo_str = f"{ci_lo:.1f}" if ci_lo is not None else "NR"
             ci_hi_str = f"{ci_hi:.1f}" if ci_hi is not None else "NR"
-            if ci_lo is not None or ci_hi is not None:
+            # Always show CI bracket if we have any CI data, or if median exists
+            # (lifelines always provides CI for KM medians)
+            has_ci = (ci_lo is not None or ci_hi is not None)
+            if has_ci:
                 txt = f"Median {param_name} {med_str} (95%CI {ci_lo_str}-{ci_hi_str})"
+            elif med is not None and not is_cif:
+                # KM should always have CI; show NR-NR if missing
+                txt = f"Median {param_name} {med_str} (95%CI NR-NR)"
             else:
                 txt = f"Median {param_name} {med_str}"
-            # For on_curve: place at the curve's actual position near the median
-            if med is not None:
-                # Get actual survival value at a point just after median
-                # for natural vertical separation between groups
-                nudge_t = med + (view_max - view_min) * 0.02
-                est_at_med, _, _ = _get_survival_at_time(fitter, nudge_t, is_cif=is_cif)
+            # For on_curve: place at the curve value at the timepoint,
+            # exactly like timepoint labels do
+            if med is not None and med <= view_max:
+                est_at_med, _, _ = _get_survival_at_time(fitter, med, is_cif=is_cif)
                 y_curve = est_at_med if est_at_med is not None else 0.5
                 x_curve = med
             else:
-                # Median not reached — place at last observed time on the curve
+                # Median not reached — place at last observed point on curve
                 if is_cif:
                     curve = fitter.cumulative_density_
                 else:
@@ -370,6 +376,7 @@ def add_estimate_labels(fitters, ax, colors=None, labels=None,
         return
 
     _use_black = (text_color == 'black')
+    _weight = 'bold' if bold else 'normal'
 
     if placement == 'on_curve':
         for item in texts:
@@ -378,7 +385,7 @@ def add_estimate_labels(fitters, ax, colors=None, labels=None,
                 item['text'],
                 xy=(item['x_curve'], item['y_curve']),
                 xytext=(8, 8), textcoords='offset points',
-                fontsize=fontsize, color=_col, weight='bold',
+                fontsize=fontsize, color=_col, weight=_weight,
                 ha='left', va='bottom'
             )
 
@@ -394,12 +401,12 @@ def add_estimate_labels(fitters, ax, colors=None, labels=None,
             y_pos = y_start - (idx * line_spacing)
             # Group name always in theme color
             ax.text(x_pos, y_pos, item['label'], transform=ax.transAxes,
-                    fontsize=fontsize, color=item['color'], weight='bold',
+                    fontsize=fontsize, color=item['color'], weight=_weight,
                     ha='left', va='top')
             # Estimate text in chosen color
             _col = 'black' if _use_black else item['color']
             ax.text(x_pos + x_est_offset, y_pos, item['text'], transform=ax.transAxes,
-                    fontsize=fontsize, color=_col, weight='bold',
+                    fontsize=fontsize, color=_col, weight=_weight,
                     ha='left', va='top')
 
 
