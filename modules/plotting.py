@@ -216,6 +216,156 @@ def add_survival_annotations(fitters, ax, colors=None, labels=None,
                         linestyle=line_style, color=color, linewidth=1, alpha=line_alpha)
 
 
+def _get_survival_at_time(fitter, t, is_cif=False):
+    """Get point estimate and 95% CI at a specific timepoint."""
+    if is_cif:
+        curve = fitter.cumulative_density_
+        ci = fitter.confidence_interval_cumulative_density_
+    else:
+        curve = fitter.survival_function_
+        ci = fitter.confidence_interval_survival_function_
+
+    col = curve.columns[0]
+
+    def _interp(series, time):
+        if time in series.index:
+            return series.loc[time]
+        combined = series.index.union([time]).sort_values()
+        interp = series.reindex(combined).interpolate(method='index')
+        return interp.loc[time]
+
+    est = _interp(curve[col], t)
+    ci_lo = _interp(ci.iloc[:, 0], t)
+    ci_hi = _interp(ci.iloc[:, 1], t)
+
+    if any(pd.isna(v) for v in [est, ci_lo, ci_hi]):
+        return None, None, None
+    return float(est), float(ci_lo), float(ci_hi)
+
+
+def _get_median_with_ci(fitter, is_cif=False):
+    """Get median survival time and 95% CI."""
+    if is_cif:
+        cdf = fitter.cumulative_density_
+        col = cdf.columns[0]
+        crossed = cdf[cdf[col] >= 0.5]
+        if crossed.empty:
+            return None, None, None
+        median_t = crossed.index[0]
+        # CI for median is harder for CIF; use point estimate only
+        return float(median_t), None, None
+    else:
+        median_t = fitter.median_survival_time_
+        if pd.isna(median_t) or np.isinf(median_t):
+            return None, None, None
+        # Get CI from the confidence interval of the median
+        try:
+            ci = fitter.confidence_interval_median_survival_time_
+            ci_lo = float(ci.iloc[0, 0]) if not pd.isna(ci.iloc[0, 0]) else None
+            ci_hi = float(ci.iloc[0, 1]) if not pd.isna(ci.iloc[0, 1]) else None
+        except Exception:
+            ci_lo, ci_hi = None, None
+        return float(median_t), ci_lo, ci_hi
+
+
+def add_estimate_labels(fitters, ax, colors=None, labels=None,
+                        mode='timepoint', timepoint=36.0, param_name='OS',
+                        placement='on_curve', fontsize=9, is_cif=False):
+    """
+    Add auto-computed survival/CIF estimate text labels on the plot.
+
+    Parameters
+    ----------
+    fitters : list
+        Fitted KaplanMeierFitter or AalenJohansenFitter objects.
+    ax : matplotlib Axes
+    colors : list of str
+    labels : list of str
+    mode : str
+        'timepoint' for X-year estimate, 'median' for median survival.
+    timepoint : float
+        Time for point estimate (used when mode='timepoint').
+    param_name : str
+        Clinical parameter name (e.g. 'OS', 'RFS', 'EFS', 'CIR').
+    placement : str
+        'on_curve' — label right above each curve at the timepoint.
+        'top' — grouped list near top-left of the plot.
+        'bottom' — grouped list near bottom-left of the plot.
+    fontsize : int
+    is_cif : bool
+    """
+    if not fitters:
+        return
+
+    view_min, view_max = ax.get_xlim()
+    texts = []
+
+    for i, fitter in enumerate(fitters):
+        color = colors[i] if colors and i < len(colors) else f'C{i}'
+        lbl = labels[i] if labels and i < len(labels) else fitter._label
+
+        if mode == 'median':
+            med, ci_lo, ci_hi = _get_median_with_ci(fitter, is_cif=is_cif)
+            if med is None:
+                continue
+            if ci_lo is not None and ci_hi is not None:
+                txt = f"Median {param_name} {med:.1f} (95%CI {ci_lo:.1f}-{ci_hi:.1f})"
+            else:
+                txt = f"Median {param_name} {med:.1f}"
+            # For on_curve placement, place at median time, y=0.5
+            y_curve = 0.5
+            x_curve = med
+        else:  # timepoint
+            t = timepoint
+            if t > view_max:
+                continue
+            est, ci_lo, ci_hi = _get_survival_at_time(fitter, t, is_cif=is_cif)
+            if est is None:
+                continue
+            # Determine time label
+            if t % 12 == 0 and t >= 12:
+                time_label = f"{int(t // 12)}-year"
+            else:
+                time_label = f"{int(t)}-month" if t == int(t) else f"{t:.1f}-month"
+            pct = est * 100
+            ci_lo_pct = ci_lo * 100
+            ci_hi_pct = ci_hi * 100
+            txt = f"{time_label} {param_name} {pct:.1f}% (95%CI {ci_lo_pct:.1f}-{ci_hi_pct:.1f}%)"
+            y_curve = est
+            x_curve = t
+
+        texts.append({
+            'text': txt, 'color': color, 'label': lbl,
+            'x_curve': x_curve, 'y_curve': y_curve
+        })
+
+    if not texts:
+        return
+
+    if placement == 'on_curve':
+        for item in texts:
+            ax.annotate(
+                item['text'],
+                xy=(item['x_curve'], item['y_curve']),
+                xytext=(8, 8), textcoords='offset points',
+                fontsize=fontsize, color=item['color'], weight='bold',
+                ha='left', va='bottom'
+            )
+
+    elif placement in ('top', 'bottom'):
+        # Build a grouped text block
+        y_start = 0.95 if placement == 'top' else 0.15
+        line_spacing = 0.045 * (fontsize / 9.0)
+        x_pos = 0.35
+
+        for idx, item in enumerate(texts):
+            y_pos = y_start - (idx * line_spacing)
+            line_text = f"{item['label']}    {item['text']}"
+            ax.text(x_pos, y_pos, line_text, transform=ax.transAxes,
+                    fontsize=fontsize, color=item['color'], weight='bold',
+                    ha='left', va='top')
+
+
 def create_forest_plot(summary_df, theme_color='#1f77b4', title="Forest Plot",
                        xlabel="Hazard Ratio (95% CI)", reference_line=1.0,
                        figsize=None, label_fontsize=10):

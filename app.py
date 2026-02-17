@@ -35,6 +35,7 @@ except:
 compute_fine_gray_weights = statistics.compute_fine_gray_weights
 add_at_risk_counts = plotting.add_at_risk_counts
 add_survival_annotations = plotting.add_survival_annotations
+add_estimate_labels = plotting.add_estimate_labels
 
 
 
@@ -541,15 +542,37 @@ if df is not None:
         pval_y_main = st.slider("P-val Y (Main)", 0.0, 1.0, 0.05)
 
         st.markdown("### Auto Annotations")
-        show_median_main = st.checkbox("Show Median Survival", value=False, key="show_median_main",
+        show_median_main = st.checkbox("Show Median Survival Lines", value=False, key="show_median_main",
                                         help="Draw dashed drop-lines at median survival for each group")
-        show_x_year_main = st.checkbox("Show X-year Survival", value=False, key="show_x_year_main",
+        show_x_year_main = st.checkbox("Show Timepoint Survival Lines", value=False, key="show_x_year_main",
                                         help="Draw dashed lines at a specific timepoint showing survival %")
         x_year_time_main = None
         if show_x_year_main:
             x_year_time_main = st.number_input("Timepoint", min_value=0.0, value=36.0, step=6.0,
                                                 key="x_year_time_main",
                                                 help="e.g. 24 for 2-year, 36 for 3-year, 60 for 5-year survival")
+
+        st.markdown("### Estimate Labels")
+        _est_mode_options_main = ["Off", "Timepoint estimate", "Median survival"]
+        est_label_mode_main = st.radio("Show Estimate Labels", _est_mode_options_main,
+                                        index=0, key="est_label_mode_main",
+                                        help="Auto-compute and display survival estimates with 95% CI on the plot")
+        est_label_param_main = "OS"
+        est_label_time_main = 36.0
+        est_label_placement_main = "on_curve"
+        est_label_fontsize_main = 9
+        if est_label_mode_main != "Off":
+            est_label_param_main = st.text_input("Parameter name", value="OS", key="est_label_param_main",
+                                                  help="e.g. OS, RFS, EFS, DFS, PFS")
+            if est_label_mode_main == "Timepoint estimate":
+                est_label_time_main = st.number_input("Timepoint (months)", min_value=0.0, value=36.0, step=6.0,
+                                                       key="est_label_time_main")
+            _placement_options = ["On curve", "Top of plot", "Bottom of plot"]
+            est_label_placement_main = st.radio("Placement", _placement_options,
+                                                 index=0, key="est_label_placement_main", horizontal=True)
+            est_label_placement_main = {"On curve": "on_curve", "Top of plot": "top", "Bottom of plot": "bottom"}[est_label_placement_main]
+            est_label_fontsize_main = st.number_input("Label font size", min_value=6, max_value=20, value=9,
+                                                       key="est_label_fontsize_main")
 
         st.markdown("### Free Text Annotations")
         main_annotations = []
@@ -590,14 +613,36 @@ if df is not None:
         pval_y_cif = st.slider("P-val Y (CIF)", 0.0, 1.0, 0.2)
         
         st.markdown("### Auto Annotations")
-        show_median_cif = st.checkbox("Show Median CIF Time", value=False, key="show_median_cif",
+        show_median_cif = st.checkbox("Show Median CIF Lines", value=False, key="show_median_cif",
                                        help="Draw dashed drop-lines where cumulative incidence reaches 50%")
-        show_x_year_cif = st.checkbox("Show X-year Cumulative Incidence", value=False, key="show_x_year_cif",
+        show_x_year_cif = st.checkbox("Show Timepoint CIF Lines", value=False, key="show_x_year_cif",
                                        help="Draw dashed lines at a specific timepoint showing cumulative incidence %")
         x_year_time_cif = None
         if show_x_year_cif:
             x_year_time_cif = st.number_input("Timepoint (CIF)", min_value=0.0, value=36.0, step=6.0,
                                                key="x_year_time_cif")
+
+        st.markdown("### Estimate Labels")
+        _est_mode_options_cif = ["Off", "Timepoint estimate", "Median CIF time"]
+        est_label_mode_cif = st.radio("Show Estimate Labels (CIF)", _est_mode_options_cif,
+                                       index=0, key="est_label_mode_cif",
+                                       help="Auto-compute and display CIF estimates with 95% CI on the plot")
+        est_label_param_cif = "CIR"
+        est_label_time_cif = 36.0
+        est_label_placement_cif = "on_curve"
+        est_label_fontsize_cif = 9
+        if est_label_mode_cif != "Off":
+            est_label_param_cif = st.text_input("Parameter name (CIF)", value="CIR", key="est_label_param_cif",
+                                                 help="e.g. CIR, CI of relapse, CI of NRM")
+            if est_label_mode_cif == "Timepoint estimate":
+                est_label_time_cif = st.number_input("Timepoint (months, CIF)", min_value=0.0, value=36.0, step=6.0,
+                                                      key="est_label_time_cif")
+            _placement_options_cif = ["On curve", "Top of plot", "Bottom of plot"]
+            est_label_placement_cif = st.radio("Placement (CIF)", _placement_options_cif,
+                                                index=0, key="est_label_placement_cif", horizontal=True)
+            est_label_placement_cif = {"On curve": "on_curve", "Top of plot": "top", "Bottom of plot": "bottom"}[est_label_placement_cif]
+            est_label_fontsize_cif = st.number_input("Label font size (CIF)", min_value=6, max_value=20, value=9,
+                                                      key="est_label_fontsize_cif")
 
         st.markdown("### Free Text Annotations")
         cif_annotations = []
@@ -1046,6 +1091,15 @@ if df is not None:
                                              show_median=show_median_main, show_x_year=show_x_year_main,
                                              x_year_time=x_year_time_main)
 
+                # Estimate labels
+                if est_label_mode_main != "Off":
+                    _est_mode = 'median' if 'Median' in est_label_mode_main else 'timepoint'
+                    add_estimate_labels(fitters, ax=ax, colors=plot_colors, labels=plot_labels,
+                                        mode=_est_mode, timepoint=est_label_time_main,
+                                        param_name=est_label_param_main,
+                                        placement=est_label_placement_main,
+                                        fontsize=est_label_fontsize_main)
+
                 # Apply Custom Label
                 ax.set_title(main_title, fontsize=title_fontsize, weight=title_fontweight)
                 ax.set_xlabel(x_label, fontsize=axes_fontsize)
@@ -1477,6 +1531,16 @@ if df is not None:
                     add_survival_annotations([kmf_all], ax=ax, colors=_ann_colors, labels=["All Patients"],
                                              show_median=show_median_main, show_x_year=show_x_year_main,
                                              x_year_time=x_year_time_main)
+
+                # Estimate labels
+                if est_label_mode_main != "Off":
+                    _est_mode = 'median' if 'Median' in est_label_mode_main else 'timepoint'
+                    _ann_colors_est = [color] if color else None
+                    add_estimate_labels([kmf_all], ax=ax, colors=_ann_colors_est, labels=["All Patients"],
+                                        mode=_est_mode, timepoint=est_label_time_main,
+                                        param_name=est_label_param_main,
+                                        placement=est_label_placement_main,
+                                        fontsize=est_label_fontsize_main)
 
                 # Apply Custom Label
                 ax.set_title(main_title, fontsize=title_fontsize, weight=title_fontweight)
@@ -2671,6 +2735,15 @@ if df is not None:
                     add_survival_annotations(cif_fitters, ax=ax_cif, colors=cif_colors, labels=cif_labels,
                                              show_median=show_median_cif, show_x_year=show_x_year_cif,
                                              x_year_time=x_year_time_cif, is_cif=True)
+
+                # Estimate labels (CIF)
+                if est_label_mode_cif != "Off":
+                    _est_mode_cif = 'median' if 'Median' in est_label_mode_cif else 'timepoint'
+                    add_estimate_labels(cif_fitters, ax=ax_cif, colors=cif_colors, labels=cif_labels,
+                                        mode=_est_mode_cif, timepoint=est_label_time_cif,
+                                        param_name=est_label_param_cif,
+                                        placement=est_label_placement_cif,
+                                        fontsize=est_label_fontsize_cif, is_cif=True)
 
                 ax_cif.set_xlabel(x_label, fontsize=axes_fontsize)
                 if cif_y_label:
