@@ -24,10 +24,10 @@ journal_themes = {
 }
 
 fun_themes = {
+    "The Tapestry of Life": ["#FFB7E1", "#8DE581", "#7DFAFF", "#D78E38", "#596025", "#304245"], # Scavengers Reign
+    "The Violence of Survival": ["#5D4037", "#D84315", "#388E3C", "#FBC02D", "#455A64", "#212121"],
+    "The Existential Emptiness": ["#2C3E50", "#D35400", "#2980B9", "#C0392B", "#bdc3c7", "#F39C12"],
     "Cosmic Nihilism": ["#A6EEE6", "#F0F035", "#44281D", "#E4A71B", "#8BCF21", "#FBFBFB"],
-    "Hollywood Equine": ["#2C3E50", "#D35400", "#2980B9", "#C0392B", "#bdc3c7", "#F39C12"],
-    "Prehistoric One": ["#5D4037", "#D84315", "#388E3C", "#FBC02D", "#455A64", "#212121"],
-    "Alien Biosphere": ["#FFB7E1", "#8DE581", "#7DFAFF", "#D78E38", "#596025", "#304245"], # Scavengers Reign
     "Fractured Timeline": ["#5C3D6E", "#E6A550", "#4DA8A0", "#C97B8B", "#7B8FA1", "#2E1F3E"], # Rotoscope dreamscape
     "Alien Flora": ["#F4EBD0", "#D66853", "#3C505D", "#7D9D9C", "#212D40", "#A8C686"],
     "Neon Acid": ["#FF00FF", "#00FF00", "#0000FF", "#FFFF00", "#00FFFF", "#FF0000"],
