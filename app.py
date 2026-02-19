@@ -53,8 +53,8 @@ section[data-testid="stSidebar"] .stSubheader {
     font-size: 0.85rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: #555;
-    border-bottom: 1px solid #e0e0e0;
+    opacity: 0.7;
+    border-bottom: 1px solid var(--secondary-background-color, rgba(128,128,128,0.2));
     padding-bottom: 0.3rem;
     margin-top: 1.2rem;
 }
@@ -71,34 +71,33 @@ section[data-testid="stSidebar"] .stSubheader {
     vertical-align: middle;
     margin-left: 0.5rem;
 }
-/* Landing page hero */
+/* Landing page hero — theme-aware */
 .hero-container {
-    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    background: var(--secondary-background-color, rgba(128,128,128,0.1));
     border-radius: 16px;
     padding: 3rem 2rem 2.5rem 2rem;
     text-align: center;
     margin-bottom: 2rem;
-    border: 1px solid #e2e8f0;
+    border: 1px solid rgba(128,128,128,0.15);
 }
 .hero-container h2 {
     margin-bottom: 0.3rem;
-    color: #1a202c;
 }
 .hero-container h4 {
-    color: #4a5568;
+    opacity: 0.7;
     font-weight: 400;
     margin-bottom: 1rem;
 }
 .hero-container p {
-    color: #718096;
+    opacity: 0.55;
     font-size: 1rem;
     max-width: 600px;
     margin: 0 auto;
 }
-/* Feature cards on landing */
+/* Feature cards — theme-aware */
 .feature-card {
-    background: white;
-    border: 1px solid #e2e8f0;
+    background: var(--secondary-background-color, rgba(128,128,128,0.1));
+    border: 1px solid rgba(128,128,128,0.15);
     border-radius: 12px;
     padding: 1.5rem;
     text-align: center;
@@ -106,7 +105,7 @@ section[data-testid="stSidebar"] .stSubheader {
     transition: box-shadow 0.2s;
 }
 .feature-card:hover {
-    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    box-shadow: 0 4px 12px rgba(128,128,128,0.15);
 }
 .feature-card .icon {
     font-size: 2rem;
@@ -114,11 +113,10 @@ section[data-testid="stSidebar"] .stSubheader {
 }
 .feature-card h4 {
     margin: 0.5rem 0 0.3rem 0;
-    color: #2d3748;
     font-size: 0.95rem;
 }
 .feature-card p {
-    color: #718096;
+    opacity: 0.6;
     font-size: 0.85rem;
     margin: 0;
 }
@@ -126,18 +124,14 @@ section[data-testid="stSidebar"] .stSubheader {
 .sidebar-footer {
     text-align: center;
     padding: 1rem 0 0.5rem 0;
-    color: #a0aec0;
+    opacity: 0.45;
     font-size: 0.7rem;
     letter-spacing: 0.05em;
-}
-.sidebar-footer a {
-    color: #667eea;
-    text-decoration: none;
 }
 /* Security note — more subtle */
 .security-note {
     font-size: 0.75rem;
-    color: #a0aec0;
+    opacity: 0.45;
     padding: 0.4rem 0;
     text-align: center;
 }
