@@ -2,8 +2,11 @@
 AI Narrator Module for EasySurv.
 
 Generates publication-ready methods and results text from statistical outputs.
-Supports multiple journal styles and provides clinical interpretation of results.
+Supports multiple journal styles, concise/detailed modes, and provides
+clinical interpretation of results.
 """
+
+import numpy as np
 
 
 # ============================================================
@@ -13,32 +16,67 @@ Supports multiple journal styles and provides clinical interpretation of results
 JOURNAL_STYLES = {
     "Standard": {
         "label": "Standard (Most Journals)",
-        "ci_format": "({low:.2f}-{high:.2f})",
+        "ci_format": "({low}-{high})",
+        "ci_sep": "-",
         "p_format": lambda p: "p<0.001" if p < 0.001 else f"p={p:.3f}",
         "hr_inline": True,
         "bold_significant": True,
         "methods_header": "**Methods**",
         "results_header": "**Results**",
+        "p_capitalize": False,
+        "p_leading_zero": True,
     },
     "NEJM": {
         "label": "NEJM Style",
-        "ci_format": "({low:.2f} to {high:.2f})",
+        "ci_format": "({low} to {high})",
+        "ci_sep": " to ",
         "p_format": lambda p: "P<0.001" if p < 0.001 else f"P={p:.2f}",
         "hr_inline": True,
         "bold_significant": False,
         "methods_header": "**Methods**",
         "results_header": "**Results**",
+        "p_capitalize": True,
+        "p_leading_zero": True,
     },
     "Lancet": {
         "label": "Lancet Style",
-        "ci_format": "({low:.2f}-{high:.2f})",
+        "ci_format": "({low}-{high})",
+        "ci_sep": "-",
         "p_format": lambda p: "p<0.0001" if p < 0.0001 else f"p={p:.4f}",
         "hr_inline": True,
         "bold_significant": False,
         "methods_header": "**Methods**",
         "results_header": "**Results**",
+        "p_capitalize": False,
+        "p_leading_zero": True,
+    },
+    "JCO": {
+        "label": "JCO (Journal of Clinical Oncology)",
+        "ci_format": "({low} to {high})",
+        "ci_sep": " to ",
+        "p_format": lambda p: "P < .001" if p < 0.001 else f"P = .{f'{p:.3f}'[2:]}",
+        "hr_inline": True,
+        "bold_significant": False,
+        "methods_header": "**Methods**",
+        "results_header": "**Results**",
+        "p_capitalize": True,
+        "p_leading_zero": False,
+    },
+    "Blood": {
+        "label": "Blood (ASH)",
+        "ci_format": "({low}-{high})",
+        "ci_sep": "-",
+        "p_format": lambda p: "P < .001" if p < 0.001 else f"P = .{f'{p:.3f}'[2:]}",
+        "hr_inline": True,
+        "bold_significant": False,
+        "methods_header": "**Methods**",
+        "results_header": "**Results**",
+        "p_capitalize": True,
+        "p_leading_zero": False,
     },
 }
+
+DETAIL_LEVELS = ["Concise", "Detailed"]
 
 
 # ============================================================
@@ -96,7 +134,7 @@ def _interpret_shr(shr):
 
 def _format_ci(low, high, style):
     """Format confidence interval according to journal style."""
-    return style["ci_format"].format(low=low, high=high)
+    return style["ci_format"].format(low=f"{low:.2f}", high=f"{high:.2f}")
 
 
 def _format_p(p, style):
@@ -113,6 +151,57 @@ def _significance_phrase(p, style):
     return "not significantly"
 
 
+def _format_median_ci(med_str, ci_str_raw, style):
+    """
+    Re-format pre-formatted median CI string to match journal style.
+
+    Parameters
+    ----------
+    med_str : str
+        Median value as string (e.g. "18.6" or "NR").
+    ci_str_raw : str
+        Raw CI string from app (e.g. "(12.3 - 25.1)" or "(NR - NR)").
+    style : dict
+        Journal style dict.
+
+    Returns
+    -------
+    str
+        Formatted string like "18.6 months (95% CI 12.3-25.1)" or
+        "18.6 months (95% CI 12.3 to 25.1)" depending on style.
+    """
+    # Parse raw CI string: "(12.3 - 25.1)" or "(NR - NR)"
+    ci_clean = ci_str_raw.strip().strip("()")
+    parts = [p.strip() for p in ci_clean.split("-", 1)]
+    if len(parts) == 2:
+        lo, hi = parts[0].strip(), parts[1].strip()
+    else:
+        return f"{med_str} {ci_str_raw}"
+
+    sep = style.get("ci_sep", "-")
+    return f"{med_str} (95% CI {lo}{sep}{hi})"
+
+
+def _event_display_name(event_name):
+    """
+    Convert short parameter codes to readable names.
+    OS -> overall survival, RFS -> relapse-free survival, etc.
+    Falls back to the raw name if no mapping found.
+    """
+    mapping = {
+        "OS": "overall survival",
+        "RFS": "relapse-free survival",
+        "EFS": "event-free survival",
+        "DFS": "disease-free survival",
+        "PFS": "progression-free survival",
+        "TTP": "time to progression",
+        "LRFS": "local relapse-free survival",
+        "DRFS": "distant relapse-free survival",
+        "CSS": "cancer-specific survival",
+    }
+    return mapping.get(event_name.upper(), event_name)
+
+
 # ============================================================
 # Univariable (Kaplan-Meier) Narrator
 # ============================================================
@@ -127,6 +216,11 @@ def generate_univariable_narrative(
     target_time=None,
     cox_method="Cox Proportional Hazards regression",
     style_name="Standard",
+    detail_level="Detailed",
+    event_name=None,
+    n_patients=None,
+    n_events=None,
+    landmark_time=None,
 ):
     """
     Generate a narrative for univariable (Kaplan-Meier) survival analysis.
@@ -152,6 +246,16 @@ def generate_univariable_narrative(
         Description of Cox method used.
     style_name : str
         Journal style name.
+    detail_level : str
+        "Concise" or "Detailed".
+    event_name : str or None
+        Parameter name (e.g. "OS", "RFS"). Used for natural language.
+    n_patients : int or None
+        Number of patients in the analysis.
+    n_events : int or None
+        Number of events observed.
+    landmark_time : float or None
+        If > 0, landmark analysis was applied.
 
     Returns
     -------
@@ -159,18 +263,40 @@ def generate_univariable_narrative(
         Formatted narrative text.
     """
     style = JOURNAL_STYLES.get(style_name, JOURNAL_STYLES["Standard"])
+    concise = detail_level == "Concise"
+    endpoint_name = _event_display_name(event_name) if event_name else "survival"
+    endpoint_short = event_name if event_name else "OS"
 
     # --- Methods ---
     text = f"{style['methods_header']}\n"
-    text += (
-        "Survival estimates were calculated using the Kaplan-Meier method. "
-        "Between-group comparisons were performed using the log-rank test. "
-        f"Univariable hazard ratios (HRs) were estimated using {cox_method}. "
-    )
+    if concise:
+        text += (
+            f"Kaplan-Meier estimates of {endpoint_name} were compared using the log-rank test. "
+            f"Hazard ratios were estimated using {cox_method}."
+        )
+    else:
+        text += (
+            f"Survival estimates for {endpoint_name} were calculated using the Kaplan-Meier method. "
+            "Between-group comparisons were performed using the log-rank test. "
+            f"Univariable hazard ratios (HRs) with 95% confidence intervals (CIs) were estimated using {cox_method}."
+        )
+
+    if landmark_time and landmark_time > 0:
+        text += (
+            f" A landmark analysis at {landmark_time:.0f} months was applied; "
+            "only patients event-free at the landmark were included, and time zero was reset to the landmark."
+        )
+
     text += "\n\n"
 
     # --- Results ---
     text += f"{style['results_header']}\n"
+
+    # Cohort context
+    if n_patients and n_events:
+        text += f"Among {n_patients} patients ({n_events} events), "
+    elif n_patients:
+        text += f"Among {n_patients} patients, "
 
     # Median survival (lead with the clinical finding)
     if median_data:
@@ -178,41 +304,64 @@ def generate_univariable_narrative(
         for item in median_data:
             med_val = item['Median Survival']
             ci_val = item['95% CI (Median)']
-            med_parts.append(f"{item['Group']}: {med_val} {ci_val}")
-        text += f"Median survival by **{group_col}** was " + "; ".join(med_parts) + ". "
+            formatted = _format_median_ci(med_val, ci_val, style)
+            label = item['Group']
+            med_parts.append(f"{label}: {formatted}")
+
+        if n_patients:
+            text += f"median {endpoint_short} by **{group_col}** was "
+        else:
+            text += f"Median {endpoint_short} by **{group_col}** was "
+        text += "; ".join(med_parts) + ". "
 
     # Log-rank result
     p_str = _format_p(logrank_p, style)
-    sig = _significance_phrase(logrank_p, style)
-    text += f"The difference between groups was {sig} ({p_str}).\n\n"
-
-    # Cox regression results with clinical interpretation
-    if cox_summary is not None and len(cox_summary) > 0:
-        text += "Univariable Cox regression results:\n"
-        for idx, row in cox_summary.iterrows():
-            hr = row['Hazard Ratio (HR)']
-            p = row['p-value']
-            # Handle both 'Lower 95% CI' and 'Lower 95%' column names
-            if 'Lower 95% CI' in row.index:
-                ci_low, ci_high = row['Lower 95% CI'], row['Upper 95% CI']
-            else:
-                ci_low, ci_high = row['Lower 95%'], row['Upper 95%']
-
-            ci_str = _format_ci(ci_low, ci_high, style)
-            p_str = _format_p(p, style)
-            interpretation = _interpret_hr(hr, idx)
-
-            text += f"* **{idx}** was {interpretation} (HR {hr:.2f}, 95% CI {ci_str}, {p_str}).\n"
+    if logrank_p < 0.05:
+        if style.get("bold_significant"):
+            text += f"The difference between groups was **statistically significant** ({p_str})."
+        else:
+            text += f"The difference between groups was statistically significant ({p_str})."
+    else:
+        text += f"The difference between groups was not statistically significant ({p_str})."
 
     # Point-in-time estimates
     if point_estimates and target_time is not None:
-        text += f"\nAt {target_time} months: "
+        text += f"\n\nAt {target_time:.0f} months: "
         pit_parts = []
         for item in point_estimates:
-            surv_key = [k for k in item.keys() if k.startswith("Survival")][0] if any(k.startswith("Survival") for k in item) else None
+            surv_key = next((k for k in item.keys() if k.startswith("Survival")), None)
             if surv_key:
                 pit_parts.append(f"{item['Group']} {item[surv_key]} (95% CI {item['95% CI']})")
         text += "; ".join(pit_parts) + "."
+
+    # Cox regression results with clinical interpretation
+    if cox_summary is not None and len(cox_summary) > 0:
+        text += "\n\n"
+        if concise:
+            # Compact bullet list
+            for idx, row in cox_summary.iterrows():
+                hr = row['Hazard Ratio (HR)']
+                p = row['p-value']
+                if 'Lower 95% CI' in row.index:
+                    ci_low, ci_high = row['Lower 95% CI'], row['Upper 95% CI']
+                else:
+                    ci_low, ci_high = row['Lower 95%'], row['Upper 95%']
+                ci_str = _format_ci(ci_low, ci_high, style)
+                p_str = _format_p(p, style)
+                text += f"* **{idx}**: HR {hr:.2f}, 95% CI {ci_str}, {p_str}\n"
+        else:
+            text += "Univariable Cox regression:\n"
+            for idx, row in cox_summary.iterrows():
+                hr = row['Hazard Ratio (HR)']
+                p = row['p-value']
+                if 'Lower 95% CI' in row.index:
+                    ci_low, ci_high = row['Lower 95% CI'], row['Upper 95% CI']
+                else:
+                    ci_low, ci_high = row['Lower 95%'], row['Upper 95%']
+                ci_str = _format_ci(ci_low, ci_high, style)
+                p_str = _format_p(p, style)
+                interpretation = _interpret_hr(hr, idx)
+                text += f"* **{idx}** was {interpretation} (HR {hr:.2f}, 95% CI {ci_str}, {p_str}).\n"
 
     return text
 
@@ -229,6 +378,9 @@ def generate_multivariable_narrative(
     n_patients=None,
     n_events=None,
     style_name="Standard",
+    detail_level="Detailed",
+    event_name=None,
+    landmark_time=None,
 ):
     """
     Generate a narrative for multivariable Cox regression analysis.
@@ -250,6 +402,12 @@ def generate_multivariable_narrative(
         Number of events observed.
     style_name : str
         Journal style name.
+    detail_level : str
+        "Concise" or "Detailed".
+    event_name : str or None
+        Parameter name (e.g. "OS", "RFS").
+    landmark_time : float or None
+        If > 0, landmark analysis was applied.
 
     Returns
     -------
@@ -257,6 +415,8 @@ def generate_multivariable_narrative(
         Formatted narrative text.
     """
     style = JOURNAL_STYLES.get(style_name, JOURNAL_STYLES["Standard"])
+    concise = detail_level == "Concise"
+    endpoint_name = _event_display_name(event_name) if event_name else "the time-to-event outcome"
 
     # --- Methods ---
     text = f"{style['methods_header']}\n"
@@ -268,21 +428,41 @@ def generate_multivariable_narrative(
             penalty_type = "Lasso"
         else:
             penalty_type = "Elastic Net"
-        text += (
-            f"Multivariable analysis was performed using penalized Cox regression "
-            f"({penalty_type}, lambda={penalizer_value:.4f}, L1 ratio={l1_ratio:.1f}) "
-            f"to account for potential multicollinearity and prevent overfitting. "
-        )
+
+        if concise:
+            text += (
+                f"Penalized Cox regression ({penalty_type}, "
+                f"\u03bb={penalizer_value:.4f}) was used for multivariable analysis."
+            )
+        else:
+            text += (
+                f"Multivariable analysis was performed using penalized Cox regression "
+                f"({penalty_type}, lambda={penalizer_value:.4f}, L1 ratio={l1_ratio:.1f}) "
+                f"to account for potential multicollinearity and prevent overfitting."
+            )
     else:
-        text += (
-            "Multivariable analysis was performed using the Cox proportional hazards model "
-            "to identify independent predictors of the time-to-event outcome. "
-        )
+        if concise:
+            text += (
+                f"Multivariable Cox regression was used to identify independent predictors of {endpoint_name}."
+            )
+        else:
+            text += (
+                f"Multivariable analysis was performed using the Cox proportional hazards model "
+                f"to identify independent predictors of {endpoint_name}."
+            )
 
     if n_patients and n_events:
-        text += f"The analysis included {n_patients} patients with {n_events} events. "
+        text += f" The analysis included {n_patients} patients with {n_events} events."
 
-    text += "Hazard ratios (HRs) with 95% confidence intervals (CIs) are reported.\n\n"
+    if landmark_time and landmark_time > 0:
+        text += (
+            f" Landmark analysis at {landmark_time:.0f} months was applied."
+        )
+
+    if not concise:
+        text += " Hazard ratios (HRs) with 95% confidence intervals (CIs) are reported."
+
+    text += "\n\n"
 
     # --- Results ---
     text += f"{style['results_header']}\n"
@@ -302,21 +482,29 @@ def generate_multivariable_narrative(
         else:
             nonsig_vars.append(entry)
 
-    # Report significant predictors first
-    if sig_vars:
-        text += "The following variables were independently associated with the outcome:\n"
-        for v in sig_vars:
+    if concise:
+        # All variables in a compact list, significant first
+        for v in sig_vars + nonsig_vars:
             ci_str = _format_ci(v['ci_low'], v['ci_high'], style)
             p_str = _format_p(v['p'], style)
-            interp = _interpret_hr(v['hr'], v['name'])
-            text += f"* **{v['name']}** was {interp} (HR {v['hr']:.2f}, 95% CI {ci_str}, {p_str}).\n"
+            sig_marker = " *" if v['p'] < 0.05 else ""
+            text += f"* **{v['name']}**: HR {v['hr']:.2f}, 95% CI {ci_str}, {p_str}{sig_marker}\n"
+    else:
+        # Report significant predictors first with interpretation
+        if sig_vars:
+            text += "The following variables were independently associated with the outcome:\n"
+            for v in sig_vars:
+                ci_str = _format_ci(v['ci_low'], v['ci_high'], style)
+                p_str = _format_p(v['p'], style)
+                interp = _interpret_hr(v['hr'], v['name'])
+                text += f"* **{v['name']}** was {interp} (HR {v['hr']:.2f}, 95% CI {ci_str}, {p_str}).\n"
 
-    if nonsig_vars:
-        text += "\nThe following variables were not statistically significant in the adjusted model:\n"
-        for v in nonsig_vars:
-            ci_str = _format_ci(v['ci_low'], v['ci_high'], style)
-            p_str = _format_p(v['p'], style)
-            text += f"* **{v['name']}**: HR {v['hr']:.2f}, 95% CI {ci_str}, {p_str}.\n"
+        if nonsig_vars:
+            text += "\nThe following variables were not statistically significant in the adjusted model:\n"
+            for v in nonsig_vars:
+                ci_str = _format_ci(v['ci_low'], v['ci_high'], style)
+                p_str = _format_p(v['p'], style)
+                text += f"* **{v['name']}**: HR {v['hr']:.2f}, 95% CI {ci_str}, {p_str}.\n"
 
     return text
 
@@ -331,6 +519,13 @@ def generate_cif_narrative(
     cif_target_time=None,
     fg_summary=None,
     style_name="Standard",
+    detail_level="Detailed",
+    event_of_interest=None,
+    competing_event=None,
+    n_patients=None,
+    n_primary_events=None,
+    n_competing_events=None,
+    landmark_time=None,
 ):
     """
     Generate a narrative for competing risks analysis.
@@ -348,6 +543,20 @@ def generate_cif_narrative(
         'Subdist HR', 'Lower 95%', 'Upper 95%', 'p-value'.
     style_name : str
         Journal style name.
+    detail_level : str
+        "Concise" or "Detailed".
+    event_of_interest : str or None
+        Name of the primary event (e.g. "relapse", "NRM").
+    competing_event : str or None
+        Name of the competing event (e.g. "death without relapse").
+    n_patients : int or None
+        Total patients.
+    n_primary_events : int or None
+        Number of primary events.
+    n_competing_events : int or None
+        Number of competing events.
+    landmark_time : float or None
+        If > 0, landmark analysis was applied.
 
     Returns
     -------
@@ -355,27 +564,41 @@ def generate_cif_narrative(
         Formatted narrative text.
     """
     style = JOURNAL_STYLES.get(style_name, JOURNAL_STYLES["Standard"])
+    concise = detail_level == "Concise"
+    event_label = event_of_interest or "the event of interest"
+    compete_label = competing_event or "competing events"
 
     # --- Methods ---
     text = f"{style['methods_header']}\n"
-    text += (
-        "Cumulative incidence functions (CIF) were estimated using the Aalen-Johansen method "
-        "to account for competing risks. The effect of covariates on the cumulative incidence "
-        "was assessed using the Fine-Gray subdistribution hazard model. "
-    )
+    if concise:
+        text += (
+            f"Cumulative incidence of {event_label} was estimated using the Aalen-Johansen method "
+            f"with {compete_label} as a competing risk."
+        )
+    else:
+        text += (
+            f"Cumulative incidence functions (CIF) for {event_label} were estimated using the "
+            f"Aalen-Johansen method, accounting for {compete_label} as a competing risk. "
+            "The effect of covariates on the subdistribution hazard was assessed using "
+            "the Fine-Gray model."
+        )
+
+    if landmark_time and landmark_time > 0:
+        text += f" Landmark analysis at {landmark_time:.0f} months was applied."
+
     text += "\n\n"
 
     # --- Results ---
     text += f"{style['results_header']}\n"
 
-    # Median time to incidence (lead with this)
-    if cif_median_data:
-        med_parts = []
-        for item in cif_median_data:
-            med_val = item['Median Time to Incidence']
-            ci_val = item['95% CI (Median)']
-            med_parts.append(f"{item['Group']}: {med_val} {ci_val}")
-        text += "Median time to incidence was " + "; ".join(med_parts) + ". "
+    # Cohort context
+    if n_patients:
+        parts = [f"{n_patients} patients"]
+        if n_primary_events is not None:
+            parts.append(f"{n_primary_events} {event_label} events")
+        if n_competing_events is not None:
+            parts.append(f"{n_competing_events} {compete_label}")
+        text += "Among " + ", ".join(parts) + ". "
 
     # Point-in-time cumulative incidence
     if cif_est_data and cif_target_time is not None:
@@ -385,22 +608,43 @@ def generate_cif_narrative(
             val = item.get(col_name, "N/A")
             ci = item.get("95% CI", "")
             pit_parts.append(f"{item['Group']} {val} (95% CI {ci})")
-        text += f"At {cif_target_time} months, the cumulative incidence was: " + "; ".join(pit_parts) + ".\n\n"
+        text += f"At {cif_target_time:.0f} months, the cumulative incidence of {event_label} was: "
+        text += "; ".join(pit_parts) + ". "
+
+    # Median time to incidence
+    if cif_median_data:
+        med_parts = []
+        for item in cif_median_data:
+            med_val = item['Median Time to Incidence']
+            ci_val = item['95% CI (Median)']
+            formatted = _format_median_ci(med_val, ci_val, style)
+            med_parts.append(f"{item['Group']}: {formatted}")
+        text += "Median time to incidence was " + "; ".join(med_parts) + "."
 
     # Fine-Gray regression with clinical interpretation
     if fg_summary is not None:
-        text += "**Fine-Gray regression** (subdistribution hazard model):\n"
-        for idx, row in fg_summary.iterrows():
-            shr = row['Subdist HR']
-            p = row['p-value']
-            ci_low = row['Lower 95%']
-            ci_high = row['Upper 95%']
-            ci_str = _format_ci(ci_low, ci_high, style)
-            p_str = _format_p(p, style)
-            interp = _interpret_shr(shr)
-
-            sig = _significance_phrase(p, style)
-            text += f"* **{idx}** was {sig} {interp} (SHR {shr:.2f}, 95% CI {ci_str}, {p_str}).\n"
+        text += "\n\n"
+        if concise:
+            for idx, row in fg_summary.iterrows():
+                shr = row['Subdist HR']
+                p = row['p-value']
+                ci_low = row['Lower 95%']
+                ci_high = row['Upper 95%']
+                ci_str = _format_ci(ci_low, ci_high, style)
+                p_str = _format_p(p, style)
+                text += f"* **{idx}**: SHR {shr:.2f}, 95% CI {ci_str}, {p_str}\n"
+        else:
+            text += "**Fine-Gray regression** (subdistribution hazard model):\n"
+            for idx, row in fg_summary.iterrows():
+                shr = row['Subdist HR']
+                p = row['p-value']
+                ci_low = row['Lower 95%']
+                ci_high = row['Upper 95%']
+                ci_str = _format_ci(ci_low, ci_high, style)
+                p_str = _format_p(p, style)
+                interp = _interpret_shr(shr)
+                sig = _significance_phrase(p, style)
+                text += f"* **{idx}** was {sig} {interp} (SHR {shr:.2f}, 95% CI {ci_str}, {p_str}).\n"
 
     return text
 
@@ -409,7 +653,7 @@ def generate_cif_narrative(
 # Diagnostic (2x2) Narrator
 # ============================================================
 
-def generate_diagnostic_narrative(res, style_name="Standard"):
+def generate_diagnostic_narrative(res, style_name="Standard", detail_level="Detailed"):
     """
     Generate a narrative for diagnostic accuracy analysis (2x2 table).
 
@@ -421,6 +665,8 @@ def generate_diagnostic_narrative(res, style_name="Standard"):
         ppv, ppv_l, ppv_h, npv, npv_l, npv_h, p_val.
     style_name : str
         Journal style name.
+    detail_level : str
+        "Concise" or "Detailed".
 
     Returns
     -------
@@ -428,17 +674,25 @@ def generate_diagnostic_narrative(res, style_name="Standard"):
         Formatted narrative text.
     """
     style = JOURNAL_STYLES.get(style_name, JOURNAL_STYLES["Standard"])
+    concise = detail_level == "Concise"
 
     # --- Methods ---
     text = f"{style['methods_header']}\n"
-    text += (
-        f"Diagnostic performance of **{res['test_var']}** was evaluated against "
-        f"**{res['ref_var']}** as the reference standard (N={res['n_total']}). "
-        "Sensitivity, specificity, positive predictive value (PPV), and negative predictive value (NPV) "
-        "were calculated from a 2x2 contingency table. "
-        "95% confidence intervals were estimated using the Wilson score method. "
-        "Association was assessed using the Pearson chi-square test."
-    )
+    if concise:
+        text += (
+            f"Diagnostic performance of **{res['test_var']}** was evaluated against "
+            f"**{res['ref_var']}** (N={res['n_total']}). "
+            "Sensitivity, specificity, PPV, and NPV were calculated with Wilson 95% CIs."
+        )
+    else:
+        text += (
+            f"Diagnostic performance of **{res['test_var']}** was evaluated against "
+            f"**{res['ref_var']}** as the reference standard (N={res['n_total']}). "
+            "Sensitivity, specificity, positive predictive value (PPV), and negative predictive value (NPV) "
+            "were calculated from a 2\u00d72 contingency table. "
+            "95% confidence intervals were estimated using the Wilson score method. "
+            "Association was assessed using the Pearson chi-square test."
+        )
     text += "\n\n"
 
     # --- Results ---
@@ -453,30 +707,39 @@ def generate_diagnostic_narrative(res, style_name="Standard"):
 
     # Performance metrics
     text += (
-        f"The sensitivity was {res['sens']:.1%} "
-        f"(95% CI {res['sens_l']:.1%}-{res['sens_h']:.1%}) "
-        f"and specificity was {res['spec']:.1%} "
-        f"(95% CI {res['spec_l']:.1%}-{res['spec_h']:.1%}). "
+        f"Sensitivity {res['sens']:.1%} "
+        f"(95% CI {res['sens_l']:.1%}{style.get('ci_sep', '-')}{res['sens_h']:.1%}), "
+        f"specificity {res['spec']:.1%} "
+        f"(95% CI {res['spec_l']:.1%}{style.get('ci_sep', '-')}{res['spec_h']:.1%})"
     )
 
-    # Interpret sensitivity/specificity
-    if res['sens'] >= 0.9 and res['spec'] >= 0.9:
-        text += "The test demonstrated excellent overall diagnostic accuracy. "
-    elif res['sens'] >= 0.9:
-        text += "The test was highly sensitive (good for ruling out) but had limited specificity. "
-    elif res['spec'] >= 0.9:
-        text += "The test was highly specific (good for ruling in) but had limited sensitivity. "
-    elif res['sens'] >= 0.7 and res['spec'] >= 0.7:
-        text += "The test showed moderate diagnostic performance. "
+    if concise:
+        text += (
+            f", PPV {res['ppv']:.1%} "
+            f"({res['ppv_l']:.1%}{style.get('ci_sep', '-')}{res['ppv_h']:.1%}), "
+            f"NPV {res['npv']:.1%} "
+            f"({res['npv_l']:.1%}{style.get('ci_sep', '-')}{res['npv_h']:.1%})."
+        )
     else:
-        text += "The test showed limited diagnostic utility in this population. "
+        text += ". "
+        # Interpret sensitivity/specificity
+        if res['sens'] >= 0.9 and res['spec'] >= 0.9:
+            text += "The test demonstrated excellent overall diagnostic accuracy. "
+        elif res['sens'] >= 0.9:
+            text += "The test was highly sensitive (good for ruling out) but had limited specificity. "
+        elif res['spec'] >= 0.9:
+            text += "The test was highly specific (good for ruling in) but had limited sensitivity. "
+        elif res['sens'] >= 0.7 and res['spec'] >= 0.7:
+            text += "The test showed moderate diagnostic performance. "
+        else:
+            text += "The test showed limited diagnostic utility in this population. "
 
-    text += (
-        f"Predictive values were: PPV {res['ppv']:.1%} "
-        f"({res['ppv_l']:.1%}-{res['ppv_h']:.1%}), "
-        f"NPV {res['npv']:.1%} "
-        f"({res['npv_l']:.1%}-{res['npv_h']:.1%})."
-    )
+        text += (
+            f"Predictive values were: PPV {res['ppv']:.1%} "
+            f"({res['ppv_l']:.1%}{style.get('ci_sep', '-')}{res['ppv_h']:.1%}), "
+            f"NPV {res['npv']:.1%} "
+            f"({res['npv_l']:.1%}{style.get('ci_sep', '-')}{res['npv_h']:.1%})."
+        )
 
     return text
 
@@ -485,7 +748,8 @@ def generate_diagnostic_narrative(res, style_name="Standard"):
 # Prognostic (C-Index) Narrator
 # ============================================================
 
-def generate_prognostic_narrative(res_list, style_name="Standard"):
+def generate_prognostic_narrative(res_list, style_name="Standard", detail_level="Detailed",
+                                  n_bootstrap=50):
     """
     Generate a narrative for prognostic model comparison (C-Index).
 
@@ -495,6 +759,10 @@ def generate_prognostic_narrative(res_list, style_name="Standard"):
         Each dict has 'Label', 'C-Index', 'Lower', 'Upper', 'Vars'.
     style_name : str
         Journal style name.
+    detail_level : str
+        "Concise" or "Detailed".
+    n_bootstrap : int
+        Number of bootstrap iterations used.
 
     Returns
     -------
@@ -502,19 +770,25 @@ def generate_prognostic_narrative(res_list, style_name="Standard"):
         Formatted narrative text.
     """
     style = JOURNAL_STYLES.get(style_name, JOURNAL_STYLES["Standard"])
+    concise = detail_level == "Concise"
 
     # --- Methods ---
     text = f"{style['methods_header']}\n"
-    text += (
-        "Discriminative ability was assessed using Harrell's concordance index (C-index) "
-        "derived from Cox proportional hazards models. 95% confidence intervals were estimated "
-        "using bootstrap resampling (n=50, normal approximation). "
-    )
+    if concise:
+        text += (
+            f"Harrell's C-index from Cox models was used to compare {len(res_list)} "
+            f"prognostic models (bootstrap 95% CIs, n={n_bootstrap})."
+        )
+    else:
+        text += (
+            "Discriminative ability was assessed using Harrell's concordance index (C-index) "
+            "derived from Cox proportional hazards models. 95% confidence intervals were estimated "
+            f"using bootstrap resampling (n={n_bootstrap}, normal approximation)."
+        )
     text += "\n\n"
 
     # --- Results ---
     text += f"{style['results_header']}\n"
-    text += f"We compared {len(res_list)} prognostic models:\n\n"
 
     # Find models
     r_a = next((r for r in res_list if r["Label"] == "Model A"), None)
@@ -524,25 +798,29 @@ def generate_prognostic_narrative(res_list, style_name="Standard"):
     # Report each model
     for r in res_list:
         ci_str = _format_ci(r['Lower'], r['Upper'], style)
-        interp = _interpret_c_index(r['C-Index'])
-        text += f"* **{r['Label']}** ({r.get('Vars', 'N/A')}): C-index {r['C-Index']:.3f} {ci_str} — {interp}.\n"
+        if concise:
+            text += f"* **{r['Label']}** ({r.get('Vars', 'N/A')}): C-index {r['C-Index']:.3f} {ci_str}\n"
+        else:
+            interp = _interpret_c_index(r['C-Index'])
+            text += f"* **{r['Label']}** ({r.get('Vars', 'N/A')}): C-index {r['C-Index']:.3f} {ci_str} \u2014 {interp}.\n"
 
-    # Deltas with interpretation
-    if r_a and r_b:
-        delta = r_b["C-Index"] - r_a["C-Index"]
-        direction = "improved" if delta > 0 else "decreased"
-        magnitude = _interpret_delta(abs(delta))
-        text += f"\nAdding covariates from Model A to B {direction} discrimination by {abs(delta):.3f} ({magnitude}). "
+    if not concise:
+        # Deltas with interpretation
+        if r_a and r_b:
+            delta = r_b["C-Index"] - r_a["C-Index"]
+            direction = "improved" if delta > 0 else "decreased"
+            magnitude = _interpret_delta(abs(delta))
+            text += f"\nAdding covariates from Model A to B {direction} discrimination by {abs(delta):.3f} ({magnitude}). "
 
-    if r_b and r_c:
-        delta = r_c["C-Index"] - r_b["C-Index"]
-        direction = "improved" if delta > 0 else "decreased"
-        magnitude = _interpret_delta(abs(delta))
-        text += f"Further addition (Model B to C) {direction} discrimination by {abs(delta):.3f} ({magnitude}). "
+        if r_b and r_c:
+            delta = r_c["C-Index"] - r_b["C-Index"]
+            direction = "improved" if delta > 0 else "decreased"
+            magnitude = _interpret_delta(abs(delta))
+            text += f"Further addition (Model B to C) {direction} discrimination by {abs(delta):.3f} ({magnitude}). "
 
     # Overall recommendation
     best = max(res_list, key=lambda x: x["C-Index"])
-    text += f"\n\nThe best performing model was **{best['Label']}** (C-index {best['C-Index']:.3f})."
+    text += f"\n\nBest model: **{best['Label']}** (C-index {best['C-Index']:.3f})."
 
     return text
 

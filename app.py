@@ -563,10 +563,23 @@ if df is not None:
             _style_keys,
             index=_style_idx,
             format_func=lambda x: narrator_style_labels[x],
-            help="Choose how the AI Narrator formats p-values and confidence intervals. Standard works for most journals; NEJM and Lancet follow their specific conventions."
+            help="Choose how the AI Narrator formats p-values and confidence intervals."
         )
     except Exception:
         narrator_style_name = "Standard"
+
+    narrator_detail_level = st.sidebar.radio(
+        "Narrator Detail",
+        ["Concise", "Detailed"],
+        index=1,
+        horizontal=True,
+        help="Concise: compact summary for posters/abstracts. Detailed: full prose for manuscripts."
+    )
+    narrator_event_name = st.sidebar.text_input(
+        "Endpoint Name",
+        value=_restored_default("narrator_event_name", "OS"),
+        help="e.g. OS, RFS, EFS, DFS, PFS. Used by the narrator to generate natural language."
+    )
 
     font_options = ["sans-serif", "serif", "monospace", "Arial", "Helvetica", "Times New Roman", "Courier New", "Verdana", "Comic Sans MS"]
     _r_font = _restored_default("selected_font", "sans-serif")
@@ -840,6 +853,7 @@ if df is not None:
             "event_col": event_col,
             "group_col": group_col,
             "narrator_style_name": narrator_style_name,
+            "narrator_event_name": narrator_event_name,
             "selected_font": selected_font,
             "title_fontsize": title_fontsize,
             "title_bold": title_bold,
@@ -1662,8 +1676,15 @@ if df is not None:
                         logrank_p=result.p_value,
                         cox_summary=cox_df,
                         median_data=median_data,
+                        point_estimates=est_data if 'est_data' in dir() else None,
+                        target_time=target_time if 'target_time' in dir() else None,
                         cox_method=cox_method_text,
                         style_name=narrator_style_name,
+                        detail_level=narrator_detail_level,
+                        event_name=narrator_event_name,
+                        n_patients=len(df_clean),
+                        n_events=int(df_clean[event_col].sum()),
+                        landmark_time=landmark_time if landmark_time > 0 else None,
                     )
                     st.success("Summary Generated (click the copy icon to copy):")
                     st.code(summary, language=None)
@@ -2250,6 +2271,9 @@ if df is not None:
                                         n_patients=n_patients,
                                         n_events=n_events,
                                         style_name=narrator_style_name,
+                                        detail_level=narrator_detail_level,
+                                        event_name=narrator_event_name,
+                                        landmark_time=landmark_time if landmark_time > 0 else None,
                                     )
                                     st.success("Summary Generated (click the copy icon to copy):")
                                     st.code(mv_narrative, language=None)
@@ -3084,13 +3108,34 @@ if df is not None:
                 # --- AI NARRATOR (CIF) ---
                 st.divider()
                 st.write("### 🤖 AI Result Narrator (Competing Risks)")
+                _col_ev1, _col_ev2 = st.columns(2)
+                with _col_ev1:
+                    _cif_event_name = st.text_input("Event of interest (for narrative)", value="relapse",
+                                                     key="cif_event_name",
+                                                     help="e.g. relapse, NRM, disease progression")
+                with _col_ev2:
+                    _cif_competing_name = st.text_input("Competing event (for narrative)", value="death without relapse",
+                                                         key="cif_competing_name",
+                                                         help="e.g. death without relapse, non-relapse mortality")
                 if st.button("Generate Summary Text (CIF)"):
+                     # Compute event counts for narrative context
+                     _cif_n_patients = len(cif_df) if cif_df is not None else None
+                     _cif_n_primary = int((cif_df[cif_event_col] == cif_event_of_interest).sum()) if cif_df is not None else None
+                     _cif_n_competing = int((cif_df[cif_event_col] == 2).sum()) if cif_df is not None else None
+
                      cif_narrative = narrator.generate_cif_narrative(
                          cif_median_data=cif_median_data if 'cif_median_data' in dir() else None,
                          cif_est_data=cif_est_data if 'cif_est_data' in dir() else None,
                          cif_target_time=cif_target_time if 'cif_target_time' in dir() else None,
                          fg_summary=fg_summary if 'fg_summary' in dir() else None,
                          style_name=narrator_style_name,
+                         detail_level=narrator_detail_level,
+                         event_of_interest=_cif_event_name,
+                         competing_event=_cif_competing_name,
+                         n_patients=_cif_n_patients,
+                         n_primary_events=_cif_n_primary,
+                         n_competing_events=_cif_n_competing,
+                         landmark_time=landmark_time if landmark_time > 0 else None,
                      )
                      st.success("Summary Generated (click the copy icon to copy):")
                      st.code(cif_narrative, language=None)
@@ -3818,7 +3863,7 @@ if df is not None:
                      st.divider()
                      st.subheader("🤖 AI Diagnostic Narrator")
                      if st.button("Generate Diagnostic Report"):
-                           narrative = narrator.generate_diagnostic_narrative(res, style_name=narrator_style_name)
+                           narrative = narrator.generate_diagnostic_narrative(res, style_name=narrator_style_name, detail_level=narrator_detail_level)
                            st.success("Report Generated (click the copy icon to copy):")
                            st.code(narrative, language=None)
 
@@ -3956,7 +4001,7 @@ if df is not None:
                       st.divider()
                       st.subheader("🤖 AI Prognostic Narrator")
                       if st.button("Generate Prognostic Report"):
-                            narrative = narrator.generate_prognostic_narrative(res_list, style_name=narrator_style_name)
+                            narrative = narrator.generate_prognostic_narrative(res_list, style_name=narrator_style_name, detail_level=narrator_detail_level)
                             st.success("Report Generated (click the copy icon to copy):")
                             st.code(narrative, language=None)
 
