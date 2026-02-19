@@ -40,15 +40,124 @@ add_estimate_labels = plotting.add_estimate_labels
 
 
 
-st.set_page_config(page_title="Survival Analysis Tool", layout="wide")
+st.set_page_config(page_title="EasySurv", layout="wide")
 
-st.title("EASYSURV: Interactive Survival Analysis Tool")
-st.caption(f"v{APP_VERSION}")
+# --- GLOBAL STYLES ---
+st.markdown("""
+<style>
+/* Sidebar refinement */
+section[data-testid="stSidebar"] [data-testid="stSidebarHeader"] {
+    padding-bottom: 0.5rem;
+}
+section[data-testid="stSidebar"] .stSubheader {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #555;
+    border-bottom: 1px solid #e0e0e0;
+    padding-bottom: 0.3rem;
+    margin-top: 1.2rem;
+}
+/* Version badge */
+.version-badge {
+    display: inline-block;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 0.15rem 0.6rem;
+    border-radius: 12px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
+    margin-left: 0.5rem;
+}
+/* Landing page hero */
+.hero-container {
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    border-radius: 16px;
+    padding: 3rem 2rem 2.5rem 2rem;
+    text-align: center;
+    margin-bottom: 2rem;
+    border: 1px solid #e2e8f0;
+}
+.hero-container h2 {
+    margin-bottom: 0.3rem;
+    color: #1a202c;
+}
+.hero-container h4 {
+    color: #4a5568;
+    font-weight: 400;
+    margin-bottom: 1rem;
+}
+.hero-container p {
+    color: #718096;
+    font-size: 1rem;
+    max-width: 600px;
+    margin: 0 auto;
+}
+/* Feature cards on landing */
+.feature-card {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 1.5rem;
+    text-align: center;
+    height: 100%;
+    transition: box-shadow 0.2s;
+}
+.feature-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+.feature-card .icon {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+.feature-card h4 {
+    margin: 0.5rem 0 0.3rem 0;
+    color: #2d3748;
+    font-size: 0.95rem;
+}
+.feature-card p {
+    color: #718096;
+    font-size: 0.85rem;
+    margin: 0;
+}
+/* Sidebar footer branding */
+.sidebar-footer {
+    text-align: center;
+    padding: 1rem 0 0.5rem 0;
+    color: #a0aec0;
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+}
+.sidebar-footer a {
+    color: #667eea;
+    text-decoration: none;
+}
+/* Security note — more subtle */
+.security-note {
+    font-size: 0.75rem;
+    color: #a0aec0;
+    padding: 0.4rem 0;
+    text-align: center;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# --- HEADER ---
+st.markdown(
+    f'# EasySurv <span class="version-badge">v{APP_VERSION}</span>',
+    unsafe_allow_html=True
+)
+st.caption("Publication-quality survival analysis without code")
 
 # Sidebar - Configuration
-st.sidebar.header("Data Upload & Configuration")
+st.sidebar.header("EasySurv")
 
-st.sidebar.warning("⚠️ **Security Note**: Do not upload identifiable patient data / PHI. This tool runs locally/in-memory, but standard data privacy hygiene applies.")
+st.sidebar.markdown(
+    '<p class="security-note">Your data stays local. Do not upload identifiable PHI.</p>',
+    unsafe_allow_html=True
+)
 uploaded_file = st.sidebar.file_uploader("Upload Clinical Data (CSV/Excel)", type=["csv", "xlsx"])
 
 # --- SESSION MANAGEMENT ---
@@ -119,30 +228,32 @@ if uploaded_file:
 else:
     # --- LANDING PAGE ---
     st.markdown("""
-    <style>
-    .hero-box {
-        padding: 2rem;
-        background-color: #f0f2f6; 
-        border-radius: 10px;
-        margin-bottom: 2rem;
-        text-align: center;
-    }
-    </style>
+    <div class="hero-container">
+        <h2>Welcome to EasySurv</h2>
+        <h4>Survival analysis for everyone</h4>
+        <p>Publication-quality Kaplan-Meier, Cox Regression, and Competing Risks analysis — without writing a single line of code.</p>
+    </div>
     """, unsafe_allow_html=True)
-    
-    st.markdown('<div class="hero-box">', unsafe_allow_html=True)
-    st.markdown("## 👋 Welcome to EasySurv")
-    st.markdown("### Survival Analysis for everyone")
-    st.markdown("Perform publication-quality Kaplan-Meier, Cox Regression, and Competing Risks analysis in seconds without writing a single line of code.")
-    st.markdown('</div>', unsafe_allow_html=True)
-    
+
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.info("**📊 Interactive Plots**\n\nCreate publication-quality curves with aligned risk tables and custom themes.")
+        st.markdown("""<div class="feature-card">
+            <div class="icon">📊</div>
+            <h4>Interactive Plots</h4>
+            <p>Publication-quality curves with aligned risk tables, estimate labels, and custom themes.</p>
+        </div>""", unsafe_allow_html=True)
     with col2:
-        st.success("**🤖 AI Narrator**\n\nGet instant natural language summaries of your P-values and Hazard Ratios.")
+        st.markdown("""<div class="feature-card">
+            <div class="icon">🤖</div>
+            <h4>AI Narrator</h4>
+            <p>Instant natural language summaries of P-values and Hazard Ratios in your journal's style.</p>
+        </div>""", unsafe_allow_html=True)
     with col3:
-        st.warning("**🧬 Biomarker Optimum Threshold**\n\nAutomatically find optimal cutoffs and visualize correlations.")
+        st.markdown("""<div class="feature-card">
+            <div class="icon">🧬</div>
+            <h4>Biomarker Thresholds</h4>
+            <p>Automatically find optimal cutoffs and visualize correlations with survival.</p>
+        </div>""", unsafe_allow_html=True)
 
     st.divider()
     
@@ -364,11 +475,10 @@ if df is not None:
             df = df_filtered
 
     st.subheader("Data Preview")
-    st.dataframe(df.head())
+    st.dataframe(df.head(), use_container_width=True)
 
     # --- DATA VALIDATION ---
-    # Run validation checks on the uploaded data to catch issues early
-    with st.expander("Data Validation Report", expanded=False):
+    with st.expander("Data Validation", expanded=False):
         validation_issues = validate_dataset(df)
         if not validation_issues:
             st.success("No issues detected in the dataset.")
@@ -387,7 +497,7 @@ if df is not None:
     # Column Selection
     columns = df.columns.tolist()
 
-    st.sidebar.subheader("Variable Selection")
+    st.sidebar.subheader("Variables")
 
     # Time and Event columns
     # Smart Defaults: session restore > demo defaults > intelligent column matching
@@ -438,9 +548,9 @@ if df is not None:
 
     # --- SIDEBAR CONFIGURATION ---
     st.sidebar.header("Configuration")
-    
+
     # 1. Global Aesthetics
-    st.sidebar.subheader("Global Theme & Typography")
+    st.sidebar.subheader("Typography & Style")
 
     # Narrator Journal Style
     try:
@@ -477,7 +587,7 @@ if df is not None:
     p_val_fontsize_cif = 12   # Default, overridden below in sidebar
 
     # Global Plot Configuration (Elements affecting all plots)
-    st.sidebar.subheader("Global Plot Configuration")
+    st.sidebar.subheader("Plot Elements")
     show_censored = st.sidebar.checkbox("Show Censored Ticks", value=_restored_default("show_censored", True))
     show_ci = st.sidebar.checkbox("Show 95% CI", value=_restored_default("show_ci", True))
     show_risk_table = st.sidebar.checkbox("Show At-Risk Table", value=_restored_default("show_risk_table", True))
@@ -689,7 +799,7 @@ if df is not None:
                     cif_annotations.append({'text': c_txt, 'x': c_x, 'y': c_y, 'size': c_sz, 'box': c_box})
         
     # Color Theme Selection
-    st.sidebar.subheader("Color Theme")
+    st.sidebar.subheader("Color Palette")
     
     # Use themes from utils
     all_themes = utils.all_themes
@@ -716,7 +826,7 @@ if df is not None:
     
     # --- SAVE SESSION ---
     st.sidebar.divider()
-    st.sidebar.subheader("Save Session")
+    st.sidebar.subheader("Session")
     session_notes = st.sidebar.text_input(
         "Session Notes (optional)",
         value="",
@@ -771,7 +881,7 @@ if df is not None:
 
     # --- REPORT GENERATOR ---
     st.sidebar.divider()
-    st.sidebar.subheader("Report Generator")
+    st.sidebar.subheader("Export")
     if st.sidebar.button("Generate HTML Report"):
         import base64
         from datetime import datetime
@@ -854,7 +964,7 @@ if df is not None:
         </head>
         <body>
             <h1>EasySurv Analysis Report</h1>
-            <p class="meta">Generated: {timestamp} | EasySurv v2.0</p>
+            <p class="meta">Generated: {timestamp} | EasySurv v{APP_VERSION}</p>
 
             <div class="section">
                 <h2>1. Dataset Overview</h2>
@@ -898,7 +1008,14 @@ if df is not None:
         href = f'<a href="data:text/html;base64,{b64_html}" download="easysurv_report.html" target="_blank" style="text-decoration:none; color:white; background-color:#ff4b4b; padding:8px 16px; border-radius:5px;">Download Report (HTML)</a>'
         st.sidebar.markdown(href, unsafe_allow_html=True)
         st.sidebar.success("Report Ready! Click above.")
-    
+
+    # --- SIDEBAR FOOTER ---
+    st.sidebar.divider()
+    st.sidebar.markdown(
+        f'<div class="sidebar-footer">EasySurv v{APP_VERSION}<br>Built for clinicians, by clinicians</div>',
+        unsafe_allow_html=True
+    )
+
     custom_colors = {}
     # Data Cleaning for NaNs
     df_clean = None
@@ -964,7 +1081,7 @@ if df is not None:
     if group_col != "None" and df_clean is not None:
         # Reordering Widget (Visible)
         st.sidebar.divider()
-        st.sidebar.subheader("Order & Legend")
+        st.sidebar.subheader("Groups & Legend")
         unique_raw = sorted(df_clean[group_col].dropna().unique())
         groups_ordered = st.sidebar.multiselect("Reorder Groups", unique_raw, default=unique_raw, help="Drag and drop to reorder groups in the Legend & Risk Table.")
         
@@ -986,12 +1103,23 @@ if df is not None:
     # Analysis
     if time_col and event_col and df_clean is not None:
         st.divider()
-        st.header("Survival Analysis")
+        st.header("Analysis")
         
         if landmark_info:
             st.info(landmark_info)
 
-        tab1, tab2, tab_risk, tab3, tab_composite, tab4, tab5, tab6, tab7, tab8 = st.tabs(["Univariable (KM)", "Multivariable (Cox)", "Risk System Based on HR", "Competing Risks (CIF)", "📊 Composite Figure", "🧬 Biomarker Optimum Threshold", "🧪 Variable Generation", "🔥 Correlations", "🎯 Diagnostic & Concordance", "📚 Methodology"])
+        tab1, tab2, tab_risk, tab3, tab_composite, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+            "Kaplan-Meier",
+            "Cox Regression",
+            "Risk Scoring",
+            "Competing Risks",
+            "Composite Figure",
+            "Biomarker Threshold",
+            "Variable Builder",
+            "Correlations",
+            "Diagnostics",
+            "Methodology",
+        ])
 
         with tab1:
         
