@@ -653,6 +653,7 @@ if df is not None:
         legend_style_main = st.radio("Legend Style (Main)", ["Standard", "Top bar"],
                                       index=0, horizontal=True, key="legend_style_main",
                                       help="Standard: inside plot. Top bar: horizontal bar above the plot area (journal style).")
+        topbar_y_main = 1.04  # default, overridden below if Top bar
         if legend_style_main == "Standard":
             show_legend_box_main = st.checkbox("Box Legend (Main)", value=True)
             leg_x_main = st.slider("Legend X (Main)", 0.0, 1.0, 0.8)
@@ -661,6 +662,9 @@ if df is not None:
             show_legend_box_main = False
             leg_x_main = 0.8
             leg_y_main = 0.9
+            topbar_y_main = st.slider("Top Bar Position (Main)", 0.98, 1.12, 1.04, 0.01,
+                                       key="topbar_y_main",
+                                       help="Adjust vertical position of the top bar legend. Higher = more space above plot.")
         
         st.markdown("### P-value")
         show_p_val_plot = st.checkbox("Show P-value (Main)", value=False)
@@ -747,6 +751,7 @@ if df is not None:
         legend_style_cif = st.radio("Legend Style (CIF)", ["Standard", "Top bar"],
                                      index=0, horizontal=True, key="legend_style_cif",
                                      help="Standard: inside plot. Top bar: horizontal bar above the plot area (journal style).")
+        topbar_y_cif = 1.04  # default, overridden below if Top bar
         if legend_style_cif == "Standard":
             show_legend_box_cif = st.checkbox("Box Legend (CIF)", value=True)
             leg_x_cif = st.slider("Legend X (CIF)", 0.0, 1.0, 0.8)
@@ -755,6 +760,9 @@ if df is not None:
             show_legend_box_cif = False
             leg_x_cif = 0.8
             leg_y_cif = 0.8
+            topbar_y_cif = st.slider("Top Bar Position (CIF)", 0.98, 1.12, 1.04, 0.01,
+                                      key="topbar_y_cif",
+                                      help="Adjust vertical position of the top bar legend. Higher = more space above plot.")
         
         st.markdown("### P-value")
         show_p_val_plot_cif = st.checkbox("Show P-value (CIF)", value=False)
@@ -1299,8 +1307,9 @@ if df is not None:
                             ax.get_legend().remove()
                         handles, labels = ax.get_legend_handles_labels()
                         if handles:
+                            fig.subplots_adjust(top=0.88)
                             fig.legend(handles, labels, loc='upper center',
-                                       bbox_to_anchor=(0.5, 0.98), ncol=len(handles),
+                                       bbox_to_anchor=(0.5, topbar_y_main), ncol=len(handles),
                                        fontsize=legend_fontsize, frameon=False,
                                        handlelength=2.0, columnspacing=1.5)
                     else:
@@ -1775,8 +1784,9 @@ if df is not None:
                             ax.get_legend().remove()
                         handles, labels = ax.get_legend_handles_labels()
                         if handles:
+                            fig.subplots_adjust(top=0.88)
                             fig.legend(handles, labels, loc='upper center',
-                                       bbox_to_anchor=(0.5, 0.98), ncol=len(handles),
+                                       bbox_to_anchor=(0.5, topbar_y_main), ncol=len(handles),
                                        fontsize=legend_fontsize, frameon=False,
                                        handlelength=2.0, columnspacing=1.5)
                     else:
@@ -2963,8 +2973,9 @@ if df is not None:
                             ax_cif.get_legend().remove()
                         handles, labels = ax_cif.get_legend_handles_labels()
                         if handles:
+                            fig_cif.subplots_adjust(top=0.88)
                             fig_cif.legend(handles, labels, loc='upper center',
-                                           bbox_to_anchor=(0.5, 0.98), ncol=len(handles),
+                                           bbox_to_anchor=(0.5, topbar_y_cif), ncol=len(handles),
                                            fontsize=legend_fontsize, frameon=False,
                                            handlelength=2.0, columnspacing=1.5)
                     else:
@@ -3009,8 +3020,9 @@ if df is not None:
                             ax_cif.get_legend().remove()
                         handles, labels = ax_cif.get_legend_handles_labels()
                         if handles:
+                            fig_cif.subplots_adjust(top=0.88)
                             fig_cif.legend(handles, labels, loc='upper center',
-                                           bbox_to_anchor=(0.5, 0.98), ncol=len(handles),
+                                           bbox_to_anchor=(0.5, topbar_y_cif), ncol=len(handles),
                                            fontsize=legend_fontsize, frameon=False,
                                            handlelength=2.0, columnspacing=1.5)
                     else:
