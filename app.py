@@ -650,9 +650,17 @@ if df is not None:
         
         st.markdown("### Legend")
         show_legend_main = st.checkbox("Show Legend (Main)", value=True)
-        show_legend_box_main = st.checkbox("Box Legend (Main)", value=True)
-        leg_x_main = st.slider("Legend X (Main)", 0.0, 1.0, 0.8)
-        leg_y_main = st.slider("Legend Y (Main)", 0.0, 1.0, 0.9)
+        legend_style_main = st.radio("Legend Style (Main)", ["Standard", "Top bar"],
+                                      index=0, horizontal=True, key="legend_style_main",
+                                      help="Standard: inside plot. Top bar: horizontal bar above the plot area (journal style).")
+        if legend_style_main == "Standard":
+            show_legend_box_main = st.checkbox("Box Legend (Main)", value=True)
+            leg_x_main = st.slider("Legend X (Main)", 0.0, 1.0, 0.8)
+            leg_y_main = st.slider("Legend Y (Main)", 0.0, 1.0, 0.9)
+        else:
+            show_legend_box_main = False
+            leg_x_main = 0.8
+            leg_y_main = 0.9
         
         st.markdown("### P-value")
         show_p_val_plot = st.checkbox("Show P-value (Main)", value=False)
@@ -736,9 +744,17 @@ if df is not None:
         
         st.markdown("### Legend")
         show_legend_cif = st.checkbox("Show Legend (CIF)", value=True)
-        show_legend_box_cif = st.checkbox("Box Legend (CIF)", value=True)
-        leg_x_cif = st.slider("Legend X (CIF)", 0.0, 1.0, 0.8)
-        leg_y_cif = st.slider("Legend Y (CIF)", 0.0, 1.0, 0.8)
+        legend_style_cif = st.radio("Legend Style (CIF)", ["Standard", "Top bar"],
+                                     index=0, horizontal=True, key="legend_style_cif",
+                                     help="Standard: inside plot. Top bar: horizontal bar above the plot area (journal style).")
+        if legend_style_cif == "Standard":
+            show_legend_box_cif = st.checkbox("Box Legend (CIF)", value=True)
+            leg_x_cif = st.slider("Legend X (CIF)", 0.0, 1.0, 0.8)
+            leg_y_cif = st.slider("Legend Y (CIF)", 0.0, 1.0, 0.8)
+        else:
+            show_legend_box_cif = False
+            leg_x_cif = 0.8
+            leg_y_cif = 0.8
         
         st.markdown("### P-value")
         show_p_val_plot_cif = st.checkbox("Show P-value (CIF)", value=False)
@@ -1277,11 +1293,22 @@ if df is not None:
                 
                 # Legend Customization
                 if show_legend_main:
-                     ax.legend(fontsize=legend_fontsize, loc=(leg_x_main, leg_y_main), frameon=show_legend_box_main)
+                    if legend_style_main == "Top bar":
+                        # Remove default legend, add horizontal bar above plot
+                        if ax.get_legend():
+                            ax.get_legend().remove()
+                        handles, labels = ax.get_legend_handles_labels()
+                        if handles:
+                            fig.legend(handles, labels, loc='upper center',
+                                       bbox_to_anchor=(0.5, 0.98), ncol=len(handles),
+                                       fontsize=legend_fontsize, frameon=False,
+                                       handlelength=2.0, columnspacing=1.5)
+                    else:
+                        ax.legend(fontsize=legend_fontsize, loc=(leg_x_main, leg_y_main), frameon=show_legend_box_main)
                 else:
                      if ax.get_legend():
                          ax.get_legend().remove()
-                
+
                 if main_annotations:
                     for ann in main_annotations:
                         bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if ann['box'] else None
@@ -1743,11 +1770,21 @@ if df is not None:
                 ax.tick_params(axis='both', which='major', labelsize=axes_fontsize)
                 
                 if show_legend_main:
-                     ax.legend(fontsize=legend_fontsize, loc=(leg_x_main, leg_y_main), frameon=show_legend_box_main)
+                    if legend_style_main == "Top bar":
+                        if ax.get_legend():
+                            ax.get_legend().remove()
+                        handles, labels = ax.get_legend_handles_labels()
+                        if handles:
+                            fig.legend(handles, labels, loc='upper center',
+                                       bbox_to_anchor=(0.5, 0.98), ncol=len(handles),
+                                       fontsize=legend_fontsize, frameon=False,
+                                       handlelength=2.0, columnspacing=1.5)
+                    else:
+                        ax.legend(fontsize=legend_fontsize, loc=(leg_x_main, leg_y_main), frameon=show_legend_box_main)
                 else:
                      if ax.get_legend():
                          ax.get_legend().remove()
-                
+
                 if show_p_val_plot and p_value_text:
                      bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box_main else None
                      ax.text(pval_x_main, pval_y_main, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize_main)
@@ -2919,13 +2956,23 @@ if df is not None:
                 fig_cif.patch.set_facecolor(plot_bgcolor)
                 ax_cif.set_facecolor(plot_bgcolor)
                 
-                # Add Risk Table (Point-in-Time)
+                # Legend
                 if show_legend_cif:
-                     ax_cif.legend(fontsize=legend_fontsize, loc=(leg_x_cif, leg_y_cif), frameon=show_legend_box_cif)
+                    if legend_style_cif == "Top bar":
+                        if ax_cif.get_legend():
+                            ax_cif.get_legend().remove()
+                        handles, labels = ax_cif.get_legend_handles_labels()
+                        if handles:
+                            fig_cif.legend(handles, labels, loc='upper center',
+                                           bbox_to_anchor=(0.5, 0.98), ncol=len(handles),
+                                           fontsize=legend_fontsize, frameon=False,
+                                           handlelength=2.0, columnspacing=1.5)
+                    else:
+                        ax_cif.legend(fontsize=legend_fontsize, loc=(leg_x_cif, leg_y_cif), frameon=show_legend_box_cif)
                 else:
                      if ax_cif.get_legend():
                          ax_cif.get_legend().remove()
-                
+
                 if show_p_val_plot_cif and fg_p_value_text:
                      bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box_cif else None
                      ax_cif.text(pval_x_cif, pval_y_cif, fg_p_value_text, transform=ax_cif.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize_cif)
@@ -2957,7 +3004,17 @@ if df is not None:
                 ax_cif.tick_params(axis='both', which='major', labelsize=axes_fontsize)
                 
                 if show_legend_cif:
-                     ax_cif.legend(fontsize=legend_fontsize, loc=(leg_x_cif, leg_y_cif), frameon=show_legend_box_cif)
+                    if legend_style_cif == "Top bar":
+                        if ax_cif.get_legend():
+                            ax_cif.get_legend().remove()
+                        handles, labels = ax_cif.get_legend_handles_labels()
+                        if handles:
+                            fig_cif.legend(handles, labels, loc='upper center',
+                                           bbox_to_anchor=(0.5, 0.98), ncol=len(handles),
+                                           fontsize=legend_fontsize, frameon=False,
+                                           handlelength=2.0, columnspacing=1.5)
+                    else:
+                        ax_cif.legend(fontsize=legend_fontsize, loc=(leg_x_cif, leg_y_cif), frameon=show_legend_box_cif)
                 else:
                      if ax_cif.get_legend():
                          ax_cif.get_legend().remove()
