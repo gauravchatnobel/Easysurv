@@ -61,6 +61,7 @@ JOURNAL_STYLES = {
         "results_header": "**Results**",
         "p_capitalize": True,
         "p_leading_zero": False,
+        "p_italic": True,
     },
     "Blood": {
         "label": "Blood (ASH)",
@@ -73,6 +74,7 @@ JOURNAL_STYLES = {
         "results_header": "**Results**",
         "p_capitalize": True,
         "p_leading_zero": False,
+        "p_italic": True,
     },
 }
 
@@ -138,8 +140,11 @@ def _format_ci(low, high, style):
 
 
 def _format_p(p, style):
-    """Format p-value according to journal style."""
-    return style["p_format"](p)
+    """Format p-value according to journal style (with markdown italic if applicable)."""
+    base = style["p_format"](p)
+    if style.get("p_italic") and base.startswith("P"):
+        base = "*P*" + base[1:]
+    return base
 
 
 def _significance_phrase(p, style):
@@ -863,3 +868,40 @@ def get_available_styles():
 def get_style_labels():
     """Return dict of style_name -> display_label for UI."""
     return {k: v["label"] for k, v in JOURNAL_STYLES.items()}
+
+
+def format_p_value(p, style_name="Standard", context="text"):
+    """
+    Format a p-value according to the selected journal style.
+
+    Public API for use by app.py in plots, tables, and inline text.
+
+    Parameters
+    ----------
+    p : float
+        The p-value.
+    style_name : str
+        Journal style name (e.g. "Standard", "JCO", "Blood").
+    context : str
+        "text" — for Streamlit text / markdown (uses *italic* for JCO/Blood P).
+        "plot" — for matplotlib text (uses $\\it{P}$ mathtext for italic).
+        "table" — for table display (plain text, italic not applicable).
+
+    Returns
+    -------
+    str
+        Formatted p-value string.
+    """
+    style = JOURNAL_STYLES.get(style_name, JOURNAL_STYLES["Standard"])
+    base = style["p_format"](p)
+
+    if style.get("p_italic") and context == "text":
+        # Markdown italic: replace leading "P" with "*P*"
+        if base.startswith("P"):
+            base = "*P*" + base[1:]
+    elif style.get("p_italic") and context == "plot":
+        # Matplotlib mathtext italic
+        if base.startswith("P"):
+            base = "$\\it{P}$" + base[1:]
+
+    return base

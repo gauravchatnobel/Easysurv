@@ -36,6 +36,7 @@ compute_fine_gray_weights = statistics.compute_fine_gray_weights
 add_at_risk_counts = plotting.add_at_risk_counts
 add_survival_annotations = plotting.add_survival_annotations
 add_estimate_labels = plotting.add_estimate_labels
+format_p_value = narrator.format_p_value
 
 
 
@@ -1157,10 +1158,7 @@ if df is not None:
                 # Calculate Log-Rank P-value (Robust)
                 try:
                     res = multivariate_logrank_test(df_clean[time_col], df_clean[group_col], df_clean[event_col])
-                    if res.p_value < 0.0001:
-                        p_value_text = "p < 0.0001"
-                    else:
-                        p_value_text = f"p = {res.p_value:.4f}"
+                    p_value_text = format_p_value(res.p_value, narrator_style_name, context="plot")
                 except:
                     p_value_text = None
 
@@ -1399,7 +1397,8 @@ if df is not None:
                 # Logrank Test
                 if len(groups) >= 2:
                     result = multivariate_logrank_test(df_clean[time_col], df_clean[group_col], df_clean[event_col])
-                    st.write(f"**Log-Rank Test p-value**: {result.p_value:.4f}")
+                    _lr_p_formatted = format_p_value(result.p_value, narrator_style_name, context="text")
+                    st.write(f"**Log-Rank Test**: {_lr_p_formatted}")
             
                 # Cox PH (Hazard Ratio)
                 st.subheader("Cox Proportional Hazards (Hazard Ratios)")
@@ -1476,14 +1475,21 @@ if df is not None:
                         'p': 'p-value'
                     })
                 
+                    # Format p-value column per journal style for display
+                    _display_df = summary_df.copy()
+                    _display_df['p-value'] = _display_df['p-value'].apply(lambda p: format_p_value(p, narrator_style_name, context="table"))
                     def _highlight_significant(row):
-                        if row['p-value'] < 0.05:
+                        # Check original numeric p for highlighting
+                        orig_p = summary_df.loc[row.name, 'p-value'] if row.name in summary_df.index else 1.0
+                        if orig_p < 0.05:
                             return ['background-color: rgba(0, 180, 0, 0.1)'] * len(row)
                         return [''] * len(row)
-                    st.dataframe(summary_df.style.format("{:.3f}").apply(_highlight_significant, axis=1))
+                    st.dataframe(_display_df.style.format(
+                        {c: "{:.3f}" for c in _display_df.columns if c != 'p-value'}
+                    ).apply(_highlight_significant, axis=1))
                     st.caption("🟩 Green: statistically significant (p<0.05)")
 
-                    # Save for AI Narrator
+                    # Save for AI Narrator (keep original numeric values)
                     st.session_state['uv_cox_summary'] = summary_df
                     st.session_state['uv_cox_method'] = "Standard Cox Proportional Hazards regression models"
                     
@@ -1513,7 +1519,11 @@ if df is not None:
                             'p': 'p-value'
                         })
                     
-                        st.dataframe(summary_df.style.format("{:.3f}"))
+                        _display_df2 = summary_df.copy()
+                        _display_df2['p-value'] = _display_df2['p-value'].apply(lambda p: format_p_value(p, narrator_style_name, context="table"))
+                        st.dataframe(_display_df2.style.format(
+                            {c: "{:.3f}" for c in _display_df2.columns if c != 'p-value'}
+                        ))
                         st.session_state['uv_cox_summary'] = summary_df
                         st.session_state['uv_cox_method'] = "Penalized Cox Regression (Ridge, Lambda=0.1) due to convergence failure in standard Cox"
                         
@@ -1643,8 +1653,11 @@ if df is not None:
                     # summary_df contains p-values
                     pairwise_df = results.summary
                     
-                    # Formatting for display
-                    st.dataframe(pairwise_df.style.format({"p": "{:.4f}"}))
+                    # Formatting for display — use journal style for p-value column
+                    _display_pair = pairwise_df.copy()
+                    if 'p' in _display_pair.columns:
+                        _display_pair['p'] = _display_pair['p'].apply(lambda p: format_p_value(p, narrator_style_name, context="table"))
+                    st.dataframe(_display_pair)
                     
                     # Download Pairwise Table
                     csv_pair = pairwise_df.to_csv().encode('utf-8')
@@ -2193,7 +2206,9 @@ if df is not None:
                             if use_penalizer:
                                 st.caption(f"Model: Penalized Cox (Lambda={final_penalizer:.4f}, L1 Ratio={final_l1})")
                                 
-                            # Identify unstable + significant rows for highlighting
+                            # Format p-value column per journal style for display
+                            _display_mv = summary_mv.copy()
+                            _display_mv['p-value'] = _display_mv['p-value'].apply(lambda p: format_p_value(p, narrator_style_name, context="table"))
                             def highlight_unstable(row):
                                 try:
                                     coef = cph_mv.params_[row.name]
@@ -2202,11 +2217,14 @@ if df is not None:
                                         return ['background-color: rgba(255, 0, 0, 0.1)'] * len(row)
                                 except:
                                     pass
-                                if row['p-value'] < 0.05:
+                                orig_p = summary_mv.loc[row.name, 'p-value'] if row.name in summary_mv.index else 1.0
+                                if orig_p < 0.05:
                                     return ['background-color: rgba(0, 180, 0, 0.1)'] * len(row)
                                 return [''] * len(row)
 
-                            st.dataframe(summary_mv.style.format("{:.3f}").apply(highlight_unstable, axis=1))
+                            st.dataframe(_display_mv.style.format(
+                                {c: "{:.3f}" for c in _display_mv.columns if c != 'p-value'}
+                            ).apply(highlight_unstable, axis=1))
                             
                             # Add legend
                             legend_parts = []
@@ -2774,7 +2792,8 @@ if df is not None:
                                   # Log-Likelihood Ratio Test against null model
                                   res_fg = cph_fg.log_likelihood_ratio_test()
                                   if show_p_val_plot_cif:
-                                      fg_p_value_text = f"Fine-Gray (LRT) p = {res_fg.p_value:.4f}"
+                                      _fg_p_fmt = format_p_value(res_fg.p_value, narrator_style_name, context="plot")
+                                      fg_p_value_text = f"Fine-Gray (LRT) {_fg_p_fmt}"
                                   
                                   # 5. Extract HR Table
                                   fg_summary = cph_fg.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']]
@@ -2787,7 +2806,8 @@ if df is not None:
                                   temp_evt = (cif_df[cif_event_col] == cif_event_of_interest).astype(int)
                                   res_cif = multivariate_logrank_test(cif_df[cif_time_col], cif_df[group_col], temp_evt)
                                   if show_p_val_plot_cif:
-                                    fg_p_value_text = f"CS-LogRank p = {res_cif.p_value:.4f}"
+                                    _cs_p_fmt = format_p_value(res_cif.p_value, narrator_style_name, context="plot")
+                                    fg_p_value_text = f"CS-LogRank {_cs_p_fmt}"
                              except:
                                  pass
                 
@@ -2979,7 +2999,12 @@ if df is not None:
                 if fg_summary is not None:
                     st.write("### Subdistribution Hazard Ratios (Fine-Gray)")
                     st.write("Covariate effect on the cumulative incidence of the event of interest, accounting for competing risks.")
-                    st.dataframe(fg_summary.style.format("{:.3f}"))
+                    _display_fg = fg_summary.copy()
+                    if 'p-value' in _display_fg.columns:
+                        _display_fg['p-value'] = _display_fg['p-value'].apply(lambda p: format_p_value(p, narrator_style_name, context="table"))
+                    st.dataframe(_display_fg.style.format(
+                        {c: "{:.3f}" for c in _display_fg.columns if c != 'p-value'}
+                    ))
                 
                 # Point-in-Time Cumulative Incidence Estimates
                 st.subheader("Point-in-Time Cumulative Incidence")
@@ -3308,7 +3333,7 @@ if df is not None:
                          p_val = summ['p']
                          
                          st.metric("Hazard Ratio (Continuous)", f"{hr:.3f}", delta=None)
-                         st.metric("P-value (Wald Test)", f"{p_val:.4f}", delta_color="inverse" if p_val < 0.05 else "normal")
+                         st.metric("P-value (Wald Test)", format_p_value(p_val, narrator_style_name, context="table"), delta_color="inverse" if p_val < 0.05 else "normal")
                          
                          if p_val < 0.05:
                              st.success(f"**{bio_col}** is significantly associated with outcome as a continuous variable.")
@@ -3420,7 +3445,7 @@ if df is not None:
                                      st.write(f"Specificity: {best_spec:.2f}")
                                  with col_roc_stats2:
                                       if not np.isnan(roc_p_val):
-                                          st.metric("Survival Separation P-value", f"{roc_p_val:.5f}", help="P-value from Log-Rank test using this cutoff.")
+                                          st.metric("Survival Separation P-value", format_p_value(roc_p_val, narrator_style_name, context="table"), help="P-value from Log-Rank test using this cutoff.")
                                       else:
                                           st.write("P-value: N/A")
                                  
@@ -3490,7 +3515,7 @@ if df is not None:
                          progress_bar.empty()
                          
                          if best_cut is not None:
-                             st.success(f"**Optimal Cutoff Found:** {best_cut:.2f} (p = {best_p:.5f})")
+                             st.success(f"**Optimal Cutoff Found:** {best_cut:.2f} ({format_p_value(best_p, narrator_style_name, context='text')})")
                              st.warning(
                                  "**Methodological Note:** This cutoff was selected by testing multiple thresholds and choosing "
                                  "the one with the smallest p-value. This is an **exploratory, data-driven** approach that inflates "
