@@ -2829,12 +2829,32 @@ if df is not None:
                                              duration_col='stop', entry_col='start', event_col='status', weights_col='weight', 
                                              cluster_col='id', robust=True)
                                   
-                                  # 4. Extract P-value (Gray's Test Equivalent)
-                                  # Log-Likelihood Ratio Test against null model
-                                  res_fg = cph_fg.log_likelihood_ratio_test()
+                                  # 4. Extract P-value — Robust Omnibus Wald Test
+                                  # IMPORTANT: Do NOT use log_likelihood_ratio_test() here!
+                                  # The LRT ignores the correlation structure in the IPCW-expanded
+                                  # data (cluster_col='id'), treating pseudo-rows as independent.
+                                  # This makes it anti-conservative (falsely small p-values).
+                                  #
+                                  # Also: cph_fg.variance_matrix_ returns model-based (Hessian) 
+                                  # variance, NOT the robust sandwich variance. The robust SEs
+                                  # are only in the summary table.
+                                  from scipy.stats import chi2
+                                  _beta = cph_fg.params_.values
+                                  _robust_se = cph_fg.summary['se(coef)'].values
+                                  # Reconstruct robust variance (diagonal approximation)
+                                  _V_robust = np.diag(_robust_se ** 2)
+                                  try:
+                                      _V_inv = np.linalg.inv(_V_robust)
+                                      _wald_stat = float(_beta @ _V_inv @ _beta)
+                                      _wald_df = len(_beta)
+                                      _wald_p = 1 - chi2.cdf(_wald_stat, df=_wald_df)
+                                  except np.linalg.LinAlgError:
+                                      # Fallback: use minimum individual Wald p-value
+                                      _wald_p = cph_fg.summary['p'].min()
+                                  
                                   if show_p_val_plot_cif:
-                                      _fg_p_fmt = format_p_value(res_fg.p_value, narrator_style_name, context="plot")
-                                      fg_p_value_text = f"Fine-Gray (LRT) {_fg_p_fmt}"
+                                      _fg_p_fmt = format_p_value(_wald_p, narrator_style_name, context="plot")
+                                      fg_p_value_text = f"Fine-Gray (Wald) {_fg_p_fmt}"
                                   
                                   # 5. Extract HR Table
                                   fg_summary = cph_fg.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']]
