@@ -191,22 +191,21 @@ def add_survival_annotations(fitters, ax, colors=None, labels=None,
                 if is_cif:
                     cdf = fitter.cumulative_density_
                     col = cdf.columns[0]
-                    # Interpolate to get value at time t
+                    # Step-function lookup (ffill) — correct for CIF
                     if t in cdf.index:
                         y_val = cdf.loc[t, col]
                     else:
                         combined = cdf.index.union([t]).sort_values()
-                        interp = cdf[col].reindex(combined).interpolate(method='index')
-                        y_val = interp.loc[t]
+                        y_val = cdf[col].reindex(combined).ffill().loc[t]
                 else:
                     sf = fitter.survival_function_
                     col = sf.columns[0]
+                    # Step-function lookup (ffill) — correct for KM
                     if t in sf.index:
                         y_val = sf.loc[t, col]
                     else:
                         combined = sf.index.union([t]).sort_values()
-                        interp = sf[col].reindex(combined).interpolate(method='index')
-                        y_val = interp.loc[t]
+                        y_val = sf[col].reindex(combined).ffill().loc[t]
 
                 if pd.isna(y_val):
                     continue
@@ -217,7 +216,15 @@ def add_survival_annotations(fitters, ax, colors=None, labels=None,
 
 
 def _get_survival_at_time(fitter, t, is_cif=False):
-    """Get point estimate and 95% CI at a specific timepoint."""
+    """Get point estimate and 95% CI at a specific timepoint.
+    
+    Uses forward-fill (step function) interpolation, which is mathematically
+    correct for Kaplan-Meier and CIF estimators. These are right-continuous 
+    step functions: between event times, the estimate stays constant.
+    
+    Note: Linear interpolation would invent values that don't exist in the 
+    KM/CIF estimator and cause mismatches with lifelines' own calculations.
+    """
     if is_cif:
         curve = fitter.cumulative_density_
         ci = fitter.confidence_interval_cumulative_density_
@@ -227,16 +234,17 @@ def _get_survival_at_time(fitter, t, is_cif=False):
 
     col = curve.columns[0]
 
-    def _interp(series, time):
+    def _step_lookup(series, time):
+        """Forward-fill lookup: returns the last observed value at or before `time`."""
         if time in series.index:
             return series.loc[time]
         combined = series.index.union([time]).sort_values()
-        interp = series.reindex(combined).interpolate(method='index')
-        return interp.loc[time]
+        filled = series.reindex(combined).ffill()
+        return filled.loc[time]
 
-    est = _interp(curve[col], t)
-    ci_lo = _interp(ci.iloc[:, 0], t)
-    ci_hi = _interp(ci.iloc[:, 1], t)
+    est = _step_lookup(curve[col], t)
+    ci_lo = _step_lookup(ci.iloc[:, 0], t)
+    ci_hi = _step_lookup(ci.iloc[:, 1], t)
 
     if any(pd.isna(v) for v in [est, ci_lo, ci_hi]):
         return None, None, None
