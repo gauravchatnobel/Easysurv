@@ -306,6 +306,10 @@ if df is not None:
     # --- SESSION STATE & CUSTOM VARIABLES ---
     if 'custom_cutoffs' not in st.session_state:
         st.session_state.custom_cutoffs = []
+    
+    # Analysis Bank: accumulate analyses across endpoint changes
+    if 'analysis_bank' not in st.session_state:
+        st.session_state.analysis_bank = []
         
     # Apply valid custom cutoffs to df
     if st.session_state.custom_cutoffs:
@@ -961,6 +965,25 @@ if df is not None:
             mv_df_report = st.session_state['mv_summary_df']
             mv_table_html = "<h3>Multivariable Cox Results</h3>" + mv_df_report.to_html(float_format="%.3f")
 
+        # 4b. Banked (pinned) analyses
+        banked_html = ""
+        _bank = st.session_state.get('analysis_bank', [])
+        if _bank:
+            banked_html = '<div class="section"><h2>📌 Pinned Analyses</h2>'
+            for i, entry in enumerate(_bank):
+                banked_html += f'<h3>{i+1}. {entry["label"]}</h3>'
+                banked_html += f'<p>Endpoint: {entry.get("endpoint", "N/A")} | Group: {entry.get("group_col", "N/A")} | n={entry.get("n_patients", "N/A")}</p>'
+                try:
+                    banked_html += f'<img src="data:image/png;base64,{fig_to_base64(entry["fig"])}" style="width:100%">'
+                except:
+                    banked_html += '<p><em>Figure could not be rendered.</em></p>'
+                # Include Cox/FG table if available
+                if entry.get('cox_summary') is not None:
+                    banked_html += '<h4>Cox Results</h4>' + entry['cox_summary'].to_html(float_format="%.3f")
+                if entry.get('fg_summary') is not None:
+                    banked_html += '<h4>Fine-Gray Results</h4>' + entry['fg_summary'].to_html(float_format="%.3f")
+            banked_html += '</div>'
+
         # 5. Software versions
         import importlib.metadata
         def get_version_safe(pkg):
@@ -1008,19 +1031,21 @@ if df is not None:
             </div>
 
             <div class="section">
-                <h2>3. Univariable Analysis (Kaplan-Meier)</h2>
+                <h2>3. Current Univariable Analysis (Kaplan-Meier)</h2>
                 {img_km}
                 {cox_table_html}
             </div>
 
             <div class="section">
-                <h2>4. Multivariable Analysis (Cox Regression)</h2>
+                <h2>4. Current Multivariable Analysis (Cox Regression)</h2>
                 {img_forest}
                 {mv_table_html}
             </div>
 
+            {banked_html}
+
             <div class="section">
-                <h2>5. Reproducibility</h2>
+                <h2>{"6" if _bank else "5"}. Reproducibility</h2>
                 <h3>Software Versions</h3>
                 {versions_html}
                 <p><em>Report these versions in your manuscript for reproducibility.</em></p>
@@ -1028,7 +1053,7 @@ if df is not None:
 
             <div class="section">
                 <h2>Notes</h2>
-                <p>This report contains snapshots of analyses from your session. Re-run the analysis with the same data and parameters to reproduce results.</p>
+                <p>This report contains snapshots of analyses from your session ({len(_bank)} pinned analyses included). Re-run the analysis with the same data and parameters to reproduce results.</p>
             </div>
         </body>
         </html>
@@ -1330,7 +1355,7 @@ if df is not None:
                 buf = io.BytesIO()
                 fig.savefig(buf, format="png", dpi=300, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
                 buf.seek(0)
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
                 with col1:
                     st.download_button(
                         label="💾 Download Plot (300 DPI)",
@@ -1358,6 +1383,23 @@ if df is not None:
                         file_name="survival_plot.pdf",
                         mime="application/pdf"
                     )
+                with col4:
+                    _pin_label = f"KM: {main_title}"
+                    if st.button("📌 Pin to Session", key="pin_km_grouped", help="Save this analysis to the session bank. You can then switch endpoints and pin more analyses."):
+                        _cox_df = st.session_state.get('uv_cox_summary', None)
+                        st.session_state.analysis_bank.append({
+                            'type': 'KM',
+                            'label': _pin_label,
+                            'title': main_title,
+                            'fig': fig,
+                            'cox_summary': _cox_df.copy() if _cox_df is not None else None,
+                            'endpoint': narrator_event_name,
+                            'group_col': group_col,
+                            'time_col': time_col,
+                            'event_col': event_col,
+                            'n_patients': len(df_clean),
+                        })
+                        st.success(f"📌 Pinned: **{_pin_label}**")
 
 
                 # At-Risk Counts Table (downloadable)
@@ -1808,7 +1850,7 @@ if df is not None:
                 buf = io.BytesIO()
                 fig.savefig(buf, format="png", dpi=300, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
                 buf.seek(0)
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
                 with col1:
                     st.download_button(
                         label="💾 Download Plot (300 DPI)",
@@ -1836,6 +1878,22 @@ if df is not None:
                         file_name="survival_plot.pdf",
                         mime="application/pdf"
                     )
+                with col4:
+                    _pin_label = f"KM: {main_title}"
+                    if st.button("📌 Pin to Session", key="pin_km_single", help="Save this analysis to the session bank."):
+                        st.session_state.analysis_bank.append({
+                            'type': 'KM',
+                            'label': _pin_label,
+                            'title': main_title,
+                            'fig': fig,
+                            'cox_summary': None,
+                            'endpoint': narrator_event_name,
+                            'group_col': 'All Patients',
+                            'time_col': time_col,
+                            'event_col': event_col,
+                            'n_patients': len(df_clean),
+                        })
+                        st.success(f"📌 Pinned: **{_pin_label}**")
 
 
         with tab2:
@@ -3078,7 +3136,7 @@ if df is not None:
                 fig_cif.savefig(buf_cif, format="png", dpi=300, bbox_inches='tight', facecolor=fig_cif.get_facecolor(), edgecolor='none')
                 buf_cif.seek(0)
                 
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
                 with col1:
                     st.download_button("💾 Download CIF Plot (300 DPI)", buf_cif, "cif_plot_300dpi.png", "image/png")
                 with col2:
@@ -3086,12 +3144,27 @@ if df is not None:
                     fig_cif.savefig(buf_cif_hi, format="png", dpi=600, bbox_inches='tight', facecolor=fig_cif.get_facecolor(), edgecolor='none')
                     buf_cif_hi.seek(0)
                     st.download_button("💾 Download High-Res CIF Plot (600 DPI)", buf_cif_hi, "cif_plot_600dpi.png", "image/png")
-                
                 with col3:
                     buf_cif_pdf = io.BytesIO()
                     fig_cif.savefig(buf_cif_pdf, format="pdf", bbox_inches='tight', facecolor=fig_cif.get_facecolor(), edgecolor='none')
                     buf_cif_pdf.seek(0)
                     st.download_button("📄 Download CIF Plot (PDF)", buf_cif_pdf, "cif_plot.pdf", "application/pdf")
+                with col4:
+                    _pin_cif_label = f"CIF: {cif_title}"
+                    if st.button("📌 Pin to Session", key="pin_cif", help="Save this CIF analysis to the session bank."):
+                        st.session_state.analysis_bank.append({
+                            'type': 'CIF',
+                            'label': _pin_cif_label,
+                            'title': cif_title,
+                            'fig': fig_cif,
+                            'fg_summary': fg_summary.copy() if fg_summary is not None else None,
+                            'endpoint': narrator_event_name,
+                            'group_col': group_col if group_col != 'None' else 'All',
+                            'time_col': time_col,
+                            'event_col': event_col,
+                            'n_patients': len(cif_df),
+                        })
+                        st.success(f"📌 Pinned: **{_pin_cif_label}**")
                 
                 # Display Fine-Gray Table
                 if fg_summary is not None:
@@ -3328,38 +3401,62 @@ if df is not None:
             st.header("Composite Figure")
             st.write("Combine 2-3 plots from your analysis into a single publication-ready panel figure (e.g. Figure 1A, 1B, 1C).")
 
-            # Collect available plots
+            # Collect available plots from BOTH current session AND analysis bank
             _available_plots = {}
+            
+            # 1. Pinned analyses from the bank (accumulated across endpoint changes)
+            for i, entry in enumerate(st.session_state.get('analysis_bank', [])):
+                _key = f"📌 {entry['label']}"
+                # Deduplicate keys if same title pinned multiple times
+                if _key in _available_plots:
+                    _key = f"{_key} ({i+1})"
+                _available_plots[_key] = entry['fig']
+            
+            # 2. Current (unpinned) plots from the active analysis
             if 'report_fig_km' in st.session_state:
                 _km_title = st.session_state.get('composite_km_title', 'Kaplan-Meier')
-                _available_plots[f"KM: {_km_title}"] = st.session_state['report_fig_km']
+                _available_plots[f"KM (current): {_km_title}"] = st.session_state['report_fig_km']
             if 'report_fig_cif' in st.session_state:
                 _cif_title = st.session_state.get('composite_cif_title', 'Cumulative Incidence')
-                _available_plots[f"CIF: {_cif_title}"] = st.session_state['report_fig_cif']
+                _available_plots[f"CIF (current): {_cif_title}"] = st.session_state['report_fig_cif']
             if 'report_fig_forest' in st.session_state:
-                _available_plots["Forest Plot"] = st.session_state['report_fig_forest']
+                _available_plots["Forest Plot (current)"] = st.session_state['report_fig_forest']
 
+            # Show pinned analyses summary
+            _bank = st.session_state.get('analysis_bank', [])
+            if _bank:
+                with st.expander(f"📌 Pinned Analyses ({len(_bank)} saved)", expanded=False):
+                    for i, entry in enumerate(_bank):
+                        c1, c2 = st.columns([4, 1])
+                        with c1:
+                            st.write(f"**{i+1}.** {entry['label']} — {entry.get('endpoint', '?')} | n={entry.get('n_patients', '?')}")
+                        with c2:
+                            if st.button("🗑️", key=f"del_bank_{i}", help="Remove this analysis"):
+                                st.session_state.analysis_bank.pop(i)
+                                st.rerun()
+            
             if len(_available_plots) < 2:
-                st.info("Generate at least 2 plots (in the Univariable KM, Competing Risks, or Multivariable Cox tabs) to create a composite figure. Currently available: " + (", ".join(_available_plots.keys()) if _available_plots else "none"))
+                st.info("📌 **Pin at least 2 analyses** to create a composite figure. Use the 📌 Pin to Session button in the KM or CIF tabs after generating each analysis. Currently available: " + (", ".join(_available_plots.keys()) if _available_plots else "none"))
             else:
                 _plot_keys = list(_available_plots.keys())
                 selected_panels = st.multiselect(
-                    "Select plots to include (2-3 panels)",
+                    "Select plots to include (2-4 panels)",
                     _plot_keys,
                     default=_plot_keys[:min(3, len(_plot_keys))],
-                    max_selections=3,
-                    help="Select 2-3 plots to arrange as panels A, B, C"
+                    max_selections=4,
+                    help="Select 2-4 plots to arrange as panels A, B, C, D"
                 )
 
                 if len(selected_panels) >= 2:
                     _layout_options = {
                         2: ["Side by side (1x2)", "Stacked (2x1)"],
                         3: ["Row (1x3)", "Top 1 + Bottom 2 (T-shape)", "Stacked (3x1)"],
+                        4: ["Grid (2x2)", "Row (1x4)", "Stacked (4x1)"],
                     }
                     n = len(selected_panels)
                     layout = st.radio("Layout", _layout_options[n], horizontal=True)
 
-                    panel_labels = st.checkbox("Show panel labels (A, B, C)", value=True)
+                    panel_labels = st.checkbox("Show panel labels (A, B, C, D)", value=True)
                     comp_fontsize = st.number_input("Panel label size", min_value=12, max_value=36, value=18)
 
                     if st.button("Generate Composite Figure", type="primary"):
@@ -3379,6 +3476,13 @@ if df is not None:
                                 nrows, ncols = 1, 2
                             else:
                                 nrows, ncols = 2, 1
+                        elif n == 4:
+                            if "2x2" in layout:
+                                nrows, ncols = 2, 2
+                            elif "1x4" in layout:
+                                nrows, ncols = 1, 4
+                            else:
+                                nrows, ncols = 4, 1
                         else:  # n == 3
                             if "1x3" in layout:
                                 nrows, ncols = 1, 3
@@ -3424,7 +3528,7 @@ if df is not None:
                             elif nrows == 1 or ncols == 1:
                                 axes = axes.flatten()
 
-                            labels_abc = ['A', 'B', 'C']
+                            labels_abc = ['A', 'B', 'C', 'D']
                             for idx, (key, img) in enumerate(zip(selected_panels, panel_images)):
                                 axes[idx].imshow(img)
                                 axes[idx].axis('off')
