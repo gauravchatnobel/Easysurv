@@ -9,6 +9,7 @@ def load_data(file, sheet_name=0):
         else:
             return pd.read_excel(file, sheet_name=sheet_name)
     except Exception as e:
+        st.error(f"Failed to load file '{file.name}': {e}")
         return None
 
 # --- THEMES ---

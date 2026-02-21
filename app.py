@@ -1,4 +1,4 @@
-APP_VERSION = "2.1.0"  # V2 with narrator journal styles
+APP_VERSION = "2.1.1"  # V2.1.1 — code quality fixes & cleanup
 
 import streamlit as st
 import pandas as pd
@@ -24,12 +24,7 @@ except ImportError:
     from modules.validation import validate_dataset, format_validation_report
     from modules.session_manager import save_session, load_session, get_session_filename, SIDEBAR_CONFIG_KEYS
 
-# Force reload to pick up hot-patches (guardrails)
-import importlib
-try:
-    importlib.reload(statistics)
-except:
-    pass
+# Module aliases (maintain backward compatibility)
 
 # Wrappers to maintain compatibility if functions were called directly
 compute_fine_gray_weights = statistics.compute_fine_gray_weights
@@ -287,7 +282,7 @@ else:
                  if os.path.exists(p):
                      df = pd.read_csv(p) # Direct read
                      break
-        except:
+        except Exception:
              pass
 
 # Check for session-restored dataframe
@@ -1176,14 +1171,14 @@ if df is not None:
                     # This might fail on separation, but we don't strictly need it for the p-value text anymore
                     cph_plot = CoxPHFitter()
                     cph_plot.fit(cox_data_encoded, duration_col=time_col, event_col=event_col)
-                except:
-                    pass
+                except Exception:
+                    pass  # Cox fit may fail on separation; p-value comes from log-rank below
 
                 # Calculate Log-Rank P-value (Robust)
                 try:
                     res = multivariate_logrank_test(df_clean[time_col], df_clean[group_col], df_clean[event_col])
                     p_value_text = format_p_value(res.p_value, narrator_style_name, context="plot")
-                except:
+                except Exception:
                     p_value_text = None
 
         
@@ -1598,7 +1593,7 @@ if df is not None:
                         lower = median_ci_df.iloc[0, 0]
                         upper = median_ci_df.iloc[0, 1]
                         ci_str = f"({lower:.1f} - {upper:.1f})"
-                    except:
+                    except Exception:
                         ci_str = "(NR - NR)"
                     
                     # Formatting text
@@ -1652,7 +1647,7 @@ if df is not None:
                      try:
                         lower = ci_df_interp.loc[target_time].iloc[0]
                         upper = ci_df_interp.loc[target_time].iloc[1]
-                     except:
+                     except Exception:
                         lower = 0
                         upper = 0
                  
@@ -1719,8 +1714,8 @@ if df is not None:
                         logrank_p=result.p_value,
                         cox_summary=cox_df,
                         median_data=median_data,
-                        point_estimates=est_data if 'est_data' in dir() else None,
-                        target_time=target_time if 'target_time' in dir() else None,
+                        point_estimates=est_data,
+                        target_time=target_time,
                         cox_method=cox_method_text,
                         style_name=narrator_style_name,
                         detail_level=narrator_detail_level,
@@ -1890,7 +1885,7 @@ if df is not None:
                     categorical_refs = {}
                     
                     # 1. Identify Categorical Columns
-                    cat_cols = [c for c in covariates if pd.api.types.is_object_dtype(mv_df[c]) or pd.api.types.is_categorical_dtype(mv_df[c])]
+                    cat_cols = [c for c in covariates if pd.api.types.is_object_dtype(mv_df[c]) or isinstance(mv_df[c].dtype, pd.CategoricalDtype)]
                     
                     if cat_cols:
                         st.markdown("##### Reference Group Selection")
@@ -2578,7 +2573,7 @@ if df is not None:
                                 kmf.fit(score_df.loc[mask, time_col], score_df.loc[mask, event_col], label=f"{grp} (n={n})")
                                 kmf.plot_survival_function(ax=ax_risk, ci_show=False)
                         
-                        ax_risk.set_title("Risk Scote Stratification")
+                        ax_risk.set_title("Risk Score Stratification")
                         ax_risk.set_xlabel(time_col)
                         ax_risk.set_ylabel("Survival Probability")
                         st.pyplot(fig_risk)
@@ -2834,8 +2829,6 @@ if df is not None:
                                              cluster_col='id', robust=True)
                                   
                                   # 4. Extract P-value (Gray's Test Equivalent)
-                                  # Log-Likelihood Ratio Test against null model
-                                  res_fg = cph_fg.log_likelihood_ratio_test()
                                   # Log-Likelihood Ratio Test against null model
                                   res_fg = cph_fg.log_likelihood_ratio_test()
                                   if show_p_val_plot_cif:
@@ -3105,7 +3098,7 @@ if df is not None:
                         # Extract CI (Lower, Upper)
                         lower = ci_df_interp.loc[cif_target_time].iloc[0]
                         upper = ci_df_interp.loc[cif_target_time].iloc[1]
-                     except:
+                     except Exception:
                         cip_val = 0
                         lower = 0
                         upper = 0
@@ -3173,7 +3166,7 @@ if df is not None:
                               ci_str = "(NR - NR)"
                          else:
                               ci_str = f"({time_lower_str} - {time_upper_str})"
-                    except:
+                    except Exception:
                          ci_str = "(NR - NR)"
 
                     cif_median_data.append({
@@ -3635,10 +3628,7 @@ if df is not None:
                      }
                      st.session_state.custom_cutoffs.append(new_def)
                      st.success(f"Variable **{new_var_name}** created! It is now available in the Main and CIF tabs.")
-                     if hasattr(st, "rerun"):
-                         st.rerun()
-                     else:
-                         st.experimental_rerun()
+                     st.rerun()
 
     # --- TAB 5: VARIABLE GENERATION ---
     if 'tab5' in locals() and df_clean is not None:
@@ -3688,10 +3678,7 @@ if df is not None:
                          
                          st.session_state.custom_combinations.append(new_combo)
                          st.success(f"Interaction variable **{preview_name}** created! It is now available in the sidebar.")
-                         if hasattr(st, "rerun"):
-                             st.rerun()
-                         else:
-                             st.experimental_rerun()
+                         st.rerun()
                              
              # --- METHOD 2: BOOLEAN LOGIC ---
              with tab5_meth2:
@@ -3756,12 +3743,8 @@ if df is not None:
                      
                      st.session_state.custom_combinations.append(bool_def)
                      
-                     # Force reload to apply logic in the main app loop (we need to update that loop too!)
                      st.success(f"Logic Variable **{new_bool_name}** created!")
-                     if hasattr(st, "rerun"):
-                         st.rerun()
-                     else:
-                         st.experimental_rerun()
+                     st.rerun()
                          
     # --- TAB 6: CORRELATIONS ---
     if 'tab6' in locals() and df_clean is not None:
@@ -4156,7 +4139,7 @@ if df is not None:
 
 else:
     st.info("Please upload a CSV or Excel file to begin analysis.")
-    st.write("Demostration with Dummy Data:")
+    st.write("Demonstration with Dummy Data:")
     st.write("You can download the demo dataset `dummy_clinical_data.csv` from the repository:")
     st.markdown("[📂 View Repository & Download Data](https://github.com/gauravchatnobel/Easysurv)")
     st.caption("Right-click the link and open in a new tab to find the CSV file.")
