@@ -89,6 +89,89 @@ def compute_fine_gray_weights(df, time_col, event_col, event_of_interest=1):
 
     return pd.DataFrame(new_rows)
 
+
+def pairwise_fine_gray(df, time_col, event_col, group_col, event_of_interest=1):
+    """
+    Performs pairwise Fine-Gray regression between ALL pairs of groups.
+    
+    For each pair, fits a separate Fine-Gray model (IPCW-weighted Cox) using 
+    only the two groups being compared. This is more powerful than extracting 
+    individual HRs from the global model because:
+      1. Each test uses only 1 degree of freedom (vs k-1 in the global model)
+      2. The IPCW weights are computed on the pair-specific subset, giving 
+         cleaner censoring estimates
+    
+    Returns a DataFrame with columns:
+      Group 1, Group 2, Subdist HR, Lower 95%, Upper 95%, p-value
+    
+    Ref: Fine JP, Gray RJ. JASA 1999;94(446):496-509.
+    """
+    from itertools import combinations
+    
+    groups = sorted(df[group_col].dropna().unique())
+    if len(groups) < 2:
+        return None
+    
+    results = []
+    
+    for g1, g2 in combinations(groups, 2):
+        try:
+            # Subset to just these two groups
+            pair_df = df[df[group_col].isin([g1, g2])].copy()
+            
+            # Compute Fine-Gray weights on the pair subset
+            fg_pair = compute_fine_gray_weights(pair_df, time_col, event_col, event_of_interest)
+            
+            if fg_pair.empty or len(fg_pair) < 5:
+                results.append({
+                    'Group 1': str(g1), 'Group 2': str(g2),
+                    'Subdist HR': np.nan, 'Lower 95%': np.nan,
+                    'Upper 95%': np.nan, 'p-value': np.nan,
+                    'Note': 'Insufficient data'
+                })
+                continue
+            
+            # Encode group: g2 = 1 (test), g1 = 0 (reference)
+            fg_pair['_group_indicator'] = (fg_pair[group_col] == g2).astype(int)
+            
+            cols_to_fit = ['start', 'stop', 'status', 'weight', 'id', '_group_indicator']
+            
+            # Fit weighted Cox
+            cph_pair = CoxPHFitter()
+            cph_pair.fit(
+                fg_pair[cols_to_fit],
+                duration_col='stop', entry_col='start',
+                event_col='status', weights_col='weight',
+                cluster_col='id', robust=True
+            )
+            
+            hr = cph_pair.summary.loc['_group_indicator', 'exp(coef)']
+            lo = cph_pair.summary.loc['_group_indicator', 'exp(coef) lower 95%']
+            hi = cph_pair.summary.loc['_group_indicator', 'exp(coef) upper 95%']
+            p = cph_pair.summary.loc['_group_indicator', 'p']
+            
+            results.append({
+                'Group 1': str(g1),
+                'Group 2': str(g2),
+                'Subdist HR': hr,
+                'Lower 95%': lo,
+                'Upper 95%': hi,
+                'p-value': p,
+            })
+            
+        except Exception as e:
+            results.append({
+                'Group 1': str(g1), 'Group 2': str(g2),
+                'Subdist HR': np.nan, 'Lower 95%': np.nan,
+                'Upper 95%': np.nan, 'p-value': np.nan,
+                'Note': str(e)
+            })
+    
+    if not results:
+        return None
+    
+    return pd.DataFrame(results)
+
 def calculate_wilson_ci(k, n, alpha=0.95):
     """Returns (lower, upper) tuple for Wilson Score Interval"""
     if n == 0: return 0.0, 0.0

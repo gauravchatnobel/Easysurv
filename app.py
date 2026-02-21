@@ -28,6 +28,7 @@ except ImportError:
 
 # Wrappers to maintain compatibility if functions were called directly
 compute_fine_gray_weights = statistics.compute_fine_gray_weights
+pairwise_fine_gray = statistics.pairwise_fine_gray
 add_at_risk_counts = plotting.add_at_risk_counts
 add_survival_annotations = plotting.add_survival_annotations
 add_estimate_labels = plotting.add_estimate_labels
@@ -3067,6 +3068,66 @@ if df is not None:
                     st.dataframe(_display_fg.style.format(
                         {c: "{:.3f}" for c in _display_fg.columns if c != 'p-value'}
                     ))
+                    st.caption(f"Reference Group: **{fg_ref_group}** | Robust SE (sandwich estimator)")
+
+                # Pairwise Fine-Gray Comparisons (Gray's Test)
+                if group_col != "None" and group_col in cif_df.columns:
+                    unique_grps = sorted(cif_df[group_col].dropna().unique())
+                    if len(unique_grps) >= 2:
+                        st.write("### Pairwise Subdistribution HRs (Gray's Test)")
+                        st.write("Each pair compared in a **separate** Fine-Gray model (1 d.f. per test → higher power for small groups).")
+                        
+                        with st.spinner("Computing pairwise Fine-Gray comparisons..."):
+                            pw_fg = pairwise_fine_gray(
+                                cif_df, cif_time_col, cif_event_col, group_col,
+                                event_of_interest=cif_event_of_interest
+                            )
+                        
+                        if pw_fg is not None and not pw_fg.empty:
+                            _display_pw = pw_fg.copy()
+                            
+                            # Format p-value column
+                            if 'p-value' in _display_pw.columns:
+                                # Highlight significant rows
+                                _raw_p = _display_pw['p-value'].copy()
+                                _display_pw['p-value'] = _display_pw['p-value'].apply(
+                                    lambda p: format_p_value(p, narrator_style_name, context="table") if not pd.isna(p) else "—"
+                                )
+                            
+                            # Drop Note column if all empty
+                            if 'Note' in _display_pw.columns:
+                                if _display_pw['Note'].isna().all():
+                                    _display_pw = _display_pw.drop(columns=['Note'])
+                            
+                            # Style: highlight significant rows
+                            def _highlight_pw(row):
+                                idx = row.name
+                                p = _raw_p.iloc[idx] if idx < len(_raw_p) else 1.0
+                                if not pd.isna(p) and p < 0.05:
+                                    return ['background-color: rgba(0, 180, 0, 0.1)'] * len(row)
+                                return [''] * len(row)
+                            
+                            num_cols = [c for c in _display_pw.columns if c not in ('Group 1', 'Group 2', 'p-value', 'Note')]
+                            st.dataframe(
+                                _display_pw.style.format(
+                                    {c: "{:.3f}" for c in num_cols}
+                                ).apply(_highlight_pw, axis=1)
+                            )
+                            st.caption(
+                                "🟩 Green: p<0.05 | "
+                                "HR interpretation: Group 2 vs Group 1 (Group 1 = reference). "
+                                "HR>1 means Group 2 has higher cumulative incidence."
+                            )
+                            
+                            # Download
+                            csv_pw_fg = pw_fg.to_csv(index=False).encode('utf-8')
+                            st.download_button(
+                                label="💾 Download Pairwise Fine-Gray Table",
+                                data=csv_pw_fg,
+                                file_name="pairwise_fine_gray.csv",
+                                mime="text/csv",
+                                key="download_pairwise_fg",
+                            )
                 
                 # Point-in-Time Cumulative Incidence Estimates
                 st.subheader("Point-in-Time Cumulative Incidence")
