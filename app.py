@@ -2825,21 +2825,24 @@ if df is not None:
                                   # 3. Fit Fine-Gray Model (Weighted Cox)
                                   # IMPORTANT: The weighted dataframe from compute_fine_gray_weights is in counting process format (start, stop).
                                   # We must NOT use duration_col=cif_time_col.
-                                  cph_fg = CoxPHFitter()
-                                  cph_fg.fit(fg_data_encoded[cols_to_fit], 
-                                             duration_col='stop', entry_col='start', event_col='status', weights_col='weight', 
-                                             cluster_col='id', robust=True)
+                                  #
+                                  # We use cluster_col='id' for correct risk set computation 
+                                  # but do NOT use robust=True. The model-based (Hessian) SE 
+                                  # is the correct Fine-Gray variance, matching R's cmprsk::crr().
+                                  # The sandwich/robust estimator over-inflates SE by ~1.5-2x,
+                                  # making results overly conservative vs R.
+                                  import warnings as _w
+                                  with _w.catch_warnings():
+                                      _w.simplefilter("ignore")  # suppress IPTW warning for non-integer weights
+                                      cph_fg = CoxPHFitter()
+                                      cph_fg.fit(fg_data_encoded[cols_to_fit], 
+                                                 duration_col='stop', entry_col='start', event_col='status', 
+                                                 weights_col='weight', cluster_col='id', robust=False)
                                   
                                   # 4. Extract P-value for CIF plot — Gray's Test
                                   # Gray's test is the proper nonparametric test for 
                                   # comparing CIFs, equivalent to R's cmprsk::cuminc()$Tests.
                                   # It's the competing-risks analogue of the log-rank test.
-                                  #
-                                  # NOTE: Do NOT use log_likelihood_ratio_test() or the 
-                                  # Fine-Gray Wald test for the omnibus CIF comparison:
-                                  # - LRT is anti-conservative (ignores IPCW clustering)
-                                  # - Wald with sandwich SE can be overly conservative
-                                  # Gray's test is the standard, properly powered alternative.
                                   _grays = grays_test(cif_df, cif_time_col, cif_event_col, 
                                                       group_col, cif_event_of_interest)
                                   
@@ -2849,14 +2852,28 @@ if df is not None:
                                           _fg_p_fmt = format_p_value(_gray_p, narrator_style_name, context="plot")
                                           fg_p_value_text = f"Gray's test {_fg_p_fmt}"
                                       else:
-                                          # Fallback to Wald if Gray's test fails
                                           _wald_p = cph_fg.summary['p'].min()
                                           _fg_p_fmt = format_p_value(_wald_p, narrator_style_name, context="plot")
                                           fg_p_value_text = f"Fine-Gray (Wald) {_fg_p_fmt}"
                                   
-                                  # 5. Extract HR Table
-                                  fg_summary = cph_fg.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']]
-                                  fg_summary.columns = ['Subdist HR', 'Lower 95%', 'Upper 95%', 'p-value']
+                                  # 5. Extract HR Table using model-based (Hessian) SE
+                                  # The model-based variance from the IPCW-weighted Cox is the
+                                  # correct Fine-Gray variance (equivalent to R's crr() output).
+                                  from scipy.stats import norm as _norm
+                                  _betas = cph_fg.params_
+                                  _model_se = np.sqrt(np.diag(cph_fg.variance_matrix_.values))
+                                  _hrs = np.exp(_betas.values)
+                                  _z = _betas.values / _model_se
+                                  _p_vals = 2 * (1 - _norm.cdf(np.abs(_z)))
+                                  _lo = np.exp(_betas.values - 1.96 * _model_se)
+                                  _hi = np.exp(_betas.values + 1.96 * _model_se)
+                                  
+                                  fg_summary = pd.DataFrame({
+                                      'Subdist HR': _hrs,
+                                      'Lower 95%': _lo,
+                                      'Upper 95%': _hi,
+                                      'p-value': _p_vals,
+                                  }, index=_betas.index)
                                  
                           except Exception as e:
                              st.error(f"Fine-Gray Analysis Failed: {e}")

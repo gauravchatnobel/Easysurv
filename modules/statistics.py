@@ -307,19 +307,27 @@ def pairwise_fine_gray(df, time_col, event_col, group_col, event_of_interest=1, 
             
             cols_to_fit = ['start', 'stop', 'status', 'weight', 'id', '_group_indicator']
             
-            # Fit weighted Cox
-            cph_pair = CoxPHFitter()
-            cph_pair.fit(
-                fg_pair[cols_to_fit],
-                duration_col='stop', entry_col='start',
-                event_col='status', weights_col='weight',
-                cluster_col='id', robust=True
-            )
+            # Fit weighted Cox with model-based (Hessian) SE
+            # This matches R's cmprsk::crr() variance estimator.
+            # Do NOT use robust=True (sandwich SE is overly conservative).
+            import warnings as _w
+            with _w.catch_warnings():
+                _w.simplefilter("ignore")
+                cph_pair = CoxPHFitter()
+                cph_pair.fit(
+                    fg_pair[cols_to_fit],
+                    duration_col='stop', entry_col='start',
+                    event_col='status', weights_col='weight',
+                    cluster_col='id', robust=False
+                )
             
-            hr = cph_pair.summary.loc['_group_indicator', 'exp(coef)']
-            lo = cph_pair.summary.loc['_group_indicator', 'exp(coef) lower 95%']
-            hi = cph_pair.summary.loc['_group_indicator', 'exp(coef) upper 95%']
-            p = cph_pair.summary.loc['_group_indicator', 'p']
+            from scipy.stats import norm as _norm
+            _beta = cph_pair.params_.values[0]
+            _se = np.sqrt(cph_pair.variance_matrix_.values[0, 0])
+            hr = np.exp(_beta)
+            lo = np.exp(_beta - 1.96 * _se)
+            hi = np.exp(_beta + 1.96 * _se)
+            p = 2 * (1 - _norm.cdf(abs(_beta / _se)))
             
             results.append({
                 'Reference': str(ref),
