@@ -90,6 +90,162 @@ def compute_fine_gray_weights(df, time_col, event_col, event_of_interest=1):
     return pd.DataFrame(new_rows)
 
 
+def grays_test(df, time_col, event_col, group_col, event_of_interest=1):
+    """
+    Gray's K-sample test for comparing cumulative incidence functions.
+    
+    This is the competing-risks analogue of the log-rank test, equivalent
+    to R's cmprsk::cuminc()$Tests. It tests the null hypothesis that the 
+    CIF of the event of interest is equal across all groups.
+    
+    Uses a modified weighted log-rank statistic where subjects with 
+    competing events remain in the subdistribution risk set with IPCW
+    weights G(t)/G(Ti).
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+    time_col : str
+    event_col : str
+        0 = censored, event_of_interest = primary event, other values = competing events.
+    group_col : str
+    event_of_interest : int
+    
+    Returns
+    -------
+    dict with keys: 'statistic', 'p_value', 'df'
+    
+    References
+    ----------
+    Gray RJ. A class of K-sample tests for comparing the cumulative 
+    incidence of a competing risk. Ann Stat 1988;16:1141-1154.
+    """
+    from scipy.stats import chi2
+    
+    df_clean = df[[time_col, event_col, group_col]].dropna().copy()
+    groups = sorted(df_clean[group_col].unique())
+    K = len(groups)
+    
+    if K < 2:
+        return {'statistic': np.nan, 'p_value': np.nan, 'df': 0}
+    
+    # ---- Step 1: Estimate censoring survival G(t) = P(C > t) ----
+    # Reverse KM: "event" = censoring (event_col == 0)
+    times_all = df_clean[time_col].values
+    events_all = df_clean[event_col].values
+    
+    # Build censoring KM manually for efficiency
+    cens_indicator = (events_all == 0).astype(int)
+    unique_times = np.sort(np.unique(times_all))
+    
+    # At each time: n at risk, n censored (= "event" for G)
+    G_values = {}
+    n_remaining = len(times_all)
+    G_current = 1.0
+    
+    for t in unique_times:
+        at_t = times_all == t
+        d_cens = int(cens_indicator[at_t].sum())  # censoring events
+        n_events = int((~cens_indicator.astype(bool) & at_t).sum())  # real events
+        
+        if n_remaining > 0 and d_cens > 0:
+            G_current *= (1 - d_cens / n_remaining)
+        
+        G_values[t] = max(G_current, 1e-10)
+        n_remaining -= (d_cens + n_events)
+    
+    def G_at(t):
+        """G(t-): censoring survival just before time t."""
+        prev = 1.0
+        for ut in unique_times:
+            if ut >= t:
+                return prev
+            prev = G_values[ut]
+        return prev
+    
+    # ---- Step 2: Identify event-of-interest times ----
+    eoi_mask = events_all == event_of_interest
+    eoi_times = np.sort(np.unique(times_all[eoi_mask]))
+    
+    if len(eoi_times) == 0:
+        return {'statistic': np.nan, 'p_value': np.nan, 'df': K - 1}
+    
+    # ---- Step 3: Pre-compute per-subject info ----
+    group_idx = {g: i for i, g in enumerate(groups)}
+    subj_time = times_all
+    subj_event = events_all
+    subj_group = np.array([group_idx[g] for g in df_clean[group_col].values])
+    
+    # Identify competing event subjects
+    is_competing = np.array([e != 0 and e != event_of_interest for e in subj_event])
+    competing_times = subj_time[is_competing]
+    competing_groups = subj_group[is_competing]
+    competing_G_Ti = np.array([G_at(t) for t in competing_times])
+    
+    # ---- Step 4: Compute U and V ----
+    U = np.zeros(K - 1)
+    V = np.zeros((K - 1, K - 1))
+    
+    for t in eoi_times:
+        G_t = G_at(t)
+        
+        # d_j(t): events of interest in each group at time t
+        at_t_eoi = (subj_time == t) & (subj_event == event_of_interest)
+        d = np.zeros(K)
+        for j in range(K):
+            d[j] = int(at_t_eoi[subj_group == j].sum())
+        
+        # R_j(t): subdistribution risk set for each group
+        # = subjects with T_i >= t (still in study)
+        # + competing event subjects with T_i < t, weighted by G(t)/G(T_i)
+        still_at_risk = subj_time >= t
+        R = np.zeros(K)
+        for j in range(K):
+            R[j] = int(still_at_risk[subj_group == j].sum())
+        
+        # Add IPCW contribution from competing events before t
+        before_t = competing_times < t
+        if before_t.any():
+            weights = np.where(competing_G_Ti[before_t] > 1e-10,
+                              G_t / competing_G_Ti[before_t], 0.0)
+            for j in range(K):
+                in_group = competing_groups[before_t] == j
+                R[j] += weights[in_group].sum()
+        
+        d_total = d.sum()
+        R_total = R.sum()
+        
+        if R_total < 1e-10 or d_total == 0:
+            continue
+        
+        # Score: U_j += d_j - R_j * d/R
+        for j in range(K - 1):
+            U[j] += d[j] - R[j] * d_total / R_total
+        
+        # Variance: V_j1j2 = Σ_t R_j1*(delta_{j1j2}*R - R_j2) * d*(R-d) / (R^2*(R-1))
+        # For j1==j2: R_j * (R - R_j) * d*(R-d) / (R^2*(R-1))
+        # For j1!=j2: -R_j1 * R_j2 * d*(R-d) / (R^2*(R-1))
+        if R_total > 1 and d_total < R_total:
+            factor = d_total * (R_total - d_total) / (R_total * R_total * (R_total - 1))
+            for j1 in range(K - 1):
+                for j2 in range(K - 1):
+                    if j1 == j2:
+                        V[j1, j2] += R[j1] * (R_total - R[j1]) * factor
+                    else:
+                        V[j1, j2] -= R[j1] * R[j2] * factor
+    
+    # ---- Step 5: Test statistic ----
+    try:
+        V_inv = np.linalg.inv(V)
+        stat = float(U @ V_inv @ U)
+        p_val = 1 - chi2.cdf(stat, df=K - 1)
+    except np.linalg.LinAlgError:
+        stat = np.nan
+        p_val = np.nan
+    
+    return {'statistic': stat, 'p_value': p_val, 'df': K - 1}
+
+
 def pairwise_fine_gray(df, time_col, event_col, group_col, event_of_interest=1, reference_group=None):
     """
     Performs pairwise Fine-Gray regression between pairs of groups.

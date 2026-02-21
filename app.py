@@ -29,6 +29,7 @@ except ImportError:
 # Wrappers to maintain compatibility if functions were called directly
 compute_fine_gray_weights = statistics.compute_fine_gray_weights
 pairwise_fine_gray = statistics.pairwise_fine_gray
+grays_test = statistics.grays_test
 add_at_risk_counts = plotting.add_at_risk_counts
 add_survival_annotations = plotting.add_survival_annotations
 add_estimate_labels = plotting.add_estimate_labels
@@ -2829,32 +2830,29 @@ if df is not None:
                                              duration_col='stop', entry_col='start', event_col='status', weights_col='weight', 
                                              cluster_col='id', robust=True)
                                   
-                                  # 4. Extract P-value — Robust Omnibus Wald Test
-                                  # IMPORTANT: Do NOT use log_likelihood_ratio_test() here!
-                                  # The LRT ignores the correlation structure in the IPCW-expanded
-                                  # data (cluster_col='id'), treating pseudo-rows as independent.
-                                  # This makes it anti-conservative (falsely small p-values).
+                                  # 4. Extract P-value for CIF plot — Gray's Test
+                                  # Gray's test is the proper nonparametric test for 
+                                  # comparing CIFs, equivalent to R's cmprsk::cuminc()$Tests.
+                                  # It's the competing-risks analogue of the log-rank test.
                                   #
-                                  # Also: cph_fg.variance_matrix_ returns model-based (Hessian) 
-                                  # variance, NOT the robust sandwich variance. The robust SEs
-                                  # are only in the summary table.
-                                  from scipy.stats import chi2
-                                  _beta = cph_fg.params_.values
-                                  _robust_se = cph_fg.summary['se(coef)'].values
-                                  # Reconstruct robust variance (diagonal approximation)
-                                  _V_robust = np.diag(_robust_se ** 2)
-                                  try:
-                                      _V_inv = np.linalg.inv(_V_robust)
-                                      _wald_stat = float(_beta @ _V_inv @ _beta)
-                                      _wald_df = len(_beta)
-                                      _wald_p = 1 - chi2.cdf(_wald_stat, df=_wald_df)
-                                  except np.linalg.LinAlgError:
-                                      # Fallback: use minimum individual Wald p-value
-                                      _wald_p = cph_fg.summary['p'].min()
+                                  # NOTE: Do NOT use log_likelihood_ratio_test() or the 
+                                  # Fine-Gray Wald test for the omnibus CIF comparison:
+                                  # - LRT is anti-conservative (ignores IPCW clustering)
+                                  # - Wald with sandwich SE can be overly conservative
+                                  # Gray's test is the standard, properly powered alternative.
+                                  _grays = grays_test(cif_df, cif_time_col, cif_event_col, 
+                                                      group_col, cif_event_of_interest)
                                   
                                   if show_p_val_plot_cif:
-                                      _fg_p_fmt = format_p_value(_wald_p, narrator_style_name, context="plot")
-                                      fg_p_value_text = f"Fine-Gray (Wald) {_fg_p_fmt}"
+                                      _gray_p = _grays['p_value']
+                                      if not np.isnan(_gray_p):
+                                          _fg_p_fmt = format_p_value(_gray_p, narrator_style_name, context="plot")
+                                          fg_p_value_text = f"Gray's test {_fg_p_fmt}"
+                                      else:
+                                          # Fallback to Wald if Gray's test fails
+                                          _wald_p = cph_fg.summary['p'].min()
+                                          _fg_p_fmt = format_p_value(_wald_p, narrator_style_name, context="plot")
+                                          fg_p_value_text = f"Fine-Gray (Wald) {_fg_p_fmt}"
                                   
                                   # 5. Extract HR Table
                                   fg_summary = cph_fg.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']]
