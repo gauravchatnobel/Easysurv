@@ -890,7 +890,7 @@ if df is not None:
             "show_censored": show_censored,
             "show_ci": show_ci,
             "selected_theme": selected_theme,
-            "plot_bgcolor": plot_bgcolor,
+            "plot_bgcolor": _restored_default("plot_bgcolor", "#FFFFFF"),
         }
         session_json = save_session(
             df=df,
