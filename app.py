@@ -542,13 +542,26 @@ if df is not None:
         help="Select a categorical variable to compare groups (e.g., Treatment Arm, Risk Group). Leave as 'None' for overall analysis."
     )
 
+    # --- MODE TOGGLE ---
+    st.sidebar.divider()
+    _app_mode = st.sidebar.radio(
+        "Mode",
+        ["⚡ Express", "🔧 Pro"],
+        index=0,
+        horizontal=True,
+        help="Express: publication-ready plots with smart defaults. Pro: full customization of every element."
+    )
+    is_express = (_app_mode == "⚡ Express")
+
     # --- SIDEBAR CONFIGURATION ---
     st.sidebar.header("Configuration")
 
-    # 1. Global Aesthetics
-    st.sidebar.subheader("Typography & Style")
-
-    # Narrator Journal Style
+    # ==========================================
+    # ALWAYS VISIBLE: Narrator + Theme + CI
+    # ==========================================
+    
+    # Narrator Journal Style (USP — always visible)
+    st.sidebar.subheader("AI Narrator")
     try:
         narrator_style_labels = narrator.get_style_labels()
         _style_keys = list(narrator_style_labels.keys())
@@ -577,50 +590,42 @@ if df is not None:
         help="e.g. OS, RFS, EFS, DFS, PFS. Used by the narrator to generate natural language."
     )
 
-    font_options = ["sans-serif", "serif", "monospace", "Arial", "Helvetica", "Times New Roman", "Courier New", "Verdana", "Comic Sans MS"]
-    _r_font = _restored_default("selected_font", "sans-serif")
-    _font_idx = font_options.index(_r_font) if _r_font in font_options else 0
-    selected_font = st.sidebar.selectbox("Font Family", font_options, index=_font_idx)
-    plt.rcParams['font.family'] = selected_font
+    # Color Theme Selection (USP — always visible)
+    st.sidebar.subheader("Color Palette")
+    all_themes = utils.all_themes
+    theme_names = ["Default"] + list(utils.journal_themes.keys()) + list(utils.fun_themes.keys()) + ["Custom"]
+    _r_theme = _restored_default("selected_theme", "Default")
+    _theme_idx = theme_names.index(_r_theme) if _r_theme in theme_names else 0
+    selected_theme = st.sidebar.selectbox("Choose Theme", theme_names, index=_theme_idx)
 
-    with st.sidebar.expander("Font Sizes & Line Width", expanded=False):
-        # Title customizations (Shared)
-        title_fontsize = st.slider("Title Font Size", 10, 30, int(_restored_default("title_fontsize", 20)))
-        title_bold = st.checkbox("Bold Title", value=_restored_default("title_bold", True))
-        axes_fontsize = st.number_input("Axes/Tick Font Size", min_value=6, value=int(_restored_default("axes_fontsize", 12)))
-        legend_fontsize = st.number_input("Legend Font Size", min_value=6, value=int(_restored_default("legend_fontsize", 10)))
-        line_width = st.slider("Line Width", 0.5, 5.0, float(_restored_default("line_width", 1.5)))
-    title_fontweight = 'bold' if title_bold else 'normal'
+    # CI toggle (always visible per user request)
+    show_ci = st.sidebar.checkbox("Show 95% CI Shading", value=_restored_default("show_ci", True))
 
-    p_val_fontsize_main = 12  # Default, overridden below in sidebar
-    p_val_fontsize_cif = 12   # Default, overridden below in sidebar
+    # ==========================================
+    # EXPRESS: Minimal titles + smart defaults
+    # ==========================================
+    if is_express:
+        # Quick title inputs
+        st.sidebar.subheader("Titles")
+        main_title = st.sidebar.text_input("KM Plot Title", value="Survival")
+        cif_title = st.sidebar.text_input("CIF Plot Title", value="Cumulative Incidence")
+        
+        # Show P-value on plot
+        show_p_val_plot = st.sidebar.checkbox("Show P-value on KM Plot", value=True)
+        show_p_val_plot_cif = st.sidebar.checkbox("Show P-value on CIF Plot", value=True)
 
-    # Global Plot Configuration (Elements affecting all plots)
-    st.sidebar.subheader("Plot Elements")
-    show_censored = st.sidebar.checkbox("Show Censored Ticks", value=_restored_default("show_censored", True))
-    show_ci = st.sidebar.checkbox("Show 95% CI", value=_restored_default("show_ci", True))
-    show_risk_table = st.sidebar.checkbox("Show At-Risk Table", value=_restored_default("show_risk_table", True))
-    if show_risk_table:
-        with st.sidebar.expander("At-Risk Table Options", expanded=False):
-            _risk_table_options = ["At-risk only", "At-risk with censored (n censored)"]
-            _r_risk_fmt = _restored_default("risk_table_format", "At-risk only")
-            _risk_fmt_idx = _risk_table_options.index(_r_risk_fmt) if _r_risk_fmt in _risk_table_options else 0
-            risk_table_format = st.radio(
-                "Format",
-                _risk_table_options,
-                index=_risk_fmt_idx,
-                help="'At-risk with censored' shows cumulative censored count in brackets, e.g. 85 (3). Common in JCO/NEJM publications."
-            )
-            show_censored_in_table = (risk_table_format == _risk_table_options[1])
-            table_height = st.slider("Table Offset (Y)", -0.5, -0.1, float(_restored_default("table_height", -0.25)), 0.05)
-            risk_table_label_pad = st.slider("Label Gap", -0.25, -0.02, float(_restored_default("risk_table_label_pad", -0.10)), 0.01,
-                                              help="Horizontal gap between group labels and the first data column. More negative = wider gap.")
-            risk_table_title = st.checkbox("Show Table Title", value=_restored_default("risk_table_title", False),
-                                            help="Adds a title row (e.g. 'No. at risk') above the table.")
-            risk_table_fontsize = st.number_input("Font Size", min_value=6, max_value=20,
-                                                   value=int(_restored_default("risk_table_fontsize", 10)), step=1)
-            risk_table_bold = st.checkbox("Bold Text", value=_restored_default("risk_table_bold", True))
-    else:
+        # Smart defaults for everything else
+        selected_font = "sans-serif"
+        plt.rcParams['font.family'] = selected_font
+        title_fontsize = 20
+        title_fontweight = 'bold'
+        axes_fontsize = 12
+        legend_fontsize = 10
+        line_width = 1.5
+        p_val_fontsize_main = 12
+        p_val_fontsize_cif = 12
+        show_censored = True
+        show_risk_table = True
         show_censored_in_table = False
         risk_table_format = "At-risk only"
         table_height = -0.25
@@ -628,69 +633,29 @@ if df is not None:
         risk_table_title = False
         risk_table_fontsize = 10
         risk_table_bold = True
-    
-    # 2. Main Plot Settings (Kaplan-Meier)
-    with st.sidebar.expander("Main Plot Settings (KM)", expanded=False):
-        st.markdown("### Layout & Axes")
-        main_title = st.text_input("Main Plot Title", value="Survival")
-        x_label = st.text_input("X-Axis Label", value="Time (Months)")
-        y_label = st.text_input("Y-Axis Label", value="Survival Probability")
         
-        col1, col2 = st.columns(2)
-        with col1:
-            tick_interval = st.number_input("X-Tick Step", value=12.0)
-            y_min = st.number_input("Y Min", value=0.0, step=0.1)
-        with col2:
-            y_tick_interval = st.number_input("Y-Tick Step", value=0.1)
-            y_max = st.number_input("Y Max", value=1.0, step=0.1)
-            
-        plot_height = st.slider("Plot Height", 4, 12, 6)
-        plot_width = st.slider("Plot Width", 6, 15, 10)
-        
-        # Elements (Moved to Global)
-        
-        st.markdown("### Legend")
-        show_legend_main = st.checkbox("Show Legend (Main)", value=True)
-        legend_style_main = st.radio("Legend Style (Main)", ["Standard", "Top bar"],
-                                      index=0, horizontal=True, key="legend_style_main",
-                                      help="Standard: inside plot. Top bar: horizontal bar above the plot area (journal style).")
-        topbar_y_main = 1.04  # default, overridden below if Top bar
-        if legend_style_main == "Standard":
-            show_legend_box_main = st.checkbox("Box Legend (Main)", value=True)
-            leg_x_main = st.slider("Legend X (Main)", 0.0, 1.0, 0.8)
-            leg_y_main = st.slider("Legend Y (Main)", 0.0, 1.0, 0.9)
-        else:
-            show_legend_box_main = False
-            leg_x_main = 0.8
-            leg_y_main = 0.9
-            topbar_y_main = st.slider("Top Bar Position (Main)", 0.98, 1.12, 1.04, 0.01,
-                                       key="topbar_y_main",
-                                       help="Adjust vertical position of the top bar legend. Higher = more space above plot.")
-        
-        st.markdown("### P-value")
-        show_p_val_plot = st.checkbox("Show P-value (Main)", value=False)
-        show_p_val_box_main = st.checkbox("Box P-value (Main)", value=True)
-        pval_x_main = st.slider("P-val X (Main)", 0.0, 1.0, 0.95)
-        pval_y_main = st.slider("P-val Y (Main)", 0.0, 1.0, 0.05)
-        p_val_fontsize_main = st.number_input("P-value font size", min_value=6, max_value=24, value=12,
-                                                key="p_val_fontsize_main")
-
-        st.markdown("### Auto Annotations")
-        show_median_main = st.checkbox("Show Median Survival Lines", value=False, key="show_median_main",
-                                        help="Draw dashed drop-lines at median survival for each group")
-        show_x_year_main = st.checkbox("Show Timepoint Survival Lines", value=False, key="show_x_year_main",
-                                        help="Draw dashed lines at a specific timepoint showing survival %")
+        # KM plot defaults
+        x_label = "Time (Months)"
+        y_label = "Survival Probability"
+        tick_interval = 12.0
+        y_min = 0.0
+        y_max = 1.0
+        y_tick_interval = 0.1
+        plot_height = 6
+        plot_width = 10
+        show_legend_main = True
+        legend_style_main = "Standard"
+        show_legend_box_main = True
+        leg_x_main = 0.65
+        leg_y_main = 0.85
+        topbar_y_main = 1.04
+        show_p_val_box_main = True
+        pval_x_main = 0.95
+        pval_y_main = 0.05
+        show_median_main = False
+        show_x_year_main = False
         x_year_time_main = None
-        if show_x_year_main:
-            x_year_time_main = st.number_input("Timepoint", min_value=0.0, value=36.0, step=6.0,
-                                                key="x_year_time_main",
-                                                help="e.g. 24 for 2-year, 36 for 3-year, 60 for 5-year survival")
-
-        st.markdown("### Estimate Labels")
-        _est_mode_options_main = ["Off", "Timepoint estimate", "Median survival"]
-        est_label_mode_main = st.radio("Show Estimate Labels", _est_mode_options_main,
-                                        index=0, key="est_label_mode_main",
-                                        help="Auto-compute and display survival estimates with 95% CI on the plot")
+        est_label_mode_main = "Off"
         est_label_param_main = "OS"
         est_label_time_main = 36.0
         est_label_placement_main = "on_curve"
@@ -698,96 +663,26 @@ if df is not None:
         est_label_textcolor_main = "theme"
         est_label_bold_main = True
         est_label_gap_main = 0.12
-        if est_label_mode_main != "Off":
-            est_label_param_main = st.text_input("Parameter name", value="OS", key="est_label_param_main",
-                                                  help="e.g. OS, RFS, EFS, DFS, PFS")
-            if est_label_mode_main == "Timepoint estimate":
-                est_label_time_main = st.number_input("Timepoint (months)", min_value=0.0, value=36.0, step=6.0,
-                                                       key="est_label_time_main")
-            _placement_options = ["On curve", "Top of plot", "Bottom of plot"]
-            est_label_placement_main = st.radio("Placement", _placement_options,
-                                                 index=0, key="est_label_placement_main", horizontal=True)
-            est_label_placement_main = {"On curve": "on_curve", "Top of plot": "top", "Bottom of plot": "bottom"}[est_label_placement_main]
-            est_label_fontsize_main = st.number_input("Label font size", min_value=6, max_value=20, value=9,
-                                                       key="est_label_fontsize_main")
-            _tc_options = ["Theme color", "Black"]
-            est_label_textcolor_main = st.radio("Estimate text color", _tc_options,
-                                                 index=0, key="est_label_textcolor_main", horizontal=True,
-                                                 help="Black makes estimates more readable; group names stay in theme color.")
-            est_label_textcolor_main = "black" if est_label_textcolor_main == "Black" else "theme"
-            est_label_bold_main = st.checkbox("Bold labels", value=True, key="est_label_bold_main")
-            if est_label_placement_main in ("top", "bottom"):
-                est_label_gap_main = st.slider("Label gap", 0.05, 0.35, 0.12, 0.01,
-                                                key="est_label_gap_main",
-                                                help="Horizontal gap between group name and estimate text. Increase for long group names.")
-
-        st.markdown("### Free Text Annotations")
         main_annotations = []
-        for i in range(1, 6):
-            with st.expander(f"Annotation {i}", expanded=(i==1)):
-                m_txt = st.text_area(f"Text ({i})", value="", placeholder="e.g. HR=0.45", key=f"main_txt_{i}", height=70)
-                m_x = st.slider(f"X ({i})", 0.0, 1.0, 0.5, key=f"main_x_{i}")
-                m_y = st.slider(f"Y ({i})", 0.0, 1.0, 0.5, key=f"main_y_{i}")
-                m_sz = st.number_input(f"Size ({i})", min_value=6, value=12, key=f"main_sz_{i}")
-                m_box = st.checkbox(f"Box ({i})", value=False, key=f"main_bx_{i}")
-
-                if m_txt:
-                    main_annotations.append({'text': m_txt, 'x': m_x, 'y': m_y, 'size': m_sz, 'box': m_box})
-
-    # 3. CIF Plot Settings
-    with st.sidebar.expander("CIF Plot Settings (Competing Risks)", expanded=False):
-        st.markdown("### Layout & Axes")
-        cif_title = st.text_input("CIF Plot Title", value="Cumulative Incidence")
-        cif_y_label = st.text_input("CIF Y-Label", value="Cumulative Incidence Probability")
         
-        col3, col4 = st.columns(2)
-        with col3:
-            cif_y_min = st.number_input("CIF Y Min", value=0.0, step=0.1)
-            cif_y_tick_interval = st.number_input("CIF Y-Tick Step", value=0.1)
-        with col4:
-            cif_y_max = st.number_input("CIF Y Max", value=1.05, step=0.1)
-        
-        st.markdown("### Legend")
-        show_legend_cif = st.checkbox("Show Legend (CIF)", value=True)
-        legend_style_cif = st.radio("Legend Style (CIF)", ["Standard", "Top bar"],
-                                     index=0, horizontal=True, key="legend_style_cif",
-                                     help="Standard: inside plot. Top bar: horizontal bar above the plot area (journal style).")
-        topbar_y_cif = 1.04  # default, overridden below if Top bar
-        if legend_style_cif == "Standard":
-            show_legend_box_cif = st.checkbox("Box Legend (CIF)", value=True)
-            leg_x_cif = st.slider("Legend X (CIF)", 0.0, 1.0, 0.8)
-            leg_y_cif = st.slider("Legend Y (CIF)", 0.0, 1.0, 0.8)
-        else:
-            show_legend_box_cif = False
-            leg_x_cif = 0.8
-            leg_y_cif = 0.8
-            topbar_y_cif = st.slider("Top Bar Position (CIF)", 0.98, 1.12, 1.04, 0.01,
-                                      key="topbar_y_cif",
-                                      help="Adjust vertical position of the top bar legend. Higher = more space above plot.")
-        
-        st.markdown("### P-value")
-        show_p_val_plot_cif = st.checkbox("Show P-value (CIF)", value=False)
-        show_p_val_box_cif = st.checkbox("Box P-value (CIF)", value=True)
-        pval_x_cif = st.slider("P-val X (CIF)", 0.0, 1.0, 0.95)
-        pval_y_cif = st.slider("P-val Y (CIF)", 0.0, 1.0, 0.2)
-        p_val_fontsize_cif = st.number_input("P-value font size (CIF)", min_value=6, max_value=24, value=12,
-                                               key="p_val_fontsize_cif")
-        
-        st.markdown("### Auto Annotations")
-        show_median_cif = st.checkbox("Show Median CIF Lines", value=False, key="show_median_cif",
-                                       help="Draw dashed drop-lines where cumulative incidence reaches 50%")
-        show_x_year_cif = st.checkbox("Show Timepoint CIF Lines", value=False, key="show_x_year_cif",
-                                       help="Draw dashed lines at a specific timepoint showing cumulative incidence %")
+        # CIF plot defaults
+        cif_y_label = "Cumulative Incidence Probability"
+        cif_y_min = 0.0
+        cif_y_max = 1.05
+        cif_y_tick_interval = 0.1
+        show_legend_cif = True
+        legend_style_cif = "Standard"
+        show_legend_box_cif = True
+        leg_x_cif = 0.65
+        leg_y_cif = 0.75
+        topbar_y_cif = 1.04
+        show_p_val_box_cif = True
+        pval_x_cif = 0.95
+        pval_y_cif = 0.2
+        show_median_cif = False
+        show_x_year_cif = False
         x_year_time_cif = None
-        if show_x_year_cif:
-            x_year_time_cif = st.number_input("Timepoint (CIF)", min_value=0.0, value=36.0, step=6.0,
-                                               key="x_year_time_cif")
-
-        st.markdown("### Estimate Labels")
-        _est_mode_options_cif = ["Off", "Timepoint estimate", "Median CIF time"]
-        est_label_mode_cif = st.radio("Show Estimate Labels (CIF)", _est_mode_options_cif,
-                                       index=0, key="est_label_mode_cif",
-                                       help="Auto-compute and display CIF estimates with 95% CI on the plot")
+        est_label_mode_cif = "Off"
         est_label_param_cif = "CIR"
         est_label_time_cif = 36.0
         est_label_placement_cif = "on_curve"
@@ -795,58 +690,267 @@ if df is not None:
         est_label_textcolor_cif = "theme"
         est_label_bold_cif = True
         est_label_gap_cif = 0.12
-        if est_label_mode_cif != "Off":
-            est_label_param_cif = st.text_input("Parameter name (CIF)", value="CIR", key="est_label_param_cif",
-                                                 help="e.g. CIR, CI of relapse, CI of NRM")
-            if est_label_mode_cif == "Timepoint estimate":
-                est_label_time_cif = st.number_input("Timepoint (months, CIF)", min_value=0.0, value=36.0, step=6.0,
-                                                      key="est_label_time_cif")
-            _placement_options_cif = ["On curve", "Top of plot", "Bottom of plot"]
-            est_label_placement_cif = st.radio("Placement (CIF)", _placement_options_cif,
-                                                index=0, key="est_label_placement_cif", horizontal=True)
-            est_label_placement_cif = {"On curve": "on_curve", "Top of plot": "top", "Bottom of plot": "bottom"}[est_label_placement_cif]
-            est_label_fontsize_cif = st.number_input("Label font size (CIF)", min_value=6, max_value=20, value=9,
-                                                      key="est_label_fontsize_cif")
-            _tc_options_cif = ["Theme color", "Black"]
-            est_label_textcolor_cif = st.radio("Estimate text color (CIF)", _tc_options_cif,
-                                                index=0, key="est_label_textcolor_cif", horizontal=True,
-                                                help="Black makes estimates more readable; group names stay in theme color.")
-            est_label_textcolor_cif = "black" if est_label_textcolor_cif == "Black" else "theme"
-            est_label_bold_cif = st.checkbox("Bold labels (CIF)", value=True, key="est_label_bold_cif")
-            if est_label_placement_cif in ("top", "bottom"):
-                est_label_gap_cif = st.slider("Label gap (CIF)", 0.05, 0.35, 0.12, 0.01,
-                                               key="est_label_gap_cif",
-                                               help="Horizontal gap between group name and estimate text.")
-
-        st.markdown("### Free Text Annotations")
         cif_annotations = []
-        for i in range(1, 6):
-             with st.expander(f"Annotation {i} (CIF)", expanded=(i==1)):
-                c_txt = st.text_area(f"Text ({i})", value="", placeholder="e.g. p=0.003", key=f"cif_txt_{i}", height=70)
-                c_x = st.slider(f"X ({i})", 0.0, 1.0, 0.5, key=f"cif_x_{i}")
-                c_y = st.slider(f"Y ({i})", 0.0, 1.0, 0.5, key=f"cif_y_{i}")
-                c_sz = st.number_input(f"Size ({i})", min_value=6, value=12, key=f"cif_sz_{i}")
-                c_box = st.checkbox(f"Box ({i})", value=False, key=f"cif_bx_{i}")
 
-                if c_txt:
-                    cif_annotations.append({'text': c_txt, 'x': c_x, 'y': c_y, 'size': c_sz, 'box': c_box})
+    # ==========================================
+    # PRO: Full customization (existing sidebar)
+    # ==========================================
+    else:
+        # 1. Typography & Style
+        st.sidebar.subheader("Typography & Style")
+
+        font_options = ["sans-serif", "serif", "monospace", "Arial", "Helvetica", "Times New Roman", "Courier New", "Verdana", "Comic Sans MS"]
+        _r_font = _restored_default("selected_font", "sans-serif")
+        _font_idx = font_options.index(_r_font) if _r_font in font_options else 0
+        selected_font = st.sidebar.selectbox("Font Family", font_options, index=_font_idx)
+        plt.rcParams['font.family'] = selected_font
+
+        with st.sidebar.expander("Font Sizes & Line Width", expanded=False):
+            title_fontsize = st.slider("Title Font Size", 10, 30, int(_restored_default("title_fontsize", 20)))
+            title_bold = st.checkbox("Bold Title", value=_restored_default("title_bold", True))
+            axes_fontsize = st.number_input("Axes/Tick Font Size", min_value=6, value=int(_restored_default("axes_fontsize", 12)))
+            legend_fontsize = st.number_input("Legend Font Size", min_value=6, value=int(_restored_default("legend_fontsize", 10)))
+            line_width = st.slider("Line Width", 0.5, 5.0, float(_restored_default("line_width", 1.5)))
+        title_fontweight = 'bold' if title_bold else 'normal'
+
+        p_val_fontsize_main = 12
+        p_val_fontsize_cif = 12
+
+        # Plot Elements
+        st.sidebar.subheader("Plot Elements")
+        show_censored = st.sidebar.checkbox("Show Censored Ticks", value=_restored_default("show_censored", True))
+        show_risk_table = st.sidebar.checkbox("Show At-Risk Table", value=_restored_default("show_risk_table", True))
+        if show_risk_table:
+            with st.sidebar.expander("At-Risk Table Options", expanded=False):
+                _risk_table_options = ["At-risk only", "At-risk with censored (n censored)"]
+                _r_risk_fmt = _restored_default("risk_table_format", "At-risk only")
+                _risk_fmt_idx = _risk_table_options.index(_r_risk_fmt) if _r_risk_fmt in _risk_table_options else 0
+                risk_table_format = st.radio(
+                    "Format",
+                    _risk_table_options,
+                    index=_risk_fmt_idx,
+                    help="'At-risk with censored' shows cumulative censored count in brackets, e.g. 85 (3). Common in JCO/NEJM publications."
+                )
+                show_censored_in_table = (risk_table_format == _risk_table_options[1])
+                table_height = st.slider("Table Offset (Y)", -0.5, -0.1, float(_restored_default("table_height", -0.25)), 0.05)
+                risk_table_label_pad = st.slider("Label Gap", -0.25, -0.02, float(_restored_default("risk_table_label_pad", -0.10)), 0.01,
+                                                  help="Horizontal gap between group labels and the first data column. More negative = wider gap.")
+                risk_table_title = st.checkbox("Show Table Title", value=_restored_default("risk_table_title", False),
+                                                help="Adds a title row (e.g. 'No. at risk') above the table.")
+                risk_table_fontsize = st.number_input("Font Size", min_value=6, max_value=20,
+                                                       value=int(_restored_default("risk_table_fontsize", 10)), step=1)
+                risk_table_bold = st.checkbox("Bold Text", value=_restored_default("risk_table_bold", True))
+        else:
+            show_censored_in_table = False
+            risk_table_format = "At-risk only"
+            table_height = -0.25
+            risk_table_label_pad = -0.10
+            risk_table_title = False
+            risk_table_fontsize = 10
+            risk_table_bold = True
         
-    # Color Theme Selection
-    st.sidebar.subheader("Color Palette")
-    
-    # Use themes from utils
-    all_themes = utils.all_themes
-    theme_names = ["Default"] + list(utils.journal_themes.keys()) + list(utils.fun_themes.keys()) + ["Custom"]
-    
-    _r_theme = _restored_default("selected_theme", "Default")
-    _theme_idx = theme_names.index(_r_theme) if _r_theme in theme_names else 0
-    selected_theme = st.sidebar.selectbox("Choose Theme", theme_names, index=_theme_idx)
-    
+        # 2. Main Plot Settings (Kaplan-Meier)
+        with st.sidebar.expander("Main Plot Settings (KM)", expanded=False):
+            st.markdown("### Layout & Axes")
+            main_title = st.text_input("Main Plot Title", value="Survival")
+            x_label = st.text_input("X-Axis Label", value="Time (Months)")
+            y_label = st.text_input("Y-Axis Label", value="Survival Probability")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                tick_interval = st.number_input("X-Tick Step", value=12.0)
+                y_min = st.number_input("Y Min", value=0.0, step=0.1)
+            with col2:
+                y_tick_interval = st.number_input("Y-Tick Step", value=0.1)
+                y_max = st.number_input("Y Max", value=1.0, step=0.1)
+                
+            plot_height = st.slider("Plot Height", 4, 12, 6)
+            plot_width = st.slider("Plot Width", 6, 15, 10)
+            
+            st.markdown("### Legend")
+            show_legend_main = st.checkbox("Show Legend (Main)", value=True)
+            legend_style_main = st.radio("Legend Style (Main)", ["Standard", "Top bar"],
+                                          index=0, horizontal=True, key="legend_style_main",
+                                          help="Standard: inside plot. Top bar: horizontal bar above the plot area (journal style).")
+            topbar_y_main = 1.04
+            if legend_style_main == "Standard":
+                show_legend_box_main = st.checkbox("Box Legend (Main)", value=True)
+                leg_x_main = st.slider("Legend X (Main)", 0.0, 1.0, 0.8)
+                leg_y_main = st.slider("Legend Y (Main)", 0.0, 1.0, 0.9)
+            else:
+                show_legend_box_main = False
+                leg_x_main = 0.8
+                leg_y_main = 0.9
+                topbar_y_main = st.slider("Top Bar Position (Main)", 0.98, 1.12, 1.04, 0.01,
+                                           key="topbar_y_main",
+                                           help="Adjust vertical position of the top bar legend. Higher = more space above plot.")
+            
+            st.markdown("### P-value")
+            show_p_val_plot = st.checkbox("Show P-value (Main)", value=False)
+            show_p_val_box_main = st.checkbox("Box P-value (Main)", value=True)
+            pval_x_main = st.slider("P-val X (Main)", 0.0, 1.0, 0.95)
+            pval_y_main = st.slider("P-val Y (Main)", 0.0, 1.0, 0.05)
+            p_val_fontsize_main = st.number_input("P-value font size", min_value=6, max_value=24, value=12,
+                                                    key="p_val_fontsize_main")
+
+            st.markdown("### Auto Annotations")
+            show_median_main = st.checkbox("Show Median Survival Lines", value=False, key="show_median_main",
+                                            help="Draw dashed drop-lines at median survival for each group")
+            show_x_year_main = st.checkbox("Show Timepoint Survival Lines", value=False, key="show_x_year_main",
+                                            help="Draw dashed lines at a specific timepoint showing survival %")
+            x_year_time_main = None
+            if show_x_year_main:
+                x_year_time_main = st.number_input("Timepoint", min_value=0.0, value=36.0, step=6.0,
+                                                    key="x_year_time_main",
+                                                    help="e.g. 24 for 2-year, 36 for 3-year, 60 for 5-year survival")
+
+            st.markdown("### Estimate Labels")
+            _est_mode_options_main = ["Off", "Timepoint estimate", "Median survival"]
+            est_label_mode_main = st.radio("Show Estimate Labels", _est_mode_options_main,
+                                            index=0, key="est_label_mode_main",
+                                            help="Auto-compute and display survival estimates with 95% CI on the plot")
+            est_label_param_main = "OS"
+            est_label_time_main = 36.0
+            est_label_placement_main = "on_curve"
+            est_label_fontsize_main = 9
+            est_label_textcolor_main = "theme"
+            est_label_bold_main = True
+            est_label_gap_main = 0.12
+            if est_label_mode_main != "Off":
+                est_label_param_main = st.text_input("Parameter name", value="OS", key="est_label_param_main",
+                                                      help="e.g. OS, RFS, EFS, DFS, PFS")
+                if est_label_mode_main == "Timepoint estimate":
+                    est_label_time_main = st.number_input("Timepoint (months)", min_value=0.0, value=36.0, step=6.0,
+                                                           key="est_label_time_main")
+                _placement_options = ["On curve", "Top of plot", "Bottom of plot"]
+                est_label_placement_main = st.radio("Placement", _placement_options,
+                                                     index=0, key="est_label_placement_main", horizontal=True)
+                est_label_placement_main = {"On curve": "on_curve", "Top of plot": "top", "Bottom of plot": "bottom"}[est_label_placement_main]
+                est_label_fontsize_main = st.number_input("Label font size", min_value=6, max_value=20, value=9,
+                                                           key="est_label_fontsize_main")
+                _tc_options = ["Theme color", "Black"]
+                est_label_textcolor_main = st.radio("Estimate text color", _tc_options,
+                                                     index=0, key="est_label_textcolor_main", horizontal=True,
+                                                     help="Black makes estimates more readable; group names stay in theme color.")
+                est_label_textcolor_main = "black" if est_label_textcolor_main == "Black" else "theme"
+                est_label_bold_main = st.checkbox("Bold labels", value=True, key="est_label_bold_main")
+                if est_label_placement_main in ("top", "bottom"):
+                    est_label_gap_main = st.slider("Label gap", 0.05, 0.35, 0.12, 0.01,
+                                                    key="est_label_gap_main",
+                                                    help="Horizontal gap between group name and estimate text. Increase for long group names.")
+
+            st.markdown("### Free Text Annotations")
+            main_annotations = []
+            for i in range(1, 6):
+                with st.expander(f"Annotation {i}", expanded=(i==1)):
+                    m_txt = st.text_area(f"Text ({i})", value="", placeholder="e.g. HR=0.45", key=f"main_txt_{i}", height=70)
+                    m_x = st.slider(f"X ({i})", 0.0, 1.0, 0.5, key=f"main_x_{i}")
+                    m_y = st.slider(f"Y ({i})", 0.0, 1.0, 0.5, key=f"main_y_{i}")
+                    m_sz = st.number_input(f"Size ({i})", min_value=6, value=12, key=f"main_sz_{i}")
+                    m_box = st.checkbox(f"Box ({i})", value=False, key=f"main_bx_{i}")
+
+                    if m_txt:
+                        main_annotations.append({'text': m_txt, 'x': m_x, 'y': m_y, 'size': m_sz, 'box': m_box})
+
+        # 3. CIF Plot Settings
+        with st.sidebar.expander("CIF Plot Settings (Competing Risks)", expanded=False):
+            st.markdown("### Layout & Axes")
+            cif_title = st.text_input("CIF Plot Title", value="Cumulative Incidence")
+            cif_y_label = st.text_input("CIF Y-Label", value="Cumulative Incidence Probability")
+            
+            col3, col4 = st.columns(2)
+            with col3:
+                cif_y_min = st.number_input("CIF Y Min", value=0.0, step=0.1)
+                cif_y_tick_interval = st.number_input("CIF Y-Tick Step", value=0.1)
+            with col4:
+                cif_y_max = st.number_input("CIF Y Max", value=1.05, step=0.1)
+            
+            st.markdown("### Legend")
+            show_legend_cif = st.checkbox("Show Legend (CIF)", value=True)
+            legend_style_cif = st.radio("Legend Style (CIF)", ["Standard", "Top bar"],
+                                         index=0, horizontal=True, key="legend_style_cif",
+                                         help="Standard: inside plot. Top bar: horizontal bar above the plot area (journal style).")
+            topbar_y_cif = 1.04
+            if legend_style_cif == "Standard":
+                show_legend_box_cif = st.checkbox("Box Legend (CIF)", value=True)
+                leg_x_cif = st.slider("Legend X (CIF)", 0.0, 1.0, 0.8)
+                leg_y_cif = st.slider("Legend Y (CIF)", 0.0, 1.0, 0.8)
+            else:
+                show_legend_box_cif = False
+                leg_x_cif = 0.8
+                leg_y_cif = 0.8
+                topbar_y_cif = st.slider("Top Bar Position (CIF)", 0.98, 1.12, 1.04, 0.01,
+                                          key="topbar_y_cif",
+                                          help="Adjust vertical position of the top bar legend. Higher = more space above plot.")
+            
+            st.markdown("### P-value")
+            show_p_val_plot_cif = st.checkbox("Show P-value (CIF)", value=False)
+            show_p_val_box_cif = st.checkbox("Box P-value (CIF)", value=True)
+            pval_x_cif = st.slider("P-val X (CIF)", 0.0, 1.0, 0.95)
+            pval_y_cif = st.slider("P-val Y (CIF)", 0.0, 1.0, 0.2)
+            p_val_fontsize_cif = st.number_input("P-value font size (CIF)", min_value=6, max_value=24, value=12,
+                                                   key="p_val_fontsize_cif")
+            
+            st.markdown("### Auto Annotations")
+            show_median_cif = st.checkbox("Show Median CIF Lines", value=False, key="show_median_cif",
+                                           help="Draw dashed drop-lines where cumulative incidence reaches 50%")
+            show_x_year_cif = st.checkbox("Show Timepoint CIF Lines", value=False, key="show_x_year_cif",
+                                           help="Draw dashed lines at a specific timepoint showing cumulative incidence %")
+            x_year_time_cif = None
+            if show_x_year_cif:
+                x_year_time_cif = st.number_input("Timepoint (CIF)", min_value=0.0, value=36.0, step=6.0,
+                                                   key="x_year_time_cif")
+
+            st.markdown("### Estimate Labels")
+            _est_mode_options_cif = ["Off", "Timepoint estimate", "Median CIF time"]
+            est_label_mode_cif = st.radio("Show Estimate Labels (CIF)", _est_mode_options_cif,
+                                           index=0, key="est_label_mode_cif",
+                                           help="Auto-compute and display CIF estimates with 95% CI on the plot")
+            est_label_param_cif = "CIR"
+            est_label_time_cif = 36.0
+            est_label_placement_cif = "on_curve"
+            est_label_fontsize_cif = 9
+            est_label_textcolor_cif = "theme"
+            est_label_bold_cif = True
+            est_label_gap_cif = 0.12
+            if est_label_mode_cif != "Off":
+                est_label_param_cif = st.text_input("Parameter name (CIF)", value="CIR", key="est_label_param_cif",
+                                                     help="e.g. CIR, CI of relapse, CI of NRM")
+                if est_label_mode_cif == "Timepoint estimate":
+                    est_label_time_cif = st.number_input("Timepoint (months, CIF)", min_value=0.0, value=36.0, step=6.0,
+                                                          key="est_label_time_cif")
+                _placement_options_cif = ["On curve", "Top of plot", "Bottom of plot"]
+                est_label_placement_cif = st.radio("Placement (CIF)", _placement_options_cif,
+                                                    index=0, key="est_label_placement_cif", horizontal=True)
+                est_label_placement_cif = {"On curve": "on_curve", "Top of plot": "top", "Bottom of plot": "bottom"}[est_label_placement_cif]
+                est_label_fontsize_cif = st.number_input("Label font size (CIF)", min_value=6, max_value=20, value=9,
+                                                          key="est_label_fontsize_cif")
+                _tc_options_cif = ["Theme color", "Black"]
+                est_label_textcolor_cif = st.radio("Estimate text color (CIF)", _tc_options_cif,
+                                                    index=0, key="est_label_textcolor_cif", horizontal=True,
+                                                    help="Black makes estimates more readable; group names stay in theme color.")
+                est_label_textcolor_cif = "black" if est_label_textcolor_cif == "Black" else "theme"
+                est_label_bold_cif = st.checkbox("Bold labels (CIF)", value=True, key="est_label_bold_cif")
+                if est_label_placement_cif in ("top", "bottom"):
+                    est_label_gap_cif = st.slider("Label gap (CIF)", 0.05, 0.35, 0.12, 0.01,
+                                                   key="est_label_gap_cif",
+                                                   help="Horizontal gap between group name and estimate text.")
+
+            st.markdown("### Free Text Annotations")
+            cif_annotations = []
+            for i in range(1, 6):
+                 with st.expander(f"Annotation {i} (CIF)", expanded=(i==1)):
+                    c_txt = st.text_area(f"Text ({i})", value="", placeholder="e.g. p=0.003", key=f"cif_txt_{i}", height=70)
+                    c_x = st.slider(f"X ({i})", 0.0, 1.0, 0.5, key=f"cif_x_{i}")
+                    c_y = st.slider(f"Y ({i})", 0.0, 1.0, 0.5, key=f"cif_y_{i}")
+                    c_sz = st.number_input(f"Size ({i})", min_value=6, value=12, key=f"cif_sz_{i}")
+                    c_box = st.checkbox(f"Box ({i})", value=False, key=f"cif_bx_{i}")
+
+                    if c_txt:
+                        cif_annotations.append({'text': c_txt, 'x': c_x, 'y': c_y, 'size': c_sz, 'box': c_box})
+
     # --- DOWNLOAD MODIFIED DATA (At bottom of sidebar) ---
     st.sidebar.divider()
-    # Use df (which has new vars added at the top) or df_clean (which filters NaNs). 
-    # Usually users want the full dataset with new variables, so 'df' is better, 
-    # but 'df_filtered' if they want the filtered view. Let's give them the full 'df' with enhancements.
     if df is not None:
         csv_buffer = df.to_csv(index=False).encode('utf-8')
         st.sidebar.download_button(
@@ -1103,20 +1207,28 @@ if df is not None:
         for err in col_errors:
             st.error(err["message"])
 
-    # Plot Background Color
-    plot_bgcolor = st.sidebar.color_picker("Plot Background Color", _restored_default("plot_bgcolor", "#FFFFFF"))
+    # Plot Background Color (Pro only)
+    if is_express:
+        plot_bgcolor = "#FFFFFF"
+    else:
+        plot_bgcolor = st.sidebar.color_picker("Plot Background Color", _restored_default("plot_bgcolor", "#FFFFFF"))
 
-    # --- GLOBAL LANDMARK & ZOOM ---
-    st.sidebar.divider()
-    with st.sidebar.expander("🔍 Landmark & Zoom Analysis (Global)"):
-        st.info("Applies to ALL tabs (Univariable, Multivariable, CIF, etc.)")
-        landmark_time = st.number_input("Landmark Time", min_value=0.0, value=0.0, step=1.0, help="Exclude patients who died/censored before this time. Time 0 becomes this landmark.")
-        
-        # Determine max time for slider default (based on original data)
-        max_time_default = float(df[time_col].max()) if df is not None and pd.api.types.is_numeric_dtype(df[time_col]) else 100.0
-        
-        enable_zoom = st.checkbox("Enable Custom X-Axis Limit")
-        zoom_max = st.number_input("Max X-Axis Time", min_value=1.0, value=max_time_default, disabled=not enable_zoom)
+    # --- GLOBAL LANDMARK & ZOOM (Pro only) ---
+    if is_express:
+        landmark_time = 0.0
+        enable_zoom = False
+        zoom_max = float(df[time_col].max()) if df is not None and pd.api.types.is_numeric_dtype(df[time_col]) else 100.0
+    else:
+        st.sidebar.divider()
+        with st.sidebar.expander("🔍 Landmark & Zoom Analysis (Global)"):
+            st.info("Applies to ALL tabs (Univariable, Multivariable, CIF, etc.)")
+            landmark_time = st.number_input("Landmark Time", min_value=0.0, value=0.0, step=1.0, help="Exclude patients who died/censored before this time. Time 0 becomes this landmark.")
+            
+            # Determine max time for slider default (based on original data)
+            max_time_default = float(df[time_col].max()) if df is not None and pd.api.types.is_numeric_dtype(df[time_col]) else 100.0
+            
+            enable_zoom = st.checkbox("Enable Custom X-Axis Limit")
+            zoom_max = st.number_input("Max X-Axis Time", min_value=1.0, value=max_time_default, disabled=not enable_zoom)
 
     # Apply Landmark Filtering GLOBALLY to df_clean
     landmark_info = ""
@@ -1163,18 +1275,34 @@ if df is not None:
         if landmark_info:
             st.info(landmark_info)
 
-        tab1, tab2, tab_risk, tab3, tab_composite, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-            "Kaplan-Meier",
-            "Cox Regression",
-            "Risk Scoring",
-            "Competing Risks",
-            "Composite Figure",
-            "Biomarker Threshold",
-            "Variable Builder",
-            "Correlations",
-            "Diagnostics",
-            "Methodology",
-        ])
+        # Express Mode: fewer tabs; Pro Mode: all tabs
+        if is_express:
+            tab1, tab2, tab3, tab_composite, tab8 = st.tabs([
+                "Kaplan-Meier",
+                "Cox Regression",
+                "Competing Risks",
+                "Composite Figure",
+                "Methodology",
+            ])
+            # Create dummy variables for hidden tabs so code doesn't break
+            tab_risk = None
+            tab4 = None
+            tab5 = None
+            tab6 = None
+            tab7 = None
+        else:
+            tab1, tab2, tab_risk, tab3, tab_composite, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+                "Kaplan-Meier",
+                "Cox Regression",
+                "Risk Scoring",
+                "Competing Risks",
+                "Composite Figure",
+                "Biomarker Threshold",
+                "Variable Builder",
+                "Correlations",
+                "Diagnostics",
+                "Methodology",
+            ])
 
         with tab1:
         
@@ -2402,7 +2530,8 @@ if df is not None:
             else:
                 st.info("Select at least one covariate variable (e.g., Age, Gender, Mutations) to begin.")
 
-        with tab_risk:
+        if tab_risk is not None:
+          with tab_risk:
             st.subheader("Risk System Based on HR")
             st.write("Stratify patients into Risk Groups based on the hazard ratios from your Multivariable Model.")
 
@@ -3567,7 +3696,7 @@ if df is not None:
                     st.warning("Select at least 2 plots to create a composite figure.")
 
     # --- TAB 4: BIOMARKER DISCOVERY ---
-    if 'tab4' in locals() and df_clean is not None:
+    if 'tab4' in locals() and tab4 is not None and df_clean is not None:
          with tab4:
              st.header("Biomarker Cutoff Optimization")
              st.write("Evaluate valid continuous variables (e.g., Gene Expression, Lab Values) and find the optimal cutoff for survival stratification.")
@@ -3836,7 +3965,7 @@ if df is not None:
                      st.rerun()
 
     # --- TAB 5: VARIABLE GENERATION ---
-    if 'tab5' in locals() and df_clean is not None:
+    if 'tab5' in locals() and tab5 is not None and df_clean is not None:
          with tab5:
              st.header("🧪 Variable Generation")
              st.write("Create advanced variables by combining existing columns or applying logical rules.")
@@ -3952,7 +4081,7 @@ if df is not None:
                      st.rerun()
                          
     # --- TAB 6: CORRELATIONS ---
-    if 'tab6' in locals() and df_clean is not None:
+    if 'tab6' in locals() and tab6 is not None and df_clean is not None:
          with tab6:
              st.header("🔥 Correlation Heatmap")
              st.write("Visualize relationships between variables. Useful for checking multicollinearity.")
@@ -3996,6 +4125,7 @@ if df is not None:
                      st.warning("The system attempted to auto-install it but failed. Please try restarting the app or installing 'seaborn' manually in your environment.")
                      st.code("pip install seaborn")
 
+    if tab7 is not None:
          with tab7:
              st.subheader("🎯 Diagnostic Accuracy & Prognostic Concordance")
              
