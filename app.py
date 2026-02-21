@@ -547,7 +547,7 @@ if df is not None:
     _app_mode = st.sidebar.radio(
         "Mode",
         ["⚡ Express", "🔧 Pro"],
-        index=0,
+        index=1,
         horizontal=True,
         help="Express: publication-ready plots with smart defaults. Pro: full customization of every element."
     )
