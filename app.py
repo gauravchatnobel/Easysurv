@@ -3103,7 +3103,7 @@ if df is not None:
                     st.dataframe(_display_fg.style.format(
                         {c: "{:.3f}" for c in _display_fg.columns if c != 'p-value'}
                     ))
-                    st.caption(f"Reference Group: **{fg_ref_group}** | Robust SE (sandwich estimator)")
+                    st.caption(f"Reference Group: **{fg_ref_group}** | Model-based SE (equivalent to R's cmprsk::crr)")
 
                 # Pairwise Fine-Gray Comparisons (Gray's Test)
                 if group_col != "None" and group_col in cif_df.columns:
@@ -4223,8 +4223,9 @@ if df is not None:
              *   **Log-Rank Test**: Mantel, N. (1966). Evaluation of survival data and two new rank order statistics arising in its consideration. *Cancer Chemotherapy Reports*, 50(3), 163-170.
              
              #### Competing Risks
-             *   **Fine-Gray Regression**: Fine, J. P., & Gray, R. J. (1999). A proportional hazards model for the subdistribution of a competing risk. *Journal of the American Statistical Association*, 94(446), 496-509.
              *   **Aalen-Johansen Estimator**: Aalen, O. O., & Johansen, S. (1978). An empirical transition matrix for non-homogeneous Markov chains based on censored observations. *Scandinavian Journal of Statistics*, 141-150.
+             *   **Gray's K-sample Test**: Gray, R. J. (1988). A class of K-sample tests for comparing the cumulative incidence of a competing risk. *Annals of Statistics*, 16(3), 1141-1154.
+             *   **Fine-Gray Regression**: Fine, J. P., & Gray, R. J. (1999). A proportional hazards model for the subdistribution of a competing risk. *Journal of the American Statistical Association*, 94(446), 496-509.
              
              #### Advanced Methods
              *   **Landmark Analysis**: Anderson, J. R., Cain, K. C., & Gelber, R. D. (1983). Analysis of survival by tumor response. *Journal of Clinical Oncology*, 1(11), 710-719.
@@ -4232,6 +4233,31 @@ if df is not None:
              #### Diagnostic Accuracy
              *   **Wilson Score Interval**: Wilson, E. B. (1927). Probable inference, the law of succession, and statistical inference. *Journal of the American Statistical Association*, 22(158), 209-212.
              *   **Harrell's C-Index**: Harrell Jr, F. E., Lee, K. L., & Mark, D. B. (1996). Multivariable prognostic models: issues in developing models, evaluating assumptions and adequacy, and measuring and reducing errors. *Statistics in medicine*, 15(4), 361-387.
+             
+             ---
+             
+             ### 🔬 Methodology Notes
+             
+             #### Kaplan-Meier & Cox PH
+             Kaplan-Meier survival is estimated using the product-limit estimator. Group comparisons use the **log-rank test** (Mantel, 1966). Hazard ratios (HRs) are estimated using the **Cox proportional hazards** model (Cox, 1972). The proportional hazards assumption is assessed using scaled Schoenfeld residuals.
+             
+             #### Cumulative Incidence (Competing Risks)
+             
+             Cumulative incidence functions (CIF) are estimated using the **Aalen-Johansen estimator** (lifelines `AalenJohansenFitter`), which correctly accounts for competing events. This is equivalent to R's `cmprsk::cuminc()` point estimates.
+             
+             **Group comparison** on the CIF plot uses **Gray's K-sample test** (Gray, 1988), the nonparametric analogue of the log-rank test for competing risks. It tests whether the CIF of the event of interest is equal across groups using a modified risk set where competing-event subjects remain at risk with inverse-probability-of-censoring (IPCW) weights *G(t)/G(Tᵢ)*. This is equivalent to the test statistic reported by R's `cmprsk::cuminc()$Tests`.
+             
+             **Subdistribution hazard ratios (SHRs)** are estimated using the **Fine-Gray regression model** (Fine & Gray, 1999), implemented via an IPCW-weighted Cox proportional hazards model in counting-process format. Subjects experiencing competing events are kept in the subdistribution risk set with weights derived from the Kaplan-Meier estimate of the censoring distribution. The model-based (Hessian) variance is used for confidence intervals and p-values, which is equivalent to the variance estimator used by R's `cmprsk::crr()`.
+             
+             **Pairwise SHRs** are computed by fitting separate Fine-Gray models on each pair of groups, providing 1 d.f. tests with higher power for detecting differences in small subgroups.
+             
+             #### Implementation Equivalence with R
+             | EasySurv Component | R Equivalent |
+             |---|---|
+             | Aalen-Johansen CIF | `cmprsk::cuminc()` point estimates |
+             | Gray's test (plot p-value) | `cmprsk::cuminc()$Tests` |
+             | Fine-Gray SHR table | `cmprsk::crr()` coefficients & SE |
+             | Pairwise SHR table | `cmprsk::crr()` on each pair |
              
              ### 📝 How to Cite EasySurv
              If you use this tool for your research, please cite it as:
