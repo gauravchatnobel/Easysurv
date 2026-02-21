@@ -3077,10 +3077,14 @@ if df is not None:
                         st.write("### Pairwise Subdistribution HRs (Gray's Test)")
                         st.write("Each pair compared in a **separate** Fine-Gray model (1 d.f. per test → higher power for small groups).")
                         
+                        # Use same reference as the global model (fg_ref_group already selected above)
+                        _pw_ref = fg_ref_group if 'fg_ref_group' in dir() else None
+                        
                         with st.spinner("Computing pairwise Fine-Gray comparisons..."):
                             pw_fg = pairwise_fine_gray(
                                 cif_df, cif_time_col, cif_event_col, group_col,
-                                event_of_interest=cif_event_of_interest
+                                event_of_interest=cif_event_of_interest,
+                                reference_group=_pw_ref
                             )
                         
                         if pw_fg is not None and not pw_fg.empty:
@@ -3107,16 +3111,17 @@ if df is not None:
                                     return ['background-color: rgba(0, 180, 0, 0.1)'] * len(row)
                                 return [''] * len(row)
                             
-                            num_cols = [c for c in _display_pw.columns if c not in ('Group 1', 'Group 2', 'p-value', 'Note')]
+                            num_cols = [c for c in _display_pw.columns if c not in ('Reference', 'Comparison', 'p-value', 'Note')]
                             st.dataframe(
                                 _display_pw.style.format(
                                     {c: "{:.3f}" for c in num_cols}
                                 ).apply(_highlight_pw, axis=1)
                             )
+                            _ref_label = _pw_ref if _pw_ref else "first group (alphabetical)"
                             st.caption(
-                                "🟩 Green: p<0.05 | "
-                                "HR interpretation: Group 2 vs Group 1 (Group 1 = reference). "
-                                "HR>1 means Group 2 has higher cumulative incidence."
+                                f"🟩 Green: p<0.05 | "
+                                f"Reference: **{_ref_label}** | "
+                                f"HR>1 means the Comparison group has higher cumulative incidence than Reference."
                             )
                             
                             # Download

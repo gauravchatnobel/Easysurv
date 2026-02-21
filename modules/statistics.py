@@ -90,9 +90,9 @@ def compute_fine_gray_weights(df, time_col, event_col, event_of_interest=1):
     return pd.DataFrame(new_rows)
 
 
-def pairwise_fine_gray(df, time_col, event_col, group_col, event_of_interest=1):
+def pairwise_fine_gray(df, time_col, event_col, group_col, event_of_interest=1, reference_group=None):
     """
-    Performs pairwise Fine-Gray regression between ALL pairs of groups.
+    Performs pairwise Fine-Gray regression between pairs of groups.
     
     For each pair, fits a separate Fine-Gray model (IPCW-weighted Cox) using 
     only the two groups being compared. This is more powerful than extracting 
@@ -101,8 +101,15 @@ def pairwise_fine_gray(df, time_col, event_col, group_col, event_of_interest=1):
       2. The IPCW weights are computed on the pair-specific subset, giving 
          cleaner censoring estimates
     
+    Parameters
+    ----------
+    reference_group : str or None
+        If provided, all comparisons use this group as the baseline (Group 1).
+        HR > 1 means Group 2 has higher cumulative incidence than reference.
+        If None, all pairwise combinations are shown with alphabetical ordering.
+    
     Returns a DataFrame with columns:
-      Group 1, Group 2, Subdist HR, Lower 95%, Upper 95%, p-value
+      Reference, Comparison, Subdist HR, Lower 95%, Upper 95%, p-value
     
     Ref: Fine JP, Gray RJ. JASA 1999;94(446):496-509.
     """
@@ -112,27 +119,35 @@ def pairwise_fine_gray(df, time_col, event_col, group_col, event_of_interest=1):
     if len(groups) < 2:
         return None
     
+    # Build list of (reference, comparison) pairs
+    if reference_group is not None and str(reference_group) in [str(g) for g in groups]:
+        # All other groups vs the chosen reference
+        pairs = [(reference_group, g) for g in groups if str(g) != str(reference_group)]
+    else:
+        # All pairwise combinations (alphabetical order)
+        pairs = list(combinations(groups, 2))
+    
     results = []
     
-    for g1, g2 in combinations(groups, 2):
+    for ref, comp in pairs:
         try:
             # Subset to just these two groups
-            pair_df = df[df[group_col].isin([g1, g2])].copy()
+            pair_df = df[df[group_col].isin([ref, comp])].copy()
             
             # Compute Fine-Gray weights on the pair subset
             fg_pair = compute_fine_gray_weights(pair_df, time_col, event_col, event_of_interest)
             
             if fg_pair.empty or len(fg_pair) < 5:
                 results.append({
-                    'Group 1': str(g1), 'Group 2': str(g2),
+                    'Reference': str(ref), 'Comparison': str(comp),
                     'Subdist HR': np.nan, 'Lower 95%': np.nan,
                     'Upper 95%': np.nan, 'p-value': np.nan,
                     'Note': 'Insufficient data'
                 })
                 continue
             
-            # Encode group: g2 = 1 (test), g1 = 0 (reference)
-            fg_pair['_group_indicator'] = (fg_pair[group_col] == g2).astype(int)
+            # Encode group: comp = 1 (test), ref = 0 (baseline)
+            fg_pair['_group_indicator'] = (fg_pair[group_col] == comp).astype(int)
             
             cols_to_fit = ['start', 'stop', 'status', 'weight', 'id', '_group_indicator']
             
@@ -151,8 +166,8 @@ def pairwise_fine_gray(df, time_col, event_col, group_col, event_of_interest=1):
             p = cph_pair.summary.loc['_group_indicator', 'p']
             
             results.append({
-                'Group 1': str(g1),
-                'Group 2': str(g2),
+                'Reference': str(ref),
+                'Comparison': str(comp),
                 'Subdist HR': hr,
                 'Lower 95%': lo,
                 'Upper 95%': hi,
@@ -161,7 +176,7 @@ def pairwise_fine_gray(df, time_col, event_col, group_col, event_of_interest=1):
             
         except Exception as e:
             results.append({
-                'Group 1': str(g1), 'Group 2': str(g2),
+                'Reference': str(ref), 'Comparison': str(comp),
                 'Subdist HR': np.nan, 'Lower 95%': np.nan,
                 'Upper 95%': np.nan, 'p-value': np.nan,
                 'Note': str(e)
