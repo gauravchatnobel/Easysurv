@@ -3587,87 +3587,92 @@ if df is not None:
 
                     panel_labels = st.checkbox("Show panel labels (A, B, C, D)", value=True)
                     comp_fontsize = st.number_input("Panel label size", min_value=12, max_value=36, value=18)
+                    
+                    # Panel spacing controls
+                    st.markdown("**Panel Spacing**")
+                    _sp_col1, _sp_col2 = st.columns(2)
+                    with _sp_col1:
+                        comp_hspace = st.slider("Vertical gap", 0.0, 0.5, 0.05, 0.01,
+                                                help="Space between rows of panels. 0 = touching, 0.5 = very wide gap.")
+                    with _sp_col2:
+                        comp_wspace = st.slider("Horizontal gap", 0.0, 0.5, 0.02, 0.01,
+                                                help="Space between columns of panels. 0 = touching, 0.5 = very wide gap.")
+                    comp_pad = st.slider("Outer margin", 0.0, 3.0, 0.5, 0.1,
+                                         help="Padding around the entire figure edge.")
 
                     if st.button("Generate Composite Figure", type="primary"):
-                        # Render each source figure to an image buffer
-                        panel_images = []
-                        for key in selected_panels:
-                            src_fig = _available_plots[key]
-                            buf = io.BytesIO()
-                            src_fig.savefig(buf, format='png', dpi=300, bbox_inches='tight',
-                                            facecolor=src_fig.get_facecolor(), edgecolor='none')
-                            buf.seek(0)
-                            panel_images.append(plt.imread(buf))
 
-                        # Determine grid shape
-                        if n == 2:
-                            if "1x2" in layout:
-                                nrows, ncols = 1, 2
-                            else:
-                                nrows, ncols = 2, 1
-                        elif n == 4:
-                            if "2x2" in layout:
-                                nrows, ncols = 2, 2
-                            elif "1x4" in layout:
-                                nrows, ncols = 1, 4
-                            else:
-                                nrows, ncols = 4, 1
-                        else:  # n == 3
-                            if "1x3" in layout:
-                                nrows, ncols = 1, 3
-                            elif "T-shape" in layout:
-                                nrows, ncols = 2, 2  # special case
-                            else:
-                                nrows, ncols = 3, 1
+                        def _build_composite(source_dpi):
+                            """Build composite figure from source figures rendered at given DPI."""
+                            _panel_imgs = []
+                            for key in selected_panels:
+                                src_fig = _available_plots[key]
+                                _buf = io.BytesIO()
+                                src_fig.savefig(_buf, format='png', dpi=source_dpi, bbox_inches='tight',
+                                                facecolor=src_fig.get_facecolor(), edgecolor='none')
+                                _buf.seek(0)
+                                _panel_imgs.append(plt.imread(_buf))
 
-                        is_t_shape = (n == 3 and "T-shape" in layout)
+                            is_t = (n == 3 and "T-shape" in layout)
 
-                        if is_t_shape:
-                            fig_comp, axes = plt.subplots(2, 2, figsize=(20, 12))
-                            # Top-left: panel A spans full top row visually
-                            axes[0, 0].imshow(panel_images[0])
-                            axes[0, 0].axis('off')
-                            axes[0, 1].axis('off')  # hide top-right
-                            axes[0, 1].set_visible(False)
-                            # Merge top row: remove the axes and use a single axes spanning both cols
-                            fig_comp.delaxes(axes[0, 0])
-                            fig_comp.delaxes(axes[0, 1])
-                            ax_top = fig_comp.add_subplot(2, 1, 1)
-                            ax_top.imshow(panel_images[0])
-                            ax_top.axis('off')
-                            if panel_labels:
-                                ax_top.text(0.02, 0.98, 'A', transform=ax_top.transAxes,
-                                            fontsize=comp_fontsize, weight='bold', va='top')
-
-                            axes[1, 0].imshow(panel_images[1])
-                            axes[1, 0].axis('off')
-                            if panel_labels:
-                                axes[1, 0].text(0.02, 0.98, 'B', transform=axes[1, 0].transAxes,
-                                                fontsize=comp_fontsize, weight='bold', va='top')
-
-                            axes[1, 1].imshow(panel_images[2])
-                            axes[1, 1].axis('off')
-                            if panel_labels:
-                                axes[1, 1].text(0.02, 0.98, 'C', transform=axes[1, 1].transAxes,
-                                                fontsize=comp_fontsize, weight='bold', va='top')
-                        else:
-                            fig_comp, axes = plt.subplots(nrows, ncols, figsize=(10 * ncols, 6 * nrows))
-                            if n == 1:
-                                axes = [axes]
-                            elif nrows == 1 or ncols == 1:
-                                axes = axes.flatten()
-
-                            labels_abc = ['A', 'B', 'C', 'D']
-                            for idx, (key, img) in enumerate(zip(selected_panels, panel_images)):
-                                axes[idx].imshow(img)
-                                axes[idx].axis('off')
+                            if is_t:
+                                _fig, _axes = plt.subplots(2, 2, figsize=(20, 12))
+                                _axes[0, 0].imshow(_panel_imgs[0]); _axes[0, 0].axis('off')
+                                _axes[0, 1].axis('off'); _axes[0, 1].set_visible(False)
+                                _fig.delaxes(_axes[0, 0]); _fig.delaxes(_axes[0, 1])
+                                _ax_top = _fig.add_subplot(2, 1, 1)
+                                _ax_top.imshow(_panel_imgs[0]); _ax_top.axis('off')
                                 if panel_labels:
-                                    axes[idx].text(0.02, 0.98, labels_abc[idx], transform=axes[idx].transAxes,
-                                                   fontsize=comp_fontsize, weight='bold', va='top')
+                                    _ax_top.text(0.02, 0.98, 'A', transform=_ax_top.transAxes,
+                                                fontsize=comp_fontsize, weight='bold', va='top')
+                                _axes[1, 0].imshow(_panel_imgs[1]); _axes[1, 0].axis('off')
+                                if panel_labels:
+                                    _axes[1, 0].text(0.02, 0.98, 'B', transform=_axes[1, 0].transAxes,
+                                                    fontsize=comp_fontsize, weight='bold', va='top')
+                                _axes[1, 1].imshow(_panel_imgs[2]); _axes[1, 1].axis('off')
+                                if panel_labels:
+                                    _axes[1, 1].text(0.02, 0.98, 'C', transform=_axes[1, 1].transAxes,
+                                                    fontsize=comp_fontsize, weight='bold', va='top')
+                            else:
+                                # Determine grid
+                                if n == 2:
+                                    _nr, _nc = (1, 2) if "1x2" in layout else (2, 1)
+                                elif n == 4:
+                                    if "2x2" in layout: _nr, _nc = 2, 2
+                                    elif "1x4" in layout: _nr, _nc = 1, 4
+                                    else: _nr, _nc = 4, 1
+                                else:
+                                    if "1x3" in layout: _nr, _nc = 1, 3
+                                    elif "T-shape" in layout: _nr, _nc = 2, 2
+                                    else: _nr, _nc = 3, 1
 
-                        fig_comp.patch.set_facecolor(plot_bgcolor)
-                        fig_comp.tight_layout(pad=1.0)
+                                _fig, _axes = plt.subplots(_nr, _nc, figsize=(10 * _nc, 6 * _nr))
+                                if n == 1:
+                                    _axes = [_axes]
+                                elif _nr == 1 or _nc == 1:
+                                    _axes = _axes.flatten()
+                                else:
+                                    _axes = _axes.flatten()
 
+                                _labels = ['A', 'B', 'C', 'D']
+                                for idx, (key, img) in enumerate(zip(selected_panels, _panel_imgs)):
+                                    _axes[idx].imshow(img)
+                                    _axes[idx].axis('off')
+                                    if panel_labels:
+                                        _axes[idx].text(0.02, 0.98, _labels[idx], transform=_axes[idx].transAxes,
+                                                       fontsize=comp_fontsize, weight='bold', va='top')
+                                # Hide extra axes in grid layouts (e.g., 2x2 with 3 panels)
+                                if hasattr(_axes, '__len__'):
+                                    for idx in range(n, len(_axes)):
+                                        _axes[idx].set_visible(False)
+
+                            _fig.patch.set_facecolor(plot_bgcolor)
+                            _fig.subplots_adjust(wspace=comp_wspace, hspace=comp_hspace)
+                            _fig.tight_layout(pad=comp_pad)
+                            return _fig
+
+                        # Build preview at 300 DPI
+                        fig_comp = _build_composite(300)
                         st.pyplot(fig_comp)
 
                         # Download buttons
@@ -3679,16 +3684,23 @@ if df is not None:
                             buf_comp.seek(0)
                             st.download_button("💾 Download (300 DPI)", buf_comp, "composite_figure_300dpi.png", "image/png")
                         with col2:
-                            buf_comp_hi = io.BytesIO()
-                            fig_comp.savefig(buf_comp_hi, format="png", dpi=600, bbox_inches='tight',
-                                             facecolor=fig_comp.get_facecolor(), edgecolor='none')
-                            buf_comp_hi.seek(0)
-                            st.download_button("💾 Download (600 DPI)", buf_comp_hi, "composite_figure_600dpi.png", "image/png")
+                            # TRUE 600 DPI: rebuild from 600 DPI source renders
+                            with st.spinner("Building 600 DPI..."):
+                                fig_comp_hi = _build_composite(600)
+                                buf_comp_hi = io.BytesIO()
+                                fig_comp_hi.savefig(buf_comp_hi, format="png", dpi=600, bbox_inches='tight',
+                                                    facecolor=fig_comp_hi.get_facecolor(), edgecolor='none')
+                                buf_comp_hi.seek(0)
+                                plt.close(fig_comp_hi)
+                            st.download_button("💾 Download TRUE 600 DPI", buf_comp_hi, "composite_figure_600dpi.png", "image/png")
                         with col3:
+                            # PDF also from 600 DPI sources
+                            fig_comp_pdf = _build_composite(600)
                             buf_comp_pdf = io.BytesIO()
-                            fig_comp.savefig(buf_comp_pdf, format="pdf", bbox_inches='tight',
-                                             facecolor=fig_comp.get_facecolor(), edgecolor='none')
+                            fig_comp_pdf.savefig(buf_comp_pdf, format="pdf", bbox_inches='tight',
+                                                 facecolor=fig_comp_pdf.get_facecolor(), edgecolor='none')
                             buf_comp_pdf.seek(0)
+                            plt.close(fig_comp_pdf)
                             st.download_button("📄 Download (PDF)", buf_comp_pdf, "composite_figure.pdf", "application/pdf")
 
                         plt.close(fig_comp)
