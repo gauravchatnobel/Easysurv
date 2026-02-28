@@ -3521,6 +3521,7 @@ if df is not None:
                          cif_est_data=cif_est_data if 'cif_est_data' in dir() else None,
                          cif_target_time=cif_target_time if 'cif_target_time' in dir() else None,
                          fg_summary=fg_summary if 'fg_summary' in dir() else None,
+                         fg_mv_summary=st.session_state.get('fg_mv_summary', None),
                          style_name=narrator_style_name,
                          detail_level=narrator_detail_level,
                          event_of_interest=_cif_event_name,
@@ -4802,6 +4803,8 @@ if df is not None:
              
              **Pairwise SHRs** are computed by fitting separate Fine-Gray models on each pair of groups, providing 1 d.f. tests with higher power for detecting differences in small subgroups.
              
+             **Multivariable Fine-Gray regression** uses the same IPCW-weighted Cox framework but with multiple covariates, reporting **adjusted subdistribution hazard ratios (aSHR)**. Categorical covariates are dummy-encoded with a user-selected reference group. The model-based (Hessian) variance is used for SE/CI/p-values, identical to R's `cmprsk::crr()` with a design matrix. Statistical guardrails (EPV, VIF, collinearity checks) are applied before fitting.
+             
              #### Implementation Equivalence with R
              | EasySurv Component | R Equivalent |
              |---|---|
@@ -4809,6 +4812,7 @@ if df is not None:
              | Gray's test (plot p-value) | `cmprsk::cuminc()$Tests` |
              | Fine-Gray SHR table | `cmprsk::crr()` coefficients & SE |
              | Pairwise SHR table | `cmprsk::crr()` on each pair |
+             | **Multivariable Fine-Gray (aSHR)** | **`cmprsk::crr()` with covariate matrix** |
              
              ### 📝 How to Cite EasySurv
              If you use this tool for your research, please cite it as:

@@ -523,6 +523,7 @@ def generate_cif_narrative(
     cif_est_data=None,
     cif_target_time=None,
     fg_summary=None,
+    fg_mv_summary=None,
     style_name="Standard",
     detail_level="Detailed",
     event_of_interest=None,
@@ -544,8 +545,11 @@ def generate_cif_narrative(
     cif_target_time : float or None
         Time point for point estimates.
     fg_summary : pd.DataFrame or None
-        Fine-Gray regression summary with columns:
+        Univariable Fine-Gray regression summary with columns:
         'Subdist HR', 'Lower 95%', 'Upper 95%', 'p-value'.
+    fg_mv_summary : pd.DataFrame or None
+        Multivariable Fine-Gray regression summary with columns:
+        'Variable', 'aSHR', 'Lower 95%', 'Upper 95%', 'p-value'.
     style_name : str
         Journal style name.
     detail_level : str
@@ -650,6 +654,49 @@ def generate_cif_narrative(
                 interp = _interpret_shr(shr)
                 sig = _significance_phrase(p, style)
                 text += f"* **{idx}** was {sig} {interp} (SHR {shr:.2f}, 95% CI {ci_str}, {p_str}).\n"
+
+    # Multivariable Fine-Gray (adjusted SHRs)
+    if fg_mv_summary is not None and len(fg_mv_summary) > 0:
+        text += "\n\n"
+        if concise:
+            text += "**Multivariable Fine-Gray (adjusted SHRs):**\n"
+            for _, row in fg_mv_summary.iterrows():
+                shr = row['aSHR']
+                p = row['p-value']
+                ci_low = row['Lower 95%']
+                ci_high = row['Upper 95%']
+                ci_str = _format_ci(ci_low, ci_high, style)
+                p_str = _format_p(p, style)
+                text += f"* **{row['Variable']}**: aSHR {shr:.2f}, 95% CI {ci_str}, {p_str}\n"
+        else:
+            text += (
+                "**Multivariable Fine-Gray regression** "
+                "(adjusted subdistribution hazard model):\n"
+            )
+            # Separate significant and non-significant
+            sig_rows = fg_mv_summary[fg_mv_summary['p-value'] < 0.05]
+            nonsig_rows = fg_mv_summary[fg_mv_summary['p-value'] >= 0.05]
+
+            if len(sig_rows) > 0:
+                text += "\nIndependent predictors of cumulative incidence:\n"
+                for _, row in sig_rows.iterrows():
+                    shr = row['aSHR']
+                    p = row['p-value']
+                    ci_str = _format_ci(row['Lower 95%'], row['Upper 95%'], style)
+                    p_str = _format_p(p, style)
+                    interp = _interpret_shr(shr)
+                    text += (
+                        f"* **{row['Variable']}** was independently {interp} "
+                        f"(aSHR {shr:.2f}, 95% CI {ci_str}, {p_str}).\n"
+                    )
+
+            if len(nonsig_rows) > 0:
+                ns_names = [f"**{r['Variable']}**" for _, r in nonsig_rows.iterrows()]
+                if len(ns_names) == 1:
+                    text += f"\n{ns_names[0]} was not independently associated with {event_label} "
+                else:
+                    text += f"\n{', '.join(ns_names[:-1])} and {ns_names[-1]} were not independently associated with {event_label} "
+                text += "after adjustment for other covariates.\n"
 
     return text
 
