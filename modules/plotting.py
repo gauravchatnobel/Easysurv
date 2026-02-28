@@ -424,6 +424,7 @@ def add_estimate_labels(fitters, ax, colors=None, labels=None,
 def create_forest_plot(summary_df, theme_color='#1f77b4', title="Forest Plot",
                        xlabel="Hazard Ratio (95% CI)", reference_line=1.0,
                        figsize=None, label_fontsize=10, p_formatter=None,
+                       ci_sep='-',
                        hr_label='HR', hr_col='Hazard Ratio (HR)',
                        lower_col='Lower 95%', upper_col='Upper 95%',
                        p_col='p-value', use_index_labels=True):
@@ -449,6 +450,8 @@ def create_forest_plot(summary_df, theme_color='#1f77b4', title="Forest Plot",
         Font size for variable labels.
     p_formatter : callable or None
         Function(p_value) -> str. If None, uses default format.
+    ci_sep : str
+        Separator for CI values in annotations (e.g. '-', ' to ', '–').
     hr_label : str
         Label for the hazard ratio (e.g. 'HR', 'aSHR').
     hr_col : str
@@ -510,7 +513,7 @@ def create_forest_plot(summary_df, theme_color='#1f77b4', title="Forest Plot",
             p_str = p_formatter(p)
         else:
             p_str = f"p<0.001" if p < 0.001 else f"p={p:.3f}"
-        annotation = f"{hr:.2f} ({lo:.2f}-{hi:.2f}) {p_str}"
+        annotation = f"{hr:.2f} ({lo:.2f}{ci_sep}{hi:.2f}) {p_str}"
         # Place to the right of the plot
         ax.annotate(annotation, xy=(1.02, y_pos[i]),
                     xycoords=('axes fraction', 'data'),

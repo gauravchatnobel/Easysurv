@@ -2485,11 +2485,15 @@ if df is not None:
                             if selected_theme in all_themes and len(all_themes[selected_theme]) > 0:
                                  forest_color = all_themes[selected_theme][0]
 
+                            # CI separator from journal style
+                            _ci_sep = narrator.JOURNAL_STYLES.get(narrator_style_name, {}).get('ci_sep', '-')
+                            
                             fig_forest = plotting.create_forest_plot(
                                 summary_mv,
                                 theme_color=forest_color,
                                 title="Multivariable Cox Regression Results",
                                 p_formatter=lambda p: format_p_value(p, narrator_style_name, context="plot"),
+                                ci_sep=_ci_sep,
                             )
                             st.pyplot(fig_forest)
                             
@@ -2504,31 +2508,31 @@ if df is not None:
                                 st.download_button("💾 Download High-Res Forest Plot (600 DPI)", plotting.save_plot_to_buffer(fig_forest, dpi=600), "forest_plot_600dpi.png", "image/png")
                             with col3:
                                 st.download_button("📄 Download Forest Plot (PDF)", plotting.save_plot_to_buffer(fig_forest, fmt="pdf"), "forest_plot.pdf", "application/pdf")
-                                
-                                # --- AI NARRATOR (Multivariable) ---
-                                st.divider()
-                                st.write("### 🤖 AI Result Narrator")
+                            
+                            # --- AI NARRATOR (Multivariable) ---
+                            st.divider()
+                            st.write("### 🤖 AI Result Narrator")
 
-                                mv_df_for_narrator = st.session_state.get('mv_summary_df', summary_mv)
+                            mv_df_for_narrator = st.session_state.get('mv_summary_df', summary_mv)
 
-                                if st.button("Generate Summary Text (Multivariable)"):
-                                    n_patients = len(mv_df) if 'mv_df' in dir() else None
-                                    n_events = int(mv_df[event_col].sum()) if 'mv_df' in dir() else None
+                            if st.button("Generate Summary Text (Multivariable)"):
+                                n_patients = len(mv_df) if 'mv_df' in dir() else None
+                                n_events = int(mv_df[event_col].sum()) if 'mv_df' in dir() else None
 
-                                    mv_narrative = narrator.generate_multivariable_narrative(
-                                        summary_df=mv_df_for_narrator,
-                                        use_penalizer=use_penalizer,
-                                        penalizer_value=st.session_state.get('penalizer_val', 0.0),
-                                        l1_ratio=st.session_state.get('l1_ratio_val', 0.0),
-                                        n_patients=n_patients,
-                                        n_events=n_events,
-                                        style_name=narrator_style_name,
-                                        detail_level=narrator_detail_level,
-                                        event_name=narrator_event_name,
-                                        landmark_time=landmark_time if landmark_time > 0 else None,
-                                    )
-                                    st.success("Summary Generated (click the copy icon to copy):")
-                                    st.code(mv_narrative, language=None)
+                                mv_narrative = narrator.generate_multivariable_narrative(
+                                    summary_df=mv_df_for_narrator,
+                                    use_penalizer=use_penalizer,
+                                    penalizer_value=st.session_state.get('penalizer_val', 0.0),
+                                    l1_ratio=st.session_state.get('l1_ratio_val', 0.0),
+                                    n_patients=n_patients,
+                                    n_events=n_events,
+                                    style_name=narrator_style_name,
+                                    detail_level=narrator_detail_level,
+                                    event_name=narrator_event_name,
+                                    landmark_time=landmark_time if landmark_time > 0 else None,
+                                )
+                                st.success("Summary Generated (click the copy icon to copy):")
+                                st.code(mv_narrative, language=None)
 
                         except Exception as e:
                             st.error(f"Error running model: {e}")
@@ -3745,12 +3749,16 @@ if df is not None:
                                     if selected_theme in all_themes and len(all_themes[selected_theme]) > 0:
                                         _fg_forest_color = all_themes[selected_theme][0]
                                     
+                                    # CI separator from journal style
+                                    _fg_ci_sep = narrator.JOURNAL_STYLES.get(narrator_style_name, {}).get('ci_sep', '-')
+                                    
                                     _fig_forest_fg = plotting.create_forest_plot(
                                         _fg_mv_summary,
                                         theme_color=_fg_forest_color,
                                         title="Multivariable Fine-Gray Regression",
                                         xlabel="Adjusted Subdistribution Hazard Ratio (aSHR)",
                                         p_formatter=lambda p: format_p_value(p, narrator_style_name, context="plot"),
+                                        ci_sep=_fg_ci_sep,
                                         hr_col='aSHR',
                                         lower_col='Lower 95%',
                                         upper_col='Upper 95%',
