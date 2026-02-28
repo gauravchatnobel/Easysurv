@@ -2489,6 +2489,7 @@ if df is not None:
                                 summary_mv,
                                 theme_color=forest_color,
                                 title="Multivariable Cox Regression Results",
+                                p_formatter=lambda p: format_p_value(p, narrator_style_name, context="plot"),
                             )
                             st.pyplot(fig_forest)
                             
@@ -3739,43 +3740,23 @@ if df is not None:
                                     # --- FOREST PLOT ---
                                     st.write("### Forest Plot (Adjusted SHR)")
                                     
-                                    _n_vars = len(_fg_mv_summary)
-                                    _fig_height = max(3, 0.5 * _n_vars + 1.5)
-                                    _fig_forest_fg, _ax_forest_fg = plt.subplots(figsize=(8, _fig_height))
+                                    # Theme Color (same as Cox PH forest)
+                                    _fg_forest_color = '#1f77b4'
+                                    if selected_theme in all_themes and len(all_themes[selected_theme]) > 0:
+                                        _fg_forest_color = all_themes[selected_theme][0]
                                     
-                                    _y_pos = range(_n_vars)
-                                    _ax_forest_fg.errorbar(
-                                        _fg_mv_summary['aSHR'],
-                                        _y_pos,
-                                        xerr=[
-                                            _fg_mv_summary['aSHR'] - _fg_mv_summary['Lower 95%'],
-                                            _fg_mv_summary['Upper 95%'] - _fg_mv_summary['aSHR']
-                                        ],
-                                        fmt='D', color='#1a5276', ecolor='#2980b9',
-                                        elinewidth=1.5, capsize=4, markersize=6,
-                                        markeredgecolor='#1a5276', markerfacecolor='#2980b9'
+                                    _fig_forest_fg = plotting.create_forest_plot(
+                                        _fg_mv_summary,
+                                        theme_color=_fg_forest_color,
+                                        title="Multivariable Fine-Gray Regression",
+                                        xlabel="Adjusted Subdistribution Hazard Ratio (aSHR)",
+                                        p_formatter=lambda p: format_p_value(p, narrator_style_name, context="plot"),
+                                        hr_col='aSHR',
+                                        lower_col='Lower 95%',
+                                        upper_col='Upper 95%',
+                                        p_col='p-value',
+                                        use_index_labels=False,
                                     )
-                                    
-                                    _ax_forest_fg.axvline(x=1.0, color='grey', linestyle='--', alpha=0.7, linewidth=1)
-                                    _ax_forest_fg.set_yticks(list(_y_pos))
-                                    _ax_forest_fg.set_yticklabels(_fg_mv_summary['Variable'].tolist(), fontsize=10)
-                                    _ax_forest_fg.set_xlabel("Adjusted Subdistribution Hazard Ratio (aSHR)", fontsize=11)
-                                    _ax_forest_fg.set_title("Multivariable Fine-Gray Regression", fontsize=13, weight='bold')
-                                    _ax_forest_fg.invert_yaxis()
-                                    _ax_forest_fg.spines['top'].set_visible(False)
-                                    _ax_forest_fg.spines['right'].set_visible(False)
-                                    _ax_forest_fg.grid(axis='x', alpha=0.2)
-                                    
-                                    # Annotate HR values to right of points
-                                    for i, row in _fg_mv_summary.iterrows():
-                                        _p_raw = row['p-value']
-                                        _p_str = format_p_value(_p_raw, narrator_style_name, context="table")
-                                        _ax_forest_fg.annotate(
-                                            f"  {row['aSHR']:.2f} ({row['Lower 95%']:.2f}–{row['Upper 95%']:.2f}), {_p_str}",
-                                            xy=(row['Upper 95%'], i), fontsize=8, va='center'
-                                        )
-                                    
-                                    _fig_forest_fg.tight_layout()
                                     st.pyplot(_fig_forest_fg)
                                     
                                     # Download buttons
@@ -3785,18 +3766,12 @@ if df is not None:
                                         st.download_button("💾 Download SHR Table (CSV)", _buf_fg_csv,
                                                            "multivariable_fine_gray.csv", "text/csv", key="dl_fg_mv_csv")
                                     with _fc2:
-                                        _buf_fg_forest = io.BytesIO()
-                                        _fig_forest_fg.savefig(_buf_fg_forest, format='png', dpi=600,
-                                                               bbox_inches='tight', facecolor='white', edgecolor='none')
-                                        _buf_fg_forest.seek(0)
-                                        st.download_button("💾 Forest Plot (600 DPI)", _buf_fg_forest,
+                                        st.download_button("💾 Forest Plot (600 DPI)",
+                                                           plotting.save_plot_to_buffer(_fig_forest_fg, dpi=600),
                                                            "fg_mv_forest_600dpi.png", "image/png", key="dl_fg_mv_forest")
                                     with _fc3:
-                                        _buf_fg_pdf = io.BytesIO()
-                                        _fig_forest_fg.savefig(_buf_fg_pdf, format='pdf',
-                                                               bbox_inches='tight', facecolor='white', edgecolor='none')
-                                        _buf_fg_pdf.seek(0)
-                                        st.download_button("📄 Forest Plot (PDF)", _buf_fg_pdf,
+                                        st.download_button("📄 Forest Plot (PDF)",
+                                                           plotting.save_plot_to_buffer(_fig_forest_fg, fmt="pdf"),
                                                            "fg_mv_forest.pdf", "application/pdf", key="dl_fg_mv_pdf")
                                     
                                     plt.close(_fig_forest_fg)

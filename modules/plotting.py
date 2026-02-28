@@ -423,15 +423,18 @@ def add_estimate_labels(fitters, ax, colors=None, labels=None,
 
 def create_forest_plot(summary_df, theme_color='#1f77b4', title="Forest Plot",
                        xlabel="Hazard Ratio (95% CI)", reference_line=1.0,
-                       figsize=None, label_fontsize=10):
+                       figsize=None, label_fontsize=10, p_formatter=None,
+                       hr_label='HR', hr_col='Hazard Ratio (HR)',
+                       lower_col='Lower 95%', upper_col='Upper 95%',
+                       p_col='p-value', use_index_labels=True):
     """
-    Create a publication-quality forest plot from Cox regression summary.
+    Create a publication-quality forest plot from regression summary.
 
     Parameters
     ----------
     summary_df : pd.DataFrame
-        Must have columns: 'Hazard Ratio (HR)', 'Lower 95%', 'Upper 95%', 'p-value'.
-        Index = variable names.
+        Must have HR, Lower 95%, Upper 95%, p-value columns.
+        Index = variable names (if use_index_labels=True).
     theme_color : str
         Color for plot elements.
     title : str
@@ -444,13 +447,32 @@ def create_forest_plot(summary_df, theme_color='#1f77b4', title="Forest Plot",
         Figure size. Auto-calculated if None.
     label_fontsize : int
         Font size for variable labels.
+    p_formatter : callable or None
+        Function(p_value) -> str. If None, uses default format.
+    hr_label : str
+        Label for the hazard ratio (e.g. 'HR', 'aSHR').
+    hr_col : str
+        Column name for hazard ratio values.
+    lower_col : str
+        Column name for lower CI.
+    upper_col : str
+        Column name for upper CI.
+    p_col : str
+        Column name for p-values.
+    use_index_labels : bool
+        If True, use index as variable labels. If False, use 'Variable' column.
 
     Returns
     -------
     matplotlib.figure.Figure
     """
     plot_data = summary_df.copy()
-    plot_data = plot_data.sort_index(ascending=False)
+    if use_index_labels:
+        plot_data = plot_data.sort_index(ascending=False)
+        var_labels = plot_data.index.tolist()
+    else:
+        var_labels = plot_data['Variable'].tolist()[::-1]
+        plot_data = plot_data.iloc[::-1].reset_index(drop=True)
 
     n_vars = len(plot_data)
     if figsize is None:
@@ -459,10 +481,10 @@ def create_forest_plot(summary_df, theme_color='#1f77b4', title="Forest Plot",
     fig, ax = plt.subplots(figsize=figsize)
     y_pos = np.arange(n_vars)
 
-    hrs = plot_data['Hazard Ratio (HR)'].values
-    lowers = plot_data['Lower 95%'].values
-    uppers = plot_data['Upper 95%'].values
-    p_vals = plot_data['p-value'].values
+    hrs = plot_data[hr_col].values
+    lowers = plot_data[lower_col].values
+    uppers = plot_data[upper_col].values
+    p_vals = plot_data[p_col].values
 
     # Error bars (must be positive distances from center)
     xerr = [
@@ -480,11 +502,14 @@ def create_forest_plot(summary_df, theme_color='#1f77b4', title="Forest Plot",
 
     # Variable labels on Y-axis
     ax.set_yticks(y_pos)
-    ax.set_yticklabels(plot_data.index, fontsize=label_fontsize, fontweight='bold')
+    ax.set_yticklabels(var_labels, fontsize=label_fontsize, fontweight='bold')
 
     # HR annotations on the right side
     for i, (hr, lo, hi, p) in enumerate(zip(hrs, lowers, uppers, p_vals)):
-        p_str = f"p<0.001" if p < 0.001 else f"p={p:.3f}"
+        if p_formatter:
+            p_str = p_formatter(p)
+        else:
+            p_str = f"p<0.001" if p < 0.001 else f"p={p:.3f}"
         annotation = f"{hr:.2f} ({lo:.2f}-{hi:.2f}) {p_str}"
         # Place to the right of the plot
         ax.annotate(annotation, xy=(1.02, y_pos[i]),
