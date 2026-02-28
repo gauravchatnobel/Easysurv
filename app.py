@@ -3308,9 +3308,20 @@ if df is not None:
                     st.write("### Subdistribution Hazard Ratios (Fine-Gray)")
                     st.write("Covariate effect on the cumulative incidence of the event of interest, accounting for competing risks.")
                     _display_fg = fg_summary.copy()
+                    _raw_fg_p = fg_summary['p-value'].copy()  # Keep raw for highlighting
                     if 'p-value' in _display_fg.columns:
                         _display_fg['p-value'] = _display_fg['p-value'].apply(lambda p: format_p_value(p, narrator_style_name, context="table"))
-                    st.dataframe(_display_fg.style.format(
+                    
+                    def _highlight_fg_uv(row):
+                        try:
+                            p_raw = _raw_fg_p.loc[row.name]
+                            if p_raw < 0.05:
+                                return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
+                        except:
+                            pass
+                        return [''] * len(row)
+                    
+                    st.dataframe(_display_fg.style.apply(_highlight_fg_uv, axis=1).format(
                         {c: "{:.3f}" for c in _display_fg.columns if c != 'p-value'}
                     ))
                     st.caption(f"Reference Group: **{fg_ref_group}** | Model-based SE (equivalent to R's cmprsk::crr)")
