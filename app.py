@@ -2887,12 +2887,11 @@ if df is not None:
                     os_stat_col = st.selectbox("Status Column (1=Event)", columns, index=columns.index("OS_Status") if "OS_Status" in columns else 0, key="os_stat")
 
                 if st.button("Construct & Analyze"):
-                    # Data Wrangling
-                    temp_df = df[[rfs_time_col, rfs_stat_col, os_time_col, os_stat_col]].copy()
+                    # Data Wrangling — keep ALL columns so covariates are available for MV Fine-Gray
+                    _required_cols = [rfs_time_col, rfs_stat_col, os_time_col, os_stat_col]
                     if group_col != "None":
-                        temp_df[group_col] = df[group_col]
-                    
-                    temp_df = temp_df.dropna()
+                        _required_cols.append(group_col)
+                    temp_df = df.dropna(subset=_required_cols).copy()
                     
                     # Create Composite Columns
                     temp_df['Composite_Time'] = temp_df[[rfs_time_col, os_time_col]].min(axis=1)
@@ -3543,12 +3542,14 @@ if df is not None:
                 st.caption("This is the multivariable extension of the univariable SHR table above. It reports **adjusted subdistribution hazard ratios (aSHR)**, the standard for competing-risks multivariable analysis in hematology/oncology journals (BLOOD, JCO).")
 
                 if cif_df is not None and cif_time_col is not None and cif_event_col is not None and cif_event_of_interest is not None:
-                    # Select covariates (exclude time, event, and group columns)
+                    # Select covariates (exclude time, event, and structural columns)
                     _fg_mv_exclude = {cif_time_col, cif_event_col}
                     if cif_mode != "Single 'Status' Column (with multiple codes)":
                         # Also exclude the raw columns used to construct composite
-                        for _excl in [rfs_time_col, rfs_stat_col, os_time_col, os_stat_col, 'Composite_Time', 'Composite_Status']:
-                            _fg_mv_exclude.add(_excl)
+                        for _excl_var in ['rfs_time_col', 'rfs_stat_col', 'os_time_col', 'os_stat_col']:
+                            if _excl_var in dir():
+                                _fg_mv_exclude.add(eval(_excl_var))
+                        _fg_mv_exclude.update({'Composite_Time', 'Composite_Status', 'start', 'stop', 'status', 'weight', 'cens_event'})
                     
                     _fg_mv_options = [c for c in cif_df.columns if c not in _fg_mv_exclude and c != 'id']
                     
