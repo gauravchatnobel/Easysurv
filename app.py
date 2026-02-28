@@ -2031,9 +2031,18 @@ if df is not None:
             # 1. Select Covariates
             # Exclude Time and Event columns from options
             covariate_options = [c for c in columns if c not in [time_col, event_col]]
-            _restored_covariates = st.session_state.get("_saved_covariates", [])
-            _default_covariates = [c for c in _restored_covariates if c in covariate_options]
-            covariates = st.multiselect("Select Covariates for Analysis", covariate_options, default=_default_covariates)
+            # Only use restored defaults on first load (not circular self-reference)
+            if "_mv_covariates_initialized" not in st.session_state:
+                _restored_covariates = st.session_state.get("_saved_covariates", [])
+                _default_covariates = [c for c in _restored_covariates if c in covariate_options]
+                st.session_state["_mv_covariates_initialized"] = True
+            else:
+                _default_covariates = None  # Let widget manage its own state after init
+            
+            if _default_covariates is not None:
+                covariates = st.multiselect("Select Covariates for Analysis", covariate_options, default=_default_covariates, key="mv_covariates_select")
+            else:
+                covariates = st.multiselect("Select Covariates for Analysis", covariate_options, key="mv_covariates_select")
             # Persist for session save
             st.session_state["_saved_covariates"] = covariates
             
@@ -3523,6 +3532,302 @@ if df is not None:
                      )
                      st.success("Summary Generated (click the copy icon to copy):")
                      st.code(cif_narrative, language=None)
+
+                # ================================================================
+                # MULTIVARIABLE FINE-GRAY (SUBDISTRIBUTION HAZARDS) REGRESSION
+                # ================================================================
+                st.divider()
+                st.subheader("Multivariable Fine-Gray Regression")
+                st.write("Assess **independent** prognostic factors for cumulative incidence using the **subdistribution hazard model** (Fine & Gray, 1999).")
+                st.caption("This is the multivariable extension of the univariable SHR table above. It reports **adjusted subdistribution hazard ratios (aSHR)**, the standard for competing-risks multivariable analysis in hematology/oncology journals (BLOOD, JCO).")
+
+                if cif_df is not None and cif_time_col is not None and cif_event_col is not None and cif_event_of_interest is not None:
+                    # Select covariates (exclude time, event, and group columns)
+                    _fg_mv_exclude = {cif_time_col, cif_event_col}
+                    if cif_mode != "Single 'Status' Column (with multiple codes)":
+                        # Also exclude the raw columns used to construct composite
+                        for _excl in [rfs_time_col, rfs_stat_col, os_time_col, os_stat_col, 'Composite_Time', 'Composite_Status']:
+                            _fg_mv_exclude.add(_excl)
+                    
+                    _fg_mv_options = [c for c in cif_df.columns if c not in _fg_mv_exclude and c != 'id']
+                    
+                    # Initialize multiselect properly (same pattern as Cox tab fix)
+                    if "_fg_mv_covariates_initialized" not in st.session_state:
+                        st.session_state["_fg_mv_covariates_initialized"] = True
+                        _fg_mv_defaults = None
+                    else:
+                        _fg_mv_defaults = None
+                    
+                    fg_mv_covariates = st.multiselect(
+                        "Select Covariates for Multivariable Fine-Gray",
+                        _fg_mv_options,
+                        key="fg_mv_covariates_select",
+                        help="Select variables to include in the multivariable model (e.g., Age, ELN Risk, MRD status, mutations)."
+                    )
+
+                    if fg_mv_covariates:
+                        # --- Build analysis dataframe ---
+                        _fg_mv_cols = [cif_time_col, cif_event_col] + fg_mv_covariates
+                        if group_col != "None" and group_col in cif_df.columns and group_col not in fg_mv_covariates:
+                            pass  # Group col already excluded from covariates or will be added separately
+                        
+                        _fg_mv_df = cif_df[_fg_mv_cols].dropna()
+                        _fg_mv_dropped = len(cif_df) - len(_fg_mv_df)
+                        
+                        if _fg_mv_dropped > 0:
+                            st.warning(f"⚠️ {_fg_mv_dropped} rows dropped due to missing values in selected covariates. Analysis based on {len(_fg_mv_df)} rows.")
+                        
+                        if len(_fg_mv_df) < 10:
+                            st.error("Not enough data points for multivariable analysis.")
+                        else:
+                            # --- Identify categorical columns ---
+                            _fg_cat_cols = [c for c in fg_mv_covariates if pd.api.types.is_object_dtype(_fg_mv_df[c]) or isinstance(_fg_mv_df[c].dtype, pd.CategoricalDtype)]
+                            
+                            # --- Reference Group Selection ---
+                            _fg_cat_refs = {}
+                            if _fg_cat_cols:
+                                st.markdown("##### Reference Group Selection")
+                                _ref_cols = st.columns(min(3, len(_fg_cat_cols)))
+                                for i, col in enumerate(_fg_cat_cols):
+                                    _unique_levels = sorted(_fg_mv_df[col].dropna().unique().astype(str))
+                                    with _ref_cols[i % 3]:
+                                        _ref = st.selectbox(f"Ref for {col}", _unique_levels, key=f"fg_mv_ref_{col}", index=0)
+                                        _fg_cat_refs[col] = _ref
+                            
+                            # --- STATISTICAL GUARDRAILS ---
+                            st.divider()
+                            st.markdown("#### 🛡️ Statistical Guardrails (Fine-Gray)")
+                            
+                            # EPV check (events = primary events of interest)
+                            _fg_n_events = int((_fg_mv_df[cif_event_col] == cif_event_of_interest).sum())
+                            _fg_n_params = 0
+                            for c in fg_mv_covariates:
+                                if c in _fg_cat_cols:
+                                    _fg_n_params += len(_fg_mv_df[c].dropna().unique()) - 1
+                                else:
+                                    _fg_n_params += 1
+                            _fg_epv = _fg_n_events / max(_fg_n_params, 1)
+                            
+                            if _fg_epv >= 10:
+                                st.success(f"✅ **Events Per Variable**: {_fg_epv:.1f} ({_fg_n_events} primary events / {_fg_n_params} parameters). EPV ≥ 10 — model is adequately powered.")
+                            elif _fg_epv >= 5:
+                                st.warning(f"⚠️ **Events Per Variable**: {_fg_epv:.1f} ({_fg_n_events} primary events / {_fg_n_params} parameters). EPV 5-10 — results may be unstable. Consider reducing covariates.")
+                            else:
+                                st.error(f"🛑 **Events Per Variable**: {_fg_epv:.1f} ({_fg_n_events} primary events / {_fg_n_params} parameters). EPV < 5 — model is likely overfit. Remove covariates or use penalization.")
+                            
+                            # VIF / Collinearity
+                            _fg_vif = statistics.calculate_vif(_fg_mv_df, fg_mv_covariates)
+                            _fg_high_corr = statistics.check_collinearity(_fg_mv_df, fg_mv_covariates)
+                            
+                            _fg_max_vif = 0
+                            if _fg_vif is not None and not _fg_vif.empty:
+                                _fg_max_vif = _fg_vif['VIF'].max()
+                            
+                            if _fg_high_corr:
+                                st.warning("⚠️ **Multicollinearity Detected**: High correlation (>0.7) between: " +
+                                           ", ".join([f"{v1} & {v2} (r={val:.2f})" for v1, v2, val in _fg_high_corr]))
+                            elif _fg_max_vif > 5.0:
+                                st.warning(f"⚠️ **Multicollinearity Detected**: Max VIF is {_fg_max_vif:.2f} (> 5.0).")
+                            else:
+                                st.success("✅ No multicollinearity detected (Pairwise Correlation & VIF).")
+                            
+                            with st.expander("🔍 Show VIF Details"):
+                                if _fg_vif is not None:
+                                    st.dataframe(_fg_vif.style.format({"VIF": "{:.2f}"}), hide_index=True)
+                                else:
+                                    st.info("Could not calculate VIF.")
+                            
+                            # --- RUN MODEL ---
+                            if st.button("Run Multivariable Fine-Gray", type="primary", key="run_fg_mv"):
+                                st.session_state['fg_mv_active'] = True
+                            
+                            if st.session_state.get('fg_mv_active', False):
+                                try:
+                                    with st.spinner("Building IPCW weights & fitting multivariable Fine-Gray model..."):
+                                        # 1. Compute Fine-Gray weights
+                                        _fg_mv_weighted = compute_fine_gray_weights(
+                                            _fg_mv_df, cif_time_col, cif_event_col, cif_event_of_interest
+                                        )
+                                        
+                                        # 2. Encode categorical variables
+                                        _fg_mv_encoded = _fg_mv_weighted.copy()
+                                        _fg_mv_encoded = _fg_mv_encoded.drop(columns=[c for c in _fg_cat_cols if c in _fg_mv_encoded.columns], errors='ignore')
+                                        
+                                        _fg_mv_dummy_cols = []
+                                        for col in _fg_cat_cols:
+                                            if col in _fg_mv_weighted.columns:
+                                                _dummies = pd.get_dummies(_fg_mv_weighted[col], prefix=col, drop_first=False)
+                                                # Drop reference column
+                                                _ref_col = f"{col}_{_fg_cat_refs.get(col, '')}"
+                                                if _ref_col in _dummies.columns:
+                                                    _dummies = _dummies.drop(columns=[_ref_col])
+                                                _fg_mv_dummy_cols.extend(_dummies.columns.tolist())
+                                                _fg_mv_encoded = pd.concat([_fg_mv_encoded, _dummies], axis=1)
+                                        
+                                        # Numeric covariate columns (not categorical, not structural)
+                                        _fg_mv_numeric_cols = [c for c in fg_mv_covariates if c not in _fg_cat_cols and c in _fg_mv_encoded.columns]
+                                        
+                                        # All covariate columns for the model
+                                        _fg_mv_model_covs = _fg_mv_numeric_cols + _fg_mv_dummy_cols
+                                        
+                                        # Sanitize column names
+                                        _col_rename = {}
+                                        for c in _fg_mv_encoded.columns:
+                                            _clean = c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                            if _clean != c:
+                                                _col_rename[c] = _clean
+                                        _fg_mv_encoded = _fg_mv_encoded.rename(columns=_col_rename)
+                                        _fg_mv_model_covs = [_col_rename.get(c, c) for c in _fg_mv_model_covs]
+                                        
+                                        # Columns to fit
+                                        _fg_mv_fit_cols = ['start', 'stop', 'status', 'weight', 'id'] + _fg_mv_model_covs
+                                        _fg_mv_fit_data = _fg_mv_encoded[_fg_mv_fit_cols].copy()
+                                        
+                                        # Ensure numeric types
+                                        for c in _fg_mv_model_covs:
+                                            _fg_mv_fit_data[c] = pd.to_numeric(_fg_mv_fit_data[c], errors='coerce')
+                                        _fg_mv_fit_data = _fg_mv_fit_data.dropna()
+                                        
+                                        # 3. Fit Weighted Cox (Fine-Gray MV)
+                                        import warnings as _w
+                                        with _w.catch_warnings():
+                                            _w.simplefilter("ignore")
+                                            _cph_fg_mv = CoxPHFitter()
+                                            _cph_fg_mv.fit(
+                                                _fg_mv_fit_data,
+                                                duration_col='stop', entry_col='start',
+                                                event_col='status', weights_col='weight',
+                                                cluster_col='id', robust=False
+                                            )
+                                        
+                                        # 4. Extract SHR table using model-based SE
+                                        from scipy.stats import norm as _norm
+                                        _betas_mv = _cph_fg_mv.params_
+                                        _se_mv = np.sqrt(np.diag(_cph_fg_mv.variance_matrix_.values))
+                                        _hrs_mv = np.exp(_betas_mv.values)
+                                        _z_mv = _betas_mv.values / _se_mv
+                                        _p_mv = 2 * (1 - _norm.cdf(np.abs(_z_mv)))
+                                        _lo_mv = np.exp(_betas_mv.values - 1.96 * _se_mv)
+                                        _hi_mv = np.exp(_betas_mv.values + 1.96 * _se_mv)
+                                        
+                                        _fg_mv_summary = pd.DataFrame({
+                                            'Variable': _betas_mv.index,
+                                            'aSHR': _hrs_mv,
+                                            'Lower 95%': _lo_mv,
+                                            'Upper 95%': _hi_mv,
+                                            'p-value': _p_mv,
+                                        })
+                                        _fg_mv_summary = _fg_mv_summary.reset_index(drop=True)
+                                        
+                                        # Store in session state
+                                        st.session_state['fg_mv_summary'] = _fg_mv_summary
+                                        st.session_state['fg_mv_cph'] = _cph_fg_mv
+                                    
+                                    # --- RESULTS DISPLAY ---
+                                    st.write("### Multivariable Fine-Gray Results")
+                                    st.caption(f"Model: IPCW-weighted Cox | Primary Event: {cif_event_of_interest} | n = {len(_fg_mv_df)} | Events = {_fg_n_events}")
+                                    
+                                    # Format table for display
+                                    _fg_mv_display = _fg_mv_summary.copy()
+                                    _fg_mv_display['p-value'] = _fg_mv_display['p-value'].apply(
+                                        lambda p: format_p_value(p, narrator_style_name, context="table")
+                                    )
+                                    _fg_mv_display['aSHR (95% CI)'] = _fg_mv_display.apply(
+                                        lambda r: f"{r['aSHR']:.2f} ({r['Lower 95%']:.2f}–{r['Upper 95%']:.2f})", axis=1
+                                    )
+                                    
+                                    # Highlight significant rows
+                                    def _highlight_fg(row):
+                                        try:
+                                            p_raw = _fg_mv_summary.loc[_fg_mv_summary['Variable'] == row['Variable'], 'p-value'].values[0]
+                                            if p_raw < 0.05:
+                                                return ['background-color: rgba(0, 255, 0, 0.08)'] * len(row)
+                                            elif p_raw < 0.1:
+                                                return ['background-color: rgba(255, 255, 0, 0.08)'] * len(row)
+                                        except:
+                                            pass
+                                        return [''] * len(row)
+                                    
+                                    _fg_mv_show = _fg_mv_display[['Variable', 'aSHR (95% CI)', 'p-value']].copy()
+                                    st.dataframe(_fg_mv_show.style.apply(_highlight_fg, axis=1), hide_index=True, use_container_width=True)
+                                    
+                                    # Full numeric table in expander
+                                    with st.expander("View Full Numeric Table"):
+                                        st.dataframe(_fg_mv_summary.style.format({
+                                            'aSHR': '{:.3f}', 'Lower 95%': '{:.3f}',
+                                            'Upper 95%': '{:.3f}', 'p-value': '{:.4f}'
+                                        }), hide_index=True)
+                                    
+                                    # --- FOREST PLOT ---
+                                    st.write("### Forest Plot (Adjusted SHR)")
+                                    
+                                    _n_vars = len(_fg_mv_summary)
+                                    _fig_height = max(3, 0.5 * _n_vars + 1.5)
+                                    _fig_forest_fg, _ax_forest_fg = plt.subplots(figsize=(8, _fig_height))
+                                    
+                                    _y_pos = range(_n_vars)
+                                    _ax_forest_fg.errorbar(
+                                        _fg_mv_summary['aSHR'],
+                                        _y_pos,
+                                        xerr=[
+                                            _fg_mv_summary['aSHR'] - _fg_mv_summary['Lower 95%'],
+                                            _fg_mv_summary['Upper 95%'] - _fg_mv_summary['aSHR']
+                                        ],
+                                        fmt='D', color='#1a5276', ecolor='#2980b9',
+                                        elinewidth=1.5, capsize=4, markersize=6,
+                                        markeredgecolor='#1a5276', markerfacecolor='#2980b9'
+                                    )
+                                    
+                                    _ax_forest_fg.axvline(x=1.0, color='grey', linestyle='--', alpha=0.7, linewidth=1)
+                                    _ax_forest_fg.set_yticks(list(_y_pos))
+                                    _ax_forest_fg.set_yticklabels(_fg_mv_summary['Variable'].tolist(), fontsize=10)
+                                    _ax_forest_fg.set_xlabel("Adjusted Subdistribution Hazard Ratio (aSHR)", fontsize=11)
+                                    _ax_forest_fg.set_title("Multivariable Fine-Gray Regression", fontsize=13, weight='bold')
+                                    _ax_forest_fg.invert_yaxis()
+                                    _ax_forest_fg.spines['top'].set_visible(False)
+                                    _ax_forest_fg.spines['right'].set_visible(False)
+                                    _ax_forest_fg.grid(axis='x', alpha=0.2)
+                                    
+                                    # Annotate HR values to right of points
+                                    for i, row in _fg_mv_summary.iterrows():
+                                        _p_raw = row['p-value']
+                                        _p_str = format_p_value(_p_raw, narrator_style_name, context="table")
+                                        _ax_forest_fg.annotate(
+                                            f"  {row['aSHR']:.2f} ({row['Lower 95%']:.2f}–{row['Upper 95%']:.2f}), {_p_str}",
+                                            xy=(row['Upper 95%'], i), fontsize=8, va='center'
+                                        )
+                                    
+                                    _fig_forest_fg.tight_layout()
+                                    st.pyplot(_fig_forest_fg)
+                                    
+                                    # Download buttons
+                                    _fc1, _fc2, _fc3 = st.columns(3)
+                                    with _fc1:
+                                        _buf_fg_csv = _fg_mv_summary.to_csv(index=False).encode('utf-8')
+                                        st.download_button("💾 Download SHR Table (CSV)", _buf_fg_csv,
+                                                           "multivariable_fine_gray.csv", "text/csv", key="dl_fg_mv_csv")
+                                    with _fc2:
+                                        _buf_fg_forest = io.BytesIO()
+                                        _fig_forest_fg.savefig(_buf_fg_forest, format='png', dpi=600,
+                                                               bbox_inches='tight', facecolor='white', edgecolor='none')
+                                        _buf_fg_forest.seek(0)
+                                        st.download_button("💾 Forest Plot (600 DPI)", _buf_fg_forest,
+                                                           "fg_mv_forest_600dpi.png", "image/png", key="dl_fg_mv_forest")
+                                    with _fc3:
+                                        _buf_fg_pdf = io.BytesIO()
+                                        _fig_forest_fg.savefig(_buf_fg_pdf, format='pdf',
+                                                               bbox_inches='tight', facecolor='white', edgecolor='none')
+                                        _buf_fg_pdf.seek(0)
+                                        st.download_button("📄 Forest Plot (PDF)", _buf_fg_pdf,
+                                                           "fg_mv_forest.pdf", "application/pdf", key="dl_fg_mv_pdf")
+                                    
+                                    plt.close(_fig_forest_fg)
+                                    
+                                except Exception as e:
+                                    st.error(f"Multivariable Fine-Gray Analysis Failed: {e}")
+                                    st.caption("Common causes: too few events, singular matrix, or covariates with zero variance in the weighted dataset.")
+                else:
+                    st.info("ℹ️ Configure the cumulative incidence analysis above first (time, event, event of interest).")
 
     # --- COMPOSITE FIGURE TAB ---
     if 'tab_composite' in locals():
