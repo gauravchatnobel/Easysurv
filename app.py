@@ -3497,41 +3497,6 @@ if df is not None:
                     mime="text/csv"
                 )
 
-                # --- AI NARRATOR (CIF) ---
-                st.divider()
-                st.write("### 🤖 AI Result Narrator (Competing Risks)")
-                _col_ev1, _col_ev2 = st.columns(2)
-                with _col_ev1:
-                    _cif_event_name = st.text_input("Event of interest (for narrative)", value="relapse",
-                                                     key="cif_event_name",
-                                                     help="e.g. relapse, NRM, disease progression")
-                with _col_ev2:
-                    _cif_competing_name = st.text_input("Competing event (for narrative)", value="death without relapse",
-                                                         key="cif_competing_name",
-                                                         help="e.g. death without relapse, non-relapse mortality")
-                if st.button("Generate Summary Text (CIF)"):
-                     # Compute event counts for narrative context
-                     _cif_n_patients = len(cif_df) if cif_df is not None else None
-                     _cif_n_primary = int((cif_df[cif_event_col] == cif_event_of_interest).sum()) if cif_df is not None else None
-                     _cif_n_competing = int((cif_df[cif_event_col] == 2).sum()) if cif_df is not None else None
-
-                     cif_narrative = narrator.generate_cif_narrative(
-                         cif_median_data=cif_median_data if 'cif_median_data' in dir() else None,
-                         cif_est_data=cif_est_data if 'cif_est_data' in dir() else None,
-                         cif_target_time=cif_target_time if 'cif_target_time' in dir() else None,
-                         fg_summary=fg_summary if 'fg_summary' in dir() else None,
-                         fg_mv_summary=st.session_state.get('fg_mv_summary', None),
-                         style_name=narrator_style_name,
-                         detail_level=narrator_detail_level,
-                         event_of_interest=_cif_event_name,
-                         competing_event=_cif_competing_name,
-                         n_patients=_cif_n_patients,
-                         n_primary_events=_cif_n_primary,
-                         n_competing_events=_cif_n_competing,
-                         landmark_time=landmark_time if landmark_time > 0 else None,
-                     )
-                     st.success("Summary Generated (click the copy icon to copy):")
-                     st.code(cif_narrative, language=None)
 
                 # ================================================================
                 # MULTIVARIABLE FINE-GRAY (SUBDISTRIBUTION HAZARDS) REGRESSION
@@ -3830,6 +3795,42 @@ if df is not None:
                                     st.caption("Common causes: too few events, singular matrix, or covariates with zero variance in the weighted dataset.")
                 else:
                     st.info("ℹ️ Configure the cumulative incidence analysis above first (time, event, event of interest).")
+
+                # --- AI NARRATOR (CIF) — placed after MV Fine-Gray so it captures all results ---
+                st.divider()
+                st.write("### 🤖 AI Result Narrator (Competing Risks)")
+                _col_ev1, _col_ev2 = st.columns(2)
+                with _col_ev1:
+                    _cif_event_name = st.text_input("Event of interest (for narrative)", value="relapse",
+                                                     key="cif_event_name",
+                                                     help="e.g. relapse, NRM, disease progression")
+                with _col_ev2:
+                    _cif_competing_name = st.text_input("Competing event (for narrative)", value="death without relapse",
+                                                         key="cif_competing_name",
+                                                         help="e.g. death without relapse, non-relapse mortality")
+                if st.button("Generate Summary Text (CIF)"):
+                     # Compute event counts for narrative context
+                     _cif_n_patients = len(cif_df) if cif_df is not None else None
+                     _cif_n_primary = int((cif_df[cif_event_col] == cif_event_of_interest).sum()) if cif_df is not None else None
+                     _cif_n_competing = int((cif_df[cif_event_col] == 2).sum()) if cif_df is not None else None
+
+                     cif_narrative = narrator.generate_cif_narrative(
+                         cif_median_data=cif_median_data if 'cif_median_data' in dir() else None,
+                         cif_est_data=cif_est_data if 'cif_est_data' in dir() else None,
+                         cif_target_time=cif_target_time if 'cif_target_time' in dir() else None,
+                         fg_summary=fg_summary if 'fg_summary' in dir() else None,
+                         fg_mv_summary=st.session_state.get('fg_mv_summary', None),
+                         style_name=narrator_style_name,
+                         detail_level=narrator_detail_level,
+                         event_of_interest=_cif_event_name,
+                         competing_event=_cif_competing_name,
+                         n_patients=_cif_n_patients,
+                         n_primary_events=_cif_n_primary,
+                         n_competing_events=_cif_n_competing,
+                         landmark_time=landmark_time if landmark_time > 0 else None,
+                     )
+                     st.success("Summary Generated (click the copy icon to copy):")
+                     st.code(cif_narrative, language=None)
 
     # --- COMPOSITE FIGURE TAB ---
     if 'tab_composite' in locals():
