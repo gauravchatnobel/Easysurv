@@ -2067,6 +2067,61 @@ if df is not None:
 
                 st.info(f"Target: **{time_col}** (Time), **{event_col}** (Event)")
                 
+                # --- TIME-DEPENDENT COVARIATE (Optional) ---
+                _td_enabled = st.checkbox(
+                    "⏱️ Include a Time-Dependent Covariate",
+                    value=False,
+                    help="Use this when a covariate changes during follow-up (e.g., transplant). "
+                         "This avoids immortal time bias by splitting each patient's record at "
+                         "the time the covariate changes."
+                )
+                
+                _td_var_name = None
+                _td_time_col = None
+                _td_status_col = None
+                
+                if _td_enabled:
+                    with st.container(border=True):
+                        st.markdown("##### ⏱️ Time-Dependent Covariate Configuration")
+                        st.caption(
+                            "**Why?** Including transplant as a baseline variable (yes/no) causes "
+                            "**immortal time bias** — patients must survive long enough to receive it. "
+                            "The counting-process approach splits each patient's timeline at the event point, "
+                            "so the covariate is 0 before and 1 after the event. "
+                            "This is equivalent to R's `survival::tmerge()` / `survival::coxph()` with `(start, stop)` format."
+                        )
+                        _tdc1, _tdc2, _tdc3 = st.columns(3)
+                        with _tdc1:
+                            _td_var_name = st.text_input(
+                                "Covariate Name",
+                                value="Transplant",
+                                help="Name for the time-dependent variable in the model output (e.g., Transplant, Second_Line_Therapy)",
+                                key="td_var_name"
+                            )
+                        with _tdc2:
+                            _td_time_col = st.selectbox(
+                                "Time of Event Column",
+                                columns,
+                                index=columns.index("Transplant_Time") if "Transplant_Time" in columns else 0,
+                                help="Column with the time when the covariate changed (e.g., days to transplant). Use NA/missing for patients who never had this event.",
+                                key="td_time_col"
+                            )
+                        with _tdc3:
+                            _td_status_col = st.selectbox(
+                                "Event Status Column (1=event occurred)",
+                                columns,
+                                index=columns.index("Transplant_Status") if "Transplant_Status" in columns else 0,
+                                help="Column indicating whether the event occurred (1) or not (0).",
+                                key="td_status_col"
+                            )
+                        
+                        # Preview the data transformation
+                        if _td_time_col and _td_status_col:
+                            _n_td_events = int(df_clean[_td_status_col].dropna().sum()) if _td_status_col in df_clean.columns else 0
+                            _n_total = len(df_clean)
+                            st.info(f"**{_n_td_events}** / {_n_total} patients had the time-dependent event. "
+                                    f"Data will be split into counting-process format (≈ {_n_total + _n_td_events} rows).")
+
                 # Check for NaNs in selected variables
                 mv_cols = [time_col, event_col] + covariates
                 mv_df = df_clean[mv_cols].dropna()
@@ -2393,13 +2448,78 @@ if df is not None:
                             # Sanitize Column Names for Lifelines/Stats (remove spaces/special chars)
                             mv_data_encoded.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in mv_data_encoded.columns]
                             
+                            # --- TIME-DEPENDENT COVARIATE: Expand to counting-process format ---
+                            _td_entry_col = None  # Will be set if TD is active
+                            
+                            if _td_enabled and _td_var_name and _td_time_col and _td_status_col:
+                                st.info(f"⏱️ Expanding data to counting-process format for **{_td_var_name}**...")
+                                
+                                # Retrieve TD columns from the ORIGINAL (pre-encoded) data
+                                # We need the index alignment from mv_df
+                                _td_time_values = df_clean.loc[mv_df.index, _td_time_col]
+                                _td_stat_values = df_clean.loc[mv_df.index, _td_status_col]
+                                
+                                # Sanitize the TD variable name
+                                _td_var_safe = _td_var_name.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                
+                                # Sanitized time/event column names
+                                _san_time = time_col.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                _san_event = event_col.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                
+                                rows_expanded = []
+                                for idx in mv_data_encoded.index:
+                                    row = mv_data_encoded.loc[idx].to_dict()
+                                    end_time = row[_san_time]
+                                    event = row[_san_event]
+                                    
+                                    td_occurred = _td_stat_values.loc[idx]
+                                    td_time = _td_time_values.loc[idx]
+                                    
+                                    if pd.notna(td_occurred) and td_occurred == 1 and pd.notna(td_time) and td_time < end_time and td_time > 0:
+                                        # SPLIT: Two rows
+                                        # Row 1: (0, td_time) — before event, TD=0, no outcome event
+                                        row1 = row.copy()
+                                        row1['_start'] = 0
+                                        row1[_san_time] = td_time  # stop = td_time
+                                        row1[_san_event] = 0       # no event yet
+                                        row1[_td_var_safe] = 0
+                                        rows_expanded.append(row1)
+                                        
+                                        # Row 2: (td_time, end_time) — after event, TD=1, original event
+                                        row2 = row.copy()
+                                        row2['_start'] = td_time
+                                        row2[_san_time] = end_time  # stop = original end
+                                        row2[_san_event] = event    # original event status
+                                        row2[_td_var_safe] = 1
+                                        rows_expanded.append(row2)
+                                    else:
+                                        # NO SPLIT: Single row, TD=0
+                                        row['_start'] = 0
+                                        row[_td_var_safe] = 0
+                                        rows_expanded.append(row)
+                                
+                                mv_data_encoded = pd.DataFrame(rows_expanded)
+                                _td_entry_col = '_start'
+                                
+                                st.success(f"✅ Data expanded: {len(mv_data_encoded)} rows "
+                                           f"(from {len(mv_df)} patients). "
+                                           f"Time-dependent covariate: **{_td_var_safe}**")
+                                
+                                with st.expander("Preview Counting-Process Data (first 10 rows)"):
+                                    _preview_cols = ['_start', _san_time, _san_event, _td_var_safe]
+                                    _other_cols = [c for c in mv_data_encoded.columns if c not in _preview_cols]
+                                    st.dataframe(mv_data_encoded[_preview_cols + _other_cols[:3]].head(10))
+                            
                             # Fit Model
                             # Use session state values to ensure consistency even after button click
                             final_penalizer = st.session_state.penalizer_val if use_penalizer else 0.0
                             final_l1 = st.session_state.l1_ratio_val if use_penalizer else 0.0
                             
                             cph_mv = CoxPHFitter(penalizer=final_penalizer, l1_ratio=final_l1)
-                            cph_mv.fit(mv_data_encoded, duration_col=time_col, event_col=event_col)
+                            if _td_entry_col:
+                                cph_mv.fit(mv_data_encoded, duration_col=_san_time, event_col=_san_event, entry_col=_td_entry_col)
+                            else:
+                                cph_mv.fit(mv_data_encoded, duration_col=time_col, event_col=event_col)
                             
                             # 3. Separation Check (Post-Analysis) -> Warning Only (Penalized handles it often)
                             if not use_penalizer:
@@ -4788,6 +4908,9 @@ if df is not None:
              
              #### Kaplan-Meier & Cox PH
              Kaplan-Meier survival is estimated using the product-limit estimator. Group comparisons use the **log-rank test** (Mantel, 1966). Hazard ratios (HRs) are estimated using the **Cox proportional hazards** model (Cox, 1972). The proportional hazards assumption is assessed using scaled Schoenfeld residuals.
+             
+             #### Time-Dependent Covariates
+             When a covariate changes during follow-up (e.g., transplant), including it as a baseline variable introduces **immortal time bias**. EasySurv uses the **counting-process** formulation: each patient's record is split at the time the covariate changes, creating (start, stop] intervals with the covariate coded 0 before and 1 after. The Cox model is then fit with `entry_col` for left-truncation, equivalent to R's `survival::tmerge()` + `coxph(Surv(start, stop, event) ~ ...)`.
              
              #### Cumulative Incidence (Competing Risks)
              
