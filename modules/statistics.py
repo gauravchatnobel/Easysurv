@@ -649,7 +649,7 @@ def compute_rmst(df, time_col, event_col, group_col, tau, n_boot=200):
             data[time_c][data[time_c] <= tau_val].values, [0, tau_val]
         )))
         # Trapezoidal integration
-        return np.trapz(sf, times)
+        return np.trapezoid(sf, times)
     
     def _rmst_from_kmf(data, time_c, event_c, tau_val):
         """More robust RMST using lifelines KMF timeline."""
@@ -658,7 +658,7 @@ def compute_rmst(df, time_col, event_col, group_col, tau, n_boot=200):
         # Build timeline from 0 to tau
         timeline = np.linspace(0, tau_val, 500)
         sf = kmf.predict(timeline)
-        return np.trapz(sf.values, timeline)
+        return np.trapezoid(sf.values, timeline)
     
     # Per-group RMST with bootstrap
     group_results = []
@@ -759,7 +759,7 @@ def compute_rmtl(df, time_col, event_col, group_col, event_of_interest, tau, n_b
         # Build timeline from 0 to tau
         timeline = np.linspace(0, tau_val, 500)
         cif = aj.predict(timeline)
-        return np.trapz(cif.values, timeline)
+        return np.trapezoid(cif.values, timeline)
     
     # Per-group RMTL with bootstrap
     group_results = []

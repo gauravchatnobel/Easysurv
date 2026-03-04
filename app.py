@@ -3226,17 +3226,21 @@ if df is not None:
                                   fg_data = compute_fine_gray_weights(cif_df, cif_time_col, cif_event_col, cif_event_of_interest)
                                   
                                   # 2. Encode Group Variable (One-Hot) with Custom Reference
-                                  # To set a specific reference, we can use pd.get_dummies and drop the reference column
-                                  fg_data_encoded = pd.get_dummies(fg_data, columns=[group_col], drop_first=False) # Keep all initially
+                                  # Track columns before/after to identify ONLY the new dummy columns
+                                  # (startswith is too greedy — catches original data columns with same prefix)
+                                  _cols_before = set(fg_data.columns)
+                                  fg_data_encoded = pd.get_dummies(fg_data, columns=[group_col], drop_first=False)
+                                  _cols_after = set(fg_data_encoded.columns)
+                                  _new_dummy_cols = list(_cols_after - _cols_before)  # ONLY new dummies
                                   
                                   # Drop the reference group column
                                   ref_col_name = f"{group_col}_{fg_ref_group}"
                                   if ref_col_name in fg_data_encoded.columns:
                                       fg_data_encoded = fg_data_encoded.drop(columns=[ref_col_name])
+                                      _new_dummy_cols = [c for c in _new_dummy_cols if c != ref_col_name]
                                   
-                                  # Select columns: 'start', 'stop', event(status), weights, id, and the new dummy columns
-                                  # The remaining dummy columns are the comparisons vs reference
-                                  dummy_cols = [c for c in fg_data_encoded.columns if c.startswith(f"{group_col}_")]
+                                  # Use ONLY the real dummy columns (not original columns sharing the prefix)
+                                  dummy_cols = _new_dummy_cols
                                   cols_to_fit = ['start', 'stop', 'status', 'weight', 'id'] + dummy_cols
                                  
                                   # 3. Fit Fine-Gray Model (Weighted Cox)
