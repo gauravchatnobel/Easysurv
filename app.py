@@ -1792,16 +1792,9 @@ if df is not None:
 
                 # Point-in-Time Survival Estimates
                 st.subheader("Point-in-Time Survival Estimates")
-                st.write("Calculate survival probability at a specific time (e.g., 2-year OS).")
-                
-                # Auto-detect time unit for smart defaults
-                _km_max_t = df_clean[time_col].max()
-                _km_is_days = _km_max_t > 100
-                _km_pit_default = 365.0 if _km_is_days else 24.0
-                _km_pit_step = 30.0 if _km_is_days else 6.0
-                _km_pit_unit = "days" if _km_is_days else "months"
+                st.write("Calculate survival probability at a specific time.")
             
-                target_time = st.number_input(f"Enter Time Point [{_km_pit_unit}]", min_value=0.0, value=_km_pit_default, step=_km_pit_step)
+                target_time = st.number_input("Enter Time Point", min_value=0.0, value=24.0, step=6.0)
             
                 est_data = []
                 for group in groups:
@@ -1893,28 +1886,18 @@ if df is not None:
                 
                 # Smart default τ: minimum of max observed time across groups
                 _max_times = [df_clean[df_clean[group_col] == g][time_col].max() for g in groups]
-                _tau_max_safe = float(min(_max_times)) if _max_times else 365.0
-                
-                # Auto-detect time unit and suggest sensible default
-                _likely_days = _tau_max_safe > 100  # if max > 100, likely days not months
-                if _likely_days:
-                    _tau_default = min(365.0, _tau_max_safe)  # Default: 1 year in days
-                    _unit_hint = "days"
-                    _common = "365 (1y), 730 (2y), 1095 (3y)"
-                else:
-                    _tau_default = min(36.0, _tau_max_safe)   # Default: 3 years in months
-                    _unit_hint = "months"
-                    _common = "12, 24, 36, 60"
+                _tau_max_safe = float(min(_max_times)) if _max_times else 60.0
+                _tau_default = round(_tau_max_safe * 0.8, 1)  # 80% of max safe τ
                 
                 _rmst_c1, _rmst_c2 = st.columns([1, 2])
                 with _rmst_c1:
                     _rmst_tau = st.number_input(
-                        f"Restriction Time (τ) [{_unit_hint}]",
+                        "Restriction Time (τ)",
                         min_value=0.1,
-                        value=round(_tau_default, 1),
-                        step=30.0 if _likely_days else 1.0,
+                        value=_tau_default,
+                        step=1.0,
                         key="rmst_tau",
-                        help=f"Max safe τ = {_tau_max_safe:.0f} {_unit_hint}. Common choices: {_common}."
+                        help=f"Max safe τ = {_tau_max_safe:.1f} (min of max observed time per group). Set to match your data's time unit."
                     )
                 
                 if st.button("Calculate RMST", key="calc_rmst"):
@@ -1945,7 +1928,7 @@ if df is not None:
                         _sig = "✅" if d['p_value'] < 0.05 else ""
                         st.metric(
                             f"RMST Difference ({d['group_a']} − {d['group_b']})",
-                            f"{d['diff']:.2f} {_unit_hint}",
+                            f"{d['diff']:.2f}",
                             delta=f"95% CI: {d['lower']:.2f} to {d['upper']:.2f}, {_p_fmt} {_sig}"
                         )
                     
@@ -3627,15 +3610,8 @@ if df is not None:
                 # Point-in-Time Cumulative Incidence Estimates
                 st.subheader("Point-in-Time Cumulative Incidence")
                 st.write("Calculate cumulative incidence probability at a specific time.")
-                
-                # Auto-detect time unit
-                _cif_max_t = cif_df[cif_time_col].max() if cif_df is not None else 24
-                _cif_is_days = _cif_max_t > 100
-                _cif_pit_default = 365.0 if _cif_is_days else 24.0
-                _cif_pit_step = 30.0 if _cif_is_days else 6.0
-                _cif_pit_unit = "days" if _cif_is_days else "months"
             
-                cif_target_time = st.number_input(f"Enter Time Point [{_cif_pit_unit}]", min_value=0.0, value=_cif_pit_default, step=_cif_pit_step, key="cif_time_input")
+                cif_target_time = st.number_input("Enter Time Point", min_value=0.0, value=24.0, step=6.0, key="cif_time_input")
             
                 cif_est_data = []
                 for ajf, label in zip(cif_fitters, cif_labels):
@@ -4259,28 +4235,18 @@ if df is not None:
                     if len(_cif_groups) > 1:
                         # Smart default τ
                         _cif_max_times = [cif_df[cif_df[group_col] == g][cif_time_col].max() for g in _cif_groups]
-                        _rmtl_tau_max_safe = float(min(_cif_max_times)) if _cif_max_times else 365.0
-                        
-                        # Auto-detect time unit
-                        _rmtl_likely_days = _rmtl_tau_max_safe > 100
-                        if _rmtl_likely_days:
-                            _rmtl_tau_default = min(365.0, _rmtl_tau_max_safe)
-                            _rmtl_unit = "days"
-                            _rmtl_common = "365 (1y), 730 (2y), 1095 (3y)"
-                        else:
-                            _rmtl_tau_default = min(36.0, _rmtl_tau_max_safe)
-                            _rmtl_unit = "months"
-                            _rmtl_common = "12, 24, 36"
+                        _rmtl_tau_max_safe = float(min(_cif_max_times)) if _cif_max_times else 60.0
+                        _rmtl_tau_default = round(_rmtl_tau_max_safe * 0.8, 1)
                         
                         _rmtl_c1, _rmtl_c2 = st.columns([1, 2])
                         with _rmtl_c1:
                             _rmtl_tau = st.number_input(
-                                f"Restriction Time (τ) [{_rmtl_unit}]",
+                                "Restriction Time (τ) for RMTL",
                                 min_value=0.1,
-                                value=round(_rmtl_tau_default, 1),
-                                step=30.0 if _rmtl_likely_days else 1.0,
+                                value=_rmtl_tau_default,
+                                step=1.0,
                                 key="rmtl_tau",
-                                help=f"Max safe τ = {_rmtl_tau_max_safe:.0f} {_rmtl_unit}. Common choices: {_rmtl_common}."
+                                help=f"Max safe τ = {_rmtl_tau_max_safe:.1f}. Set to match your data's time unit."
                             )
                         
                         if st.button("Calculate RMTL", key="calc_rmtl"):
@@ -4312,7 +4278,7 @@ if df is not None:
                                 _sig = "✅" if d['p_value'] < 0.05 else ""
                                 st.metric(
                                     f"RMTL Difference ({d['group_a']} − {d['group_b']})",
-                                    f"{d['diff']:.2f} {_rmtl_unit}",
+                                    f"{d['diff']:.2f}",
                                     delta=f"95% CI: {d['lower']:.2f} to {d['upper']:.2f}, {_p_fmt} {_sig}"
                                 )
                             
