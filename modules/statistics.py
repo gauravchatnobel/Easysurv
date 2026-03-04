@@ -606,3 +606,217 @@ def summarize_model_risk(epv_res, collinearity_list, vif_df, separation_warnings
         'reasons': reasons,
         'recommendation': rec
     }
+
+
+def compute_rmst(df, time_col, event_col, group_col, tau, n_boot=200):
+    """
+    Compute Restricted Mean Survival Time (RMST) per group.
+    
+    RMST(τ) = ∫₀^τ S(t) dt = area under KM curve up to time τ.
+    
+    Difference tested via bootstrap (group1 - group2).
+    Equivalent to R's survRM2::rmst2().
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+    time_col : str
+    event_col : str
+    group_col : str
+    tau : float
+        Restriction time (must be ≤ min of max observed time per group).
+    n_boot : int
+        Number of bootstrap replicates.
+    
+    Returns
+    -------
+    dict with keys:
+      'group_results': list of {group, rmst, se, lower, upper, n}
+      'difference': {diff, se, lower, upper, p_value} or None (if >2 groups)
+      'tau': float
+    """
+    groups = sorted(df[group_col].dropna().unique())
+    
+    def _rmst_single(data, time_c, event_c, tau_val):
+        """Compute RMST for a single dataset."""
+        kmf = KaplanMeierFitter()
+        kmf.fit(data[time_c], data[event_c])
+        # Get survival function up to tau
+        sf = kmf.survival_function_at_times(np.sort(np.unique(np.append(
+            data[time_c][data[time_c] <= tau_val].values, [0, tau_val]
+        )))).values
+        times = np.sort(np.unique(np.append(
+            data[time_c][data[time_c] <= tau_val].values, [0, tau_val]
+        )))
+        # Trapezoidal integration
+        return np.trapz(sf, times)
+    
+    def _rmst_from_kmf(data, time_c, event_c, tau_val):
+        """More robust RMST using lifelines KMF timeline."""
+        kmf = KaplanMeierFitter()
+        kmf.fit(data[time_c], data[event_c])
+        # Build timeline from 0 to tau
+        timeline = np.linspace(0, tau_val, 500)
+        sf = kmf.predict(timeline)
+        return np.trapz(sf.values, timeline)
+    
+    # Per-group RMST with bootstrap
+    group_results = []
+    group_rmst_boots = {}
+    
+    for grp in groups:
+        gdf = df[df[group_col] == grp].copy()
+        rmst_est = _rmst_from_kmf(gdf, time_col, event_col, tau)
+        
+        # Bootstrap
+        boot_vals = []
+        for _ in range(n_boot):
+            boot_df = gdf.sample(n=len(gdf), replace=True)
+            try:
+                boot_vals.append(_rmst_from_kmf(boot_df, time_col, event_col, tau))
+            except:
+                pass
+        
+        se = np.std(boot_vals) if len(boot_vals) > 5 else 0
+        ci_low = max(0, rmst_est - 1.96 * se)
+        ci_high = rmst_est + 1.96 * se
+        
+        group_results.append({
+            'group': grp, 'rmst': rmst_est, 'se': se,
+            'lower': ci_low, 'upper': ci_high, 'n': len(gdf)
+        })
+        group_rmst_boots[grp] = boot_vals
+    
+    # Pairwise difference (only for 2 groups)
+    difference = None
+    if len(groups) == 2:
+        g0, g1 = groups[0], groups[1]
+        diff_est = group_results[0]['rmst'] - group_results[1]['rmst']
+        
+        # Bootstrap difference
+        n_min = min(len(group_rmst_boots[g0]), len(group_rmst_boots[g1]))
+        if n_min > 5:
+            boot_diffs = [group_rmst_boots[g0][i] - group_rmst_boots[g1][i] for i in range(n_min)]
+            diff_se = np.std(boot_diffs)
+            diff_ci_low = diff_est - 1.96 * diff_se
+            diff_ci_high = diff_est + 1.96 * diff_se
+            # Two-sided p-value: z = diff/se
+            z = abs(diff_est / diff_se) if diff_se > 0 else 0
+            p_val = 2 * (1 - norm.cdf(z))
+        else:
+            diff_se = 0
+            diff_ci_low = diff_est
+            diff_ci_high = diff_est
+            p_val = 1.0
+        
+        difference = {
+            'group_a': g0, 'group_b': g1,
+            'diff': diff_est, 'se': diff_se,
+            'lower': diff_ci_low, 'upper': diff_ci_high,
+            'p_value': p_val
+        }
+    
+    return {
+        'group_results': group_results,
+        'difference': difference,
+        'tau': tau
+    }
+
+
+def compute_rmtl(df, time_col, event_col, group_col, event_of_interest, tau, n_boot=200):
+    """
+    Compute Restricted Mean Time Lost (RMTL) per group from CIF.
+    
+    RMTL(τ) = ∫₀^τ CIF(t) dt = area under CIF curve up to time τ.
+    Interpretable as "average time lost to the event within [0, τ]."
+    
+    Ref: Andersen PK. Stat Med 2013; Zhao et al. 2016.
+    Equivalent to computing RMTL from R's tidycmprsk or adjustedCurves.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+    time_col, event_col, group_col : str
+    event_of_interest : int/float
+        Code for the event of interest in event_col.
+    tau : float
+        Restriction time.
+    n_boot : int
+        Bootstrap replicates.
+    
+    Returns
+    -------
+    dict with same structure as compute_rmst but for RMTL.
+    """
+    from lifelines import AalenJohansenFitter
+    
+    groups = sorted(df[group_col].dropna().unique())
+    
+    def _rmtl_from_aj(data, time_c, event_c, eoi, tau_val):
+        """Compute RMTL from Aalen-Johansen CIF."""
+        aj = AalenJohansenFitter(calculate_variance=False)
+        aj.fit(data[time_c], data[event_c], event_of_interest=eoi)
+        # Build timeline from 0 to tau
+        timeline = np.linspace(0, tau_val, 500)
+        cif = aj.predict(timeline)
+        return np.trapz(cif.values, timeline)
+    
+    # Per-group RMTL with bootstrap
+    group_results = []
+    group_rmtl_boots = {}
+    
+    for grp in groups:
+        gdf = df[df[group_col] == grp].copy()
+        try:
+            rmtl_est = _rmtl_from_aj(gdf, time_col, event_col, event_of_interest, tau)
+        except:
+            rmtl_est = 0
+        
+        # Bootstrap
+        boot_vals = []
+        for _ in range(n_boot):
+            boot_df = gdf.sample(n=len(gdf), replace=True)
+            try:
+                boot_vals.append(_rmtl_from_aj(boot_df, time_col, event_col, event_of_interest, tau))
+            except:
+                pass
+        
+        se = np.std(boot_vals) if len(boot_vals) > 5 else 0
+        ci_low = max(0, rmtl_est - 1.96 * se)
+        ci_high = rmtl_est + 1.96 * se
+        
+        group_results.append({
+            'group': grp, 'rmtl': rmtl_est, 'se': se,
+            'lower': ci_low, 'upper': ci_high, 'n': len(gdf)
+        })
+        group_rmtl_boots[grp] = boot_vals
+    
+    # Pairwise difference (only for 2 groups)
+    difference = None
+    if len(groups) == 2:
+        g0, g1 = groups[0], groups[1]
+        diff_est = group_results[0]['rmtl'] - group_results[1]['rmtl']
+        
+        n_min = min(len(group_rmtl_boots[g0]), len(group_rmtl_boots[g1]))
+        if n_min > 5:
+            boot_diffs = [group_rmtl_boots[g0][i] - group_rmtl_boots[g1][i] for i in range(n_min)]
+            diff_se = np.std(boot_diffs)
+            diff_ci_low = diff_est - 1.96 * diff_se
+            diff_ci_high = diff_est + 1.96 * diff_se
+            z = abs(diff_est / diff_se) if diff_se > 0 else 0
+            p_val = 2 * (1 - norm.cdf(z))
+        else:
+            diff_se = 0; diff_ci_low = diff_est; diff_ci_high = diff_est; p_val = 1.0
+        
+        difference = {
+            'group_a': g0, 'group_b': g1,
+            'diff': diff_est, 'se': diff_se,
+            'lower': diff_ci_low, 'upper': diff_ci_high,
+            'p_value': p_val
+        }
+    
+    return {
+        'group_results': group_results,
+        'difference': difference,
+        'tau': tau
+    }

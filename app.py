@@ -1873,6 +1873,103 @@ if df is not None:
                 elif len(groups) == 2:
                     st.info("Pairwise comparison is identical to the Global Log-Rank test for 2 groups.")
 
+                # --- RMST (Restricted Mean Survival Time) ---
+                st.divider()
+                st.subheader("📐 Restricted Mean Survival Time (RMST)")
+                st.caption(
+                    "RMST(τ) = area under the KM curve from 0 to τ. "
+                    "Interpretable as the **average survival time** within [0, τ]. "
+                    "The RMST difference gives an absolute measure of treatment effect "
+                    "without requiring the proportional hazards assumption. "
+                    "Equivalent to R's `survRM2::rmst2()`."
+                )
+                
+                # Smart default τ: minimum of max observed time across groups
+                _max_times = [df_clean[df_clean[group_col] == g][time_col].max() for g in groups]
+                _tau_default = float(min(_max_times)) if _max_times else 12.0
+                
+                _rmst_c1, _rmst_c2 = st.columns([1, 2])
+                with _rmst_c1:
+                    _rmst_tau = st.number_input(
+                        "Restriction Time (τ)",
+                        min_value=0.1,
+                        value=round(_tau_default, 1),
+                        step=1.0,
+                        key="rmst_tau",
+                        help=f"Max safe τ = {_tau_default:.1f} (min of max observed time per group). "
+                             f"Common choices: 12, 24, 36, 60 months."
+                    )
+                
+                if st.button("Calculate RMST", key="calc_rmst"):
+                    with st.spinner("Bootstrapping RMST (n=200)..."):
+                        _rmst_result = statistics.compute_rmst(
+                            df_clean, time_col, event_col, group_col, _rmst_tau
+                        )
+                    st.session_state['rmst_result'] = _rmst_result
+                
+                if 'rmst_result' in st.session_state:
+                    _rmst_r = st.session_state['rmst_result']
+                    
+                    # Results table
+                    st.write(f"### RMST at τ = {_rmst_r['tau']:.1f}")
+                    _rmst_table = pd.DataFrame(_rmst_r['group_results'])
+                    _rmst_display = _rmst_table.copy()
+                    _rmst_display['RMST (95% CI)'] = _rmst_display.apply(
+                        lambda r: f"{r['rmst']:.2f} ({r['lower']:.2f}–{r['upper']:.2f})", axis=1
+                    )
+                    st.dataframe(_rmst_display[['group', 'n', 'RMST (95% CI)']].rename(
+                        columns={'group': 'Group', 'n': 'N'}
+                    ), hide_index=True, use_container_width=True)
+                    
+                    # Difference (2 groups)
+                    if _rmst_r['difference']:
+                        d = _rmst_r['difference']
+                        _p_fmt = format_p_value(d['p_value'], narrator_style_name, context="table")
+                        _sig = "✅" if d['p_value'] < 0.05 else ""
+                        st.metric(
+                            f"RMST Difference ({d['group_a']} − {d['group_b']})",
+                            f"{d['diff']:.2f} months",
+                            delta=f"95% CI: {d['lower']:.2f} to {d['upper']:.2f}, {_p_fmt} {_sig}"
+                        )
+                    
+                    # Visualization: shaded area under KM curves
+                    st.write("### RMST Visualization")
+                    _fig_rmst, _ax_rmst = plt.subplots(figsize=(8, 5))
+                    _rmst_colors = all_themes.get(selected_theme, ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
+                    
+                    for i, grp in enumerate(groups):
+                        gdf = df_clean[df_clean[group_col] == grp]
+                        kmf = KaplanMeierFitter()
+                        kmf.fit(gdf[time_col], gdf[event_col])
+                        timeline = np.linspace(0, _rmst_r['tau'], 500)
+                        sf = kmf.predict(timeline)
+                        _c = _rmst_colors[i % len(_rmst_colors)]
+                        _ax_rmst.plot(timeline, sf.values, color=_c, linewidth=2, label=f"{grp}")
+                        _ax_rmst.fill_between(timeline, 0, sf.values, alpha=0.15, color=_c)
+                    
+                    _ax_rmst.axvline(x=_rmst_r['tau'], color='grey', linestyle='--', alpha=0.7, label=f"τ = {_rmst_r['tau']:.0f}")
+                    _ax_rmst.set_xlabel("Time")
+                    _ax_rmst.set_ylabel("Survival Probability")
+                    _ax_rmst.set_title(f"RMST (τ = {_rmst_r['tau']:.0f}): Shaded Area = RMST", fontweight='bold')
+                    _ax_rmst.legend(loc='lower left')
+                    _ax_rmst.set_xlim(0, _rmst_r['tau'] * 1.05)
+                    _ax_rmst.set_ylim(0, 1.05)
+                    _ax_rmst.grid(True, alpha=0.3)
+                    _fig_rmst.tight_layout()
+                    st.pyplot(_fig_rmst)
+                    
+                    # Download
+                    _rmst_d1, _rmst_d2 = st.columns(2)
+                    with _rmst_d1:
+                        st.download_button("💾 RMST Plot (600 DPI)",
+                                           plotting.save_plot_to_buffer(_fig_rmst, dpi=600),
+                                           "rmst_plot_600dpi.png", "image/png", key="dl_rmst_png")
+                    with _rmst_d2:
+                        st.download_button("📄 RMST Plot (PDF)",
+                                           plotting.save_plot_to_buffer(_fig_rmst, fmt="pdf"),
+                                           "rmst_plot.pdf", "application/pdf", key="dl_rmst_pdf")
+                    plt.close(_fig_rmst)
+
                 # --- AI NARRATOR (Univariable) ---
                 st.divider()
                 st.subheader("🤖 AI Result Narrator")
@@ -4121,6 +4218,114 @@ if df is not None:
                             except Exception as e:
                                 st.error(f"Cause-Specific Cox Failed: {e}")
                                 st.caption("Common causes: too few events, collinear variables, or missing TD covariate data.")
+                else:
+                    st.info("ℹ️ Configure the cumulative incidence analysis above first.")
+
+                # ================================================================
+                # RMTL (Restricted Mean Time Lost)
+                # ================================================================
+                st.divider()
+                st.subheader("📐 Restricted Mean Time Lost (RMTL)")
+                st.caption(
+                    "RMTL(τ) = area under the CIF from 0 to τ. "
+                    "Interpretable as the **average time lost** to the event within [0, τ]. "
+                    "The RMTL difference quantifies absolute differences in cumulative event burden "
+                    "between groups, properly accounting for competing risks. "
+                    "Ref: Andersen PK, *Statistics in Medicine* 2013; Zhao et al. 2016."
+                )
+                
+                if cif_df is not None and cif_time_col is not None and cif_event_col is not None and cif_event_of_interest is not None:
+                    _cif_groups = sorted(cif_df[group_col].dropna().unique()) if group_col != "None" and group_col in cif_df.columns else ["All"]
+                    
+                    if len(_cif_groups) > 1:
+                        # Smart default τ
+                        _cif_max_times = [cif_df[cif_df[group_col] == g][cif_time_col].max() for g in _cif_groups]
+                        _rmtl_tau_default = float(min(_cif_max_times)) if _cif_max_times else 12.0
+                        
+                        _rmtl_c1, _rmtl_c2 = st.columns([1, 2])
+                        with _rmtl_c1:
+                            _rmtl_tau = st.number_input(
+                                "Restriction Time (τ) for RMTL",
+                                min_value=0.1,
+                                value=round(_rmtl_tau_default, 1),
+                                step=1.0,
+                                key="rmtl_tau",
+                                help=f"Max safe τ = {_rmtl_tau_default:.1f}. Common choices: 12, 24 months."
+                            )
+                        
+                        if st.button("Calculate RMTL", key="calc_rmtl"):
+                            with st.spinner("Bootstrapping RMTL (n=200)..."):
+                                _rmtl_result = statistics.compute_rmtl(
+                                    cif_df, cif_time_col, cif_event_col, group_col,
+                                    cif_event_of_interest, _rmtl_tau
+                                )
+                            st.session_state['rmtl_result'] = _rmtl_result
+                        
+                        if 'rmtl_result' in st.session_state:
+                            _rmtl_r = st.session_state['rmtl_result']
+                            
+                            # Results table
+                            st.write(f"### RMTL at τ = {_rmtl_r['tau']:.1f}")
+                            _rmtl_table = pd.DataFrame(_rmtl_r['group_results'])
+                            _rmtl_display = _rmtl_table.copy()
+                            _rmtl_display['RMTL (95% CI)'] = _rmtl_display.apply(
+                                lambda r: f"{r['rmtl']:.2f} ({r['lower']:.2f}–{r['upper']:.2f})", axis=1
+                            )
+                            st.dataframe(_rmtl_display[['group', 'n', 'RMTL (95% CI)']].rename(
+                                columns={'group': 'Group', 'n': 'N'}
+                            ), hide_index=True, use_container_width=True)
+                            
+                            # Difference (2 groups)
+                            if _rmtl_r['difference']:
+                                d = _rmtl_r['difference']
+                                _p_fmt = format_p_value(d['p_value'], narrator_style_name, context="table")
+                                _sig = "✅" if d['p_value'] < 0.05 else ""
+                                st.metric(
+                                    f"RMTL Difference ({d['group_a']} − {d['group_b']})",
+                                    f"{d['diff']:.2f} months",
+                                    delta=f"95% CI: {d['lower']:.2f} to {d['upper']:.2f}, {_p_fmt} {_sig}"
+                                )
+                            
+                            # Visualization: shaded area under CIF curves
+                            st.write("### RMTL Visualization")
+                            from lifelines import AalenJohansenFitter
+                            _fig_rmtl, _ax_rmtl = plt.subplots(figsize=(8, 5))
+                            _rmtl_colors = all_themes.get(selected_theme, ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
+                            
+                            for i, grp in enumerate(_cif_groups):
+                                gdf = cif_df[cif_df[group_col] == grp]
+                                aj = AalenJohansenFitter(calculate_variance=False)
+                                aj.fit(gdf[cif_time_col], gdf[cif_event_col], event_of_interest=cif_event_of_interest)
+                                timeline = np.linspace(0, _rmtl_r['tau'], 500)
+                                cif_vals = aj.predict(timeline)
+                                _c = _rmtl_colors[i % len(_rmtl_colors)]
+                                _ax_rmtl.plot(timeline, cif_vals.values, color=_c, linewidth=2, label=f"{grp}")
+                                _ax_rmtl.fill_between(timeline, 0, cif_vals.values, alpha=0.15, color=_c)
+                            
+                            _ax_rmtl.axvline(x=_rmtl_r['tau'], color='grey', linestyle='--', alpha=0.7, label=f"τ = {_rmtl_r['tau']:.0f}")
+                            _ax_rmtl.set_xlabel("Time")
+                            _ax_rmtl.set_ylabel("Cumulative Incidence")
+                            _ax_rmtl.set_title(f"RMTL (τ = {_rmtl_r['tau']:.0f}): Shaded Area = Time Lost to Event", fontweight='bold')
+                            _ax_rmtl.legend(loc='upper left')
+                            _ax_rmtl.set_xlim(0, _rmtl_r['tau'] * 1.05)
+                            _ax_rmtl.set_ylim(0, min(1.0, max([r['rmtl'] / _rmtl_r['tau'] * 3 for r in _rmtl_r['group_results']]) + 0.1))
+                            _ax_rmtl.grid(True, alpha=0.3)
+                            _fig_rmtl.tight_layout()
+                            st.pyplot(_fig_rmtl)
+                            
+                            # Download
+                            _rmtl_d1, _rmtl_d2 = st.columns(2)
+                            with _rmtl_d1:
+                                st.download_button("💾 RMTL Plot (600 DPI)",
+                                                   plotting.save_plot_to_buffer(_fig_rmtl, dpi=600),
+                                                   "rmtl_plot_600dpi.png", "image/png", key="dl_rmtl_png")
+                            with _rmtl_d2:
+                                st.download_button("📄 RMTL Plot (PDF)",
+                                                   plotting.save_plot_to_buffer(_fig_rmtl, fmt="pdf"),
+                                                   "rmtl_plot.pdf", "application/pdf", key="dl_rmtl_pdf")
+                            plt.close(_fig_rmtl)
+                    else:
+                        st.info("ℹ️ RMTL requires a grouping variable with ≥2 groups.")
                 else:
                     st.info("ℹ️ Configure the cumulative incidence analysis above first.")
 
