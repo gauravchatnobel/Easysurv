@@ -3910,6 +3910,220 @@ if df is not None:
                 else:
                     st.info("ℹ️ Configure the cumulative incidence analysis above first (time, event, event of interest).")
 
+                # ================================================================
+                # CAUSE-SPECIFIC COX REGRESSION (with optional TD covariate)
+                # ================================================================
+                st.divider()
+                st.subheader("Cause-Specific Cox Regression")
+                st.write("Fit a **standard Cox PH model** where the competing event is treated as **censored**. "
+                         "This gives you cause-specific hazard ratios (csHR).")
+                st.caption(
+                    "Use this when you want to assess the **direct biological effect** of a covariate on the event of interest, "
+                    "or when you need a **time-dependent covariate** (e.g., transplant) in a competing risks setting. "
+                    "While Fine-Gray gives the effect on cumulative incidence (population-level), "
+                    "cause-specific Cox gives the effect on the **instantaneous hazard** (individual-level). "
+                    "Reviewers often request both for completeness."
+                )
+
+                if cif_df is not None and cif_time_col is not None and cif_event_col is not None and cif_event_of_interest is not None:
+                    # Build cause-specific dataset: recode competing events as censored
+                    _cs_df = cif_df.copy()
+                    _cs_event_col_name = f"_cs_event_{cif_event_of_interest}"
+                    _cs_df[_cs_event_col_name] = (_cs_df[cif_event_col] == cif_event_of_interest).astype(int)
+                    
+                    _n_cs_events = int(_cs_df[_cs_event_col_name].sum())
+                    _n_cs_competing = int((_cs_df[cif_event_col] == 2).sum()) if 2 in _cs_df[cif_event_col].values else 0
+                    st.info(f"**{_n_cs_events}** primary events | **{_n_cs_competing}** competing events (recoded as censored) | **{len(_cs_df)}** total patients")
+                    
+                    # Covariates (exclude structural columns)
+                    _cs_exclude = {cif_time_col, cif_event_col, _cs_event_col_name, 'Composite_Time', 'Composite_Status',
+                                   'start', 'stop', 'status', 'weight', 'cens_event', 'id'}
+                    if cif_mode != "Single 'Status' Column (with multiple codes)":
+                        for _ev in ['rfs_time_col', 'rfs_stat_col', 'os_time_col', 'os_stat_col']:
+                            if _ev in dir():
+                                _cs_exclude.add(eval(_ev))
+                    
+                    _cs_cov_options = [c for c in _cs_df.columns if c not in _cs_exclude]
+                    
+                    _cs_covariates = st.multiselect(
+                        "Select Covariates for Cause-Specific Cox",
+                        _cs_cov_options,
+                        key="cs_cox_covariates",
+                        help="Select variables to include in the cause-specific Cox model."
+                    )
+                    
+                    # --- TD Covariate Option ---
+                    _cs_td_enabled = st.checkbox(
+                        "⏱️ Include a Time-Dependent Covariate",
+                        value=False,
+                        key="cs_td_enabled",
+                        help="E.g., transplant — avoids immortal time bias."
+                    )
+                    
+                    _cs_td_var_name = None
+                    _cs_td_time_col = None
+                    _cs_td_status_col = None
+                    
+                    if _cs_td_enabled:
+                        with st.container(border=True):
+                            st.markdown("##### ⏱️ Time-Dependent Covariate")
+                            st.caption(
+                                "The counting-process approach splits each patient's timeline at the event point. "
+                                "Equivalent to R's `survival::tmerge()` + `coxph(Surv(start, stop, event) ~ ...)`."
+                            )
+                            _cstd1, _cstd2, _cstd3 = st.columns(3)
+                            with _cstd1:
+                                _cs_td_var_name = st.text_input("Covariate Name", value="Transplant", key="cs_td_var")
+                            with _cstd2:
+                                _cs_td_time_col = st.selectbox(
+                                    "Time of Event Column", columns,
+                                    index=columns.index("Transplant_Time") if "Transplant_Time" in columns else 0,
+                                    key="cs_td_time"
+                                )
+                            with _cstd3:
+                                _cs_td_status_col = st.selectbox(
+                                    "Event Status Column (1=occurred)", columns,
+                                    index=columns.index("Transplant_Status") if "Transplant_Status" in columns else 0,
+                                    key="cs_td_stat"
+                                )
+                    
+                    if _cs_covariates or _cs_td_enabled:
+                        # Reference groups for categorical covariates
+                        _cs_cat_cols = [c for c in _cs_covariates if pd.api.types.is_object_dtype(_cs_df[c]) or isinstance(_cs_df[c].dtype, pd.CategoricalDtype)]
+                        _cs_refs = {}
+                        if _cs_cat_cols:
+                            st.markdown("##### Reference Group Selection")
+                            _ref_cols = st.columns(min(3, len(_cs_cat_cols)))
+                            for i, col in enumerate(_cs_cat_cols):
+                                with _ref_cols[i % 3]:
+                                    _levels = sorted(_cs_df[col].dropna().unique().astype(str))
+                                    _cs_refs[col] = st.selectbox(f"Ref for {col}", _levels, key=f"cs_ref_{col}", index=0)
+                        
+                        if st.button("Run Cause-Specific Cox", key="run_cs_cox"):
+                            try:
+                                # Prepare data
+                                _cs_fit_cols = [cif_time_col, _cs_event_col_name] + _cs_covariates
+                                _cs_fit_df = _cs_df[_cs_fit_cols].dropna().copy()
+                                
+                                # Encode categoricals
+                                for col in _cs_cat_cols:
+                                    ref = _cs_refs.get(col)
+                                    dummies = pd.get_dummies(_cs_fit_df[col], prefix=col)
+                                    ref_name = f"{col}_{ref}"
+                                    if ref_name in dummies.columns:
+                                        dummies = dummies.drop(columns=[ref_name])
+                                    _cs_fit_df = _cs_fit_df.drop(columns=[col])
+                                    _cs_fit_df = pd.concat([_cs_fit_df, dummies], axis=1)
+                                
+                                # Sanitize column names
+                                _cs_fit_df.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in _cs_fit_df.columns]
+                                _san_cs_time = cif_time_col.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                _san_cs_event = _cs_event_col_name.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                
+                                # --- TD Covariate Expansion ---
+                                _cs_entry_col = None
+                                if _cs_td_enabled and _cs_td_var_name and _cs_td_time_col and _cs_td_status_col:
+                                    _cs_td_var_safe = _cs_td_var_name.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                    _cs_td_time_vals = df_clean.loc[_cs_fit_df.index, _cs_td_time_col] if _cs_td_time_col in df_clean.columns else None
+                                    _cs_td_stat_vals = df_clean.loc[_cs_fit_df.index, _cs_td_status_col] if _cs_td_status_col in df_clean.columns else None
+                                    
+                                    if _cs_td_time_vals is not None and _cs_td_stat_vals is not None:
+                                        rows_exp = []
+                                        for idx in _cs_fit_df.index:
+                                            row = _cs_fit_df.loc[idx].to_dict()
+                                            end_t = row[_san_cs_time]
+                                            ev = row[_san_cs_event]
+                                            td_occ = _cs_td_stat_vals.loc[idx] if idx in _cs_td_stat_vals.index else 0
+                                            td_t = _cs_td_time_vals.loc[idx] if idx in _cs_td_time_vals.index else np.nan
+                                            
+                                            if pd.notna(td_occ) and td_occ == 1 and pd.notna(td_t) and 0 < td_t < end_t:
+                                                row1 = row.copy()
+                                                row1['_start'] = 0; row1[_san_cs_time] = td_t; row1[_san_cs_event] = 0; row1[_cs_td_var_safe] = 0
+                                                rows_exp.append(row1)
+                                                row2 = row.copy()
+                                                row2['_start'] = td_t; row2[_san_cs_time] = end_t; row2[_san_cs_event] = ev; row2[_cs_td_var_safe] = 1
+                                                rows_exp.append(row2)
+                                            else:
+                                                row['_start'] = 0; row[_cs_td_var_safe] = 0
+                                                rows_exp.append(row)
+                                        
+                                        _cs_fit_df = pd.DataFrame(rows_exp)
+                                        _cs_entry_col = '_start'
+                                        st.success(f"✅ Data expanded to {len(_cs_fit_df)} rows for TD covariate **{_cs_td_var_safe}**")
+                                
+                                # Fit model
+                                _cs_cph = CoxPHFitter()
+                                if _cs_entry_col:
+                                    _cs_cph.fit(_cs_fit_df, duration_col=_san_cs_time, event_col=_san_cs_event, entry_col=_cs_entry_col)
+                                else:
+                                    _cs_cph.fit(_cs_fit_df, duration_col=_san_cs_time, event_col=_san_cs_event)
+                                
+                                # Extract results
+                                _cs_summary = _cs_cph.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']].copy()
+                                _cs_summary.columns = ['Cause-Specific HR', 'Lower 95%', 'Upper 95%', 'p-value']
+                                
+                                st.write("### Cause-Specific Hazard Ratios")
+                                _cs_display = _cs_summary.copy()
+                                _cs_raw_p = _cs_summary['p-value'].copy()
+                                _cs_display['p-value'] = _cs_display['p-value'].apply(lambda p: format_p_value(p, narrator_style_name, context="table"))
+                                
+                                def _highlight_cs(row):
+                                    try:
+                                        p = _cs_raw_p.loc[row.name]
+                                        if p < 0.05:
+                                            return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
+                                    except: pass
+                                    return [''] * len(row)
+                                
+                                st.dataframe(_cs_display.style.apply(_highlight_cs, axis=1).format(
+                                    {c: "{:.3f}" for c in _cs_display.columns if c != 'p-value'}
+                                ))
+                                st.caption("Competing events treated as censored. csHR reflects the **direct hazard** of the event of interest.")
+                                
+                                # Forest plot
+                                st.write("### Forest Plot (Cause-Specific HR)")
+                                _cs_forest_color = '#1f77b4'
+                                if selected_theme in all_themes and len(all_themes[selected_theme]) > 0:
+                                    _cs_forest_color = all_themes[selected_theme][0]
+                                _cs_ci_sep = narrator.JOURNAL_STYLES.get(narrator_style_name, {}).get('ci_sep', '-')
+                                
+                                _fig_cs_forest = plotting.create_forest_plot(
+                                    _cs_summary,
+                                    theme_color=_cs_forest_color,
+                                    title="Cause-Specific Cox Regression",
+                                    xlabel="Cause-Specific Hazard Ratio (csHR)",
+                                    p_formatter=lambda p: format_p_value(p, narrator_style_name, context="plot"),
+                                    ci_sep=_cs_ci_sep,
+                                    hr_col='Cause-Specific HR',
+                                )
+                                st.pyplot(_fig_cs_forest)
+                                
+                                # Downloads
+                                _csd1, _csd2, _csd3 = st.columns(3)
+                                with _csd1:
+                                    st.download_button("💾 csHR Table (CSV)",
+                                                       _cs_summary.to_csv().encode('utf-8'),
+                                                       "cause_specific_cox.csv", "text/csv", key="dl_cs_csv")
+                                with _csd2:
+                                    st.download_button("💾 Forest Plot (600 DPI)",
+                                                       plotting.save_plot_to_buffer(_fig_cs_forest, dpi=600),
+                                                       "cs_forest_600dpi.png", "image/png", key="dl_cs_forest")
+                                with _csd3:
+                                    st.download_button("📄 Forest Plot (PDF)",
+                                                       plotting.save_plot_to_buffer(_fig_cs_forest, fmt="pdf"),
+                                                       "cs_forest.pdf", "application/pdf", key="dl_cs_pdf")
+                                
+                                plt.close(_fig_cs_forest)
+                                
+                                # Save for narrator
+                                st.session_state['cs_cox_summary'] = _cs_summary
+                                
+                            except Exception as e:
+                                st.error(f"Cause-Specific Cox Failed: {e}")
+                                st.caption("Common causes: too few events, collinear variables, or missing TD covariate data.")
+                else:
+                    st.info("ℹ️ Configure the cumulative incidence analysis above first.")
+
                 # --- AI NARRATOR (CIF) — placed after MV Fine-Gray so it captures all results ---
                 st.divider()
                 st.write("### 🤖 AI Result Narrator (Competing Risks)")
@@ -4932,6 +5146,8 @@ if df is not None:
              | Fine-Gray SHR table | `cmprsk::crr()` coefficients & SE |
              | Pairwise SHR table | `cmprsk::crr()` on each pair |
              | **Multivariable Fine-Gray (aSHR)** | **`cmprsk::crr()` with covariate matrix** |
+             | **Cause-Specific Cox (csHR)** | **`survival::coxph()` with competing events censored** |
+             | **TD Covariate (counting process)** | **`survival::tmerge()` + `coxph(Surv(start, stop, event) ~ ...)`** |
              
              ### 📝 How to Cite EasySurv
              If you use this tool for your research, please cite it as:
