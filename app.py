@@ -4937,21 +4937,25 @@ if df is not None:
                      st.write("#### Model C (+2) [Optional]")
                      vars_c = st.multiselect("Covariates C", [c for c in columns if c not in [time_col, event_col]], key="mod_c")
                  
+                 # Penalization Option (OUTSIDE button block so it persists)
+                 _pen_val = st.session_state.get('penalizer_val', 0.0)
+                 _l1_val = st.session_state.get('l1_ratio_val', 0.0)
+                 apply_penalty = st.checkbox(
+                     f"Apply Penalized Settings? (Lambda={_pen_val:.4f}, L1={_l1_val:.1f})",
+                     value=False,
+                     key="c_index_apply_penalty",
+                     help="Only enable this if you have explicitly configured penalization in the Cox Regression tab."
+                 )
+                 
+                 penalizer = _pen_val if apply_penalty else 0.0
+                 l1_ratio = _l1_val if apply_penalty else 0.0
+                 
                  if st.button("Compare Models"):
                       if not vars_a or not vars_b:
                           st.error("Please define at least Model A and Model B.")
                       else:
                           try:
                               res_list = []
-                              
-
-                              
-
-                              # Determine Penalties
-                              apply_penalty = st.checkbox(f"Apply Penalized Settings from Tab 2? (Lambda={st.session_state.get('penalizer_val', 0.1):.3f}, L1={st.session_state.get('l1_ratio_val', 0.0):.1f})", value=True)
-                              
-                              penalizer = st.session_state.get('penalizer_val', 0.1) if apply_penalty else 0.0
-                              l1_ratio = st.session_state.get('l1_ratio_val', 0.0) if apply_penalty else 0.0
                               
                               with st.spinner("Bootstrapping C-Indices (n=50)..."):
                                   res_a = statistics.get_c_index_bootstrap(df_clean, time_col, event_col, vars_a, "Model A", penalizer=penalizer, l1_ratio=l1_ratio)
@@ -4960,9 +4964,72 @@ if df is not None:
                                   
                               res_list = [r for r in [res_a, res_b, res_c] if r is not None]
                               
+                              # --- Likelihood Ratio Test for Nested Models ---
+                              lrt_results = []
+                              try:
+                                  from scipy.stats import chi2
+                                  
+                                  # Prepare common data (all models need same rows)
+                                  _all_vars = list(set(vars_a + vars_b + (vars_c if vars_c else [])))
+                                  _lrt_df = df_clean[[time_col, event_col] + _all_vars].dropna()
+                                  _lrt_enc = pd.get_dummies(_lrt_df, drop_first=True)
+                                  _lrt_enc.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in _lrt_enc.columns]
+                                  
+                                  # Fit Models A and B on same data
+                                  _san_vars_a = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in vars_a]
+                                  _san_vars_b = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in vars_b]
+                                  
+                                  # Get all dummy columns for each model's covariates
+                                  _cols_a = [c for c in _lrt_enc.columns if c not in [time_col, event_col] and any(c.startswith(v) for v in _san_vars_a)]
+                                  _cols_b = [c for c in _lrt_enc.columns if c not in [time_col, event_col] and any(c.startswith(v) for v in _san_vars_b)]
+                                  
+                                  _cph_a = CoxPHFitter(penalizer=penalizer, l1_ratio=l1_ratio)
+                                  _cph_a.fit(_lrt_enc[[time_col, event_col] + _cols_a], duration_col=time_col, event_col=event_col)
+                                  _ll_a = _cph_a.log_likelihood_
+                                  
+                                  _cph_b = CoxPHFitter(penalizer=penalizer, l1_ratio=l1_ratio)
+                                  _cph_b.fit(_lrt_enc[[time_col, event_col] + _cols_b], duration_col=time_col, event_col=event_col)
+                                  _ll_b = _cph_b.log_likelihood_
+                                  
+                                  # LRT: -2 * (ll_reduced - ll_full)
+                                  _df_diff_ab = len(_cols_b) - len(_cols_a)
+                                  if _df_diff_ab > 0:
+                                      _lrt_stat_ab = -2 * (_ll_a - _ll_b)
+                                      _lrt_p_ab = 1 - chi2.cdf(max(0, _lrt_stat_ab), df=_df_diff_ab)
+                                      lrt_results.append({
+                                          'Comparison': 'Model B vs A',
+                                          'χ² statistic': _lrt_stat_ab,
+                                          'df': _df_diff_ab,
+                                          'p-value': _lrt_p_ab,
+                                          'Interpretation': 'Significant improvement' if _lrt_p_ab < 0.05 else 'No significant improvement'
+                                      })
+                                  
+                                  if vars_c:
+                                      _san_vars_c = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in vars_c]
+                                      _cols_c = [c for c in _lrt_enc.columns if c not in [time_col, event_col] and any(c.startswith(v) for v in _san_vars_c)]
+                                      
+                                      _cph_c = CoxPHFitter(penalizer=penalizer, l1_ratio=l1_ratio)
+                                      _cph_c.fit(_lrt_enc[[time_col, event_col] + _cols_c], duration_col=time_col, event_col=event_col)
+                                      _ll_c = _cph_c.log_likelihood_
+                                      
+                                      _df_diff_bc = len(_cols_c) - len(_cols_b)
+                                      if _df_diff_bc > 0:
+                                          _lrt_stat_bc = -2 * (_ll_b - _ll_c)
+                                          _lrt_p_bc = 1 - chi2.cdf(max(0, _lrt_stat_bc), df=_df_diff_bc)
+                                          lrt_results.append({
+                                              'Comparison': 'Model C vs B',
+                                              'χ² statistic': _lrt_stat_bc,
+                                              'df': _df_diff_bc,
+                                              'p-value': _lrt_p_bc,
+                                              'Interpretation': 'Significant improvement' if _lrt_p_bc < 0.05 else 'No significant improvement'
+                                          })
+                              except Exception as _lrt_e:
+                                  st.caption(f"LRT calculation note: {_lrt_e}")
+                              
                               # SAVE TO SESSION STATE
                               st.session_state['prog_results'] = {
                                   'res_list': res_list,
+                                  'lrt_results': lrt_results,
                                   'vars_a': vars_a, 'vars_b': vars_b, 'vars_c': vars_c
                               }
                           
@@ -4998,6 +5065,27 @@ if df is not None:
                       if r_b and r_c:
                           delta_bc = r_c["C-Index"] - r_b["C-Index"]
                           st.metric("Δ (Model C - Model B)", f"{delta_bc:+.3f}", delta_color="normal")
+                      
+                      # --- Likelihood Ratio Test Results ---
+                      lrt_results = res_p.get('lrt_results', [])
+                      if lrt_results:
+                          st.write("### 📊 Likelihood Ratio Test (Nested Model Comparison)")
+                          st.caption("The LRT formally tests whether adding variables to a nested model significantly improves fit. "
+                                     "Both models are fit on the **same rows** for a valid comparison.")
+                          lrt_df = pd.DataFrame(lrt_results)
+                          lrt_display = lrt_df.copy()
+                          lrt_display['p-value'] = lrt_display['p-value'].apply(lambda p: format_p_value(p, narrator_style_name, context="table"))
+                          lrt_display['χ² statistic'] = lrt_display['χ² statistic'].map('{:.3f}'.format)
+                          
+                          def _highlight_lrt(row):
+                              try:
+                                  _orig_p = lrt_df.loc[lrt_df['Comparison'] == row['Comparison'], 'p-value'].values[0]
+                                  if _orig_p < 0.05:
+                                      return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
+                              except: pass
+                              return [''] * len(row)
+                          
+                          st.dataframe(lrt_display.style.apply(_highlight_lrt, axis=1), hide_index=True, use_container_width=True)
                       
                       # Plot (Forest Style)
                       fig_p, ax_p = plt.subplots(figsize=(8, 4))
