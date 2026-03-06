@@ -687,38 +687,38 @@ def compute_rmst(df, time_col, event_col, group_col, tau, n_boot=200):
         })
         group_rmst_boots[grp] = boot_vals
     
-    # Pairwise difference (only for 2 groups)
-    difference = None
-    if len(groups) == 2:
-        g0, g1 = groups[0], groups[1]
-        diff_est = group_results[0]['rmst'] - group_results[1]['rmst']
+    # Pairwise differences (all pairs)
+    pairwise = []
+    from itertools import combinations
+    for i, j in combinations(range(len(groups)), 2):
+        g_i, g_j = groups[i], groups[j]
+        diff_est = group_results[i]['rmst'] - group_results[j]['rmst']
         
-        # Bootstrap difference
-        n_min = min(len(group_rmst_boots[g0]), len(group_rmst_boots[g1]))
+        n_min = min(len(group_rmst_boots[g_i]), len(group_rmst_boots[g_j]))
         if n_min > 5:
-            boot_diffs = [group_rmst_boots[g0][i] - group_rmst_boots[g1][i] for i in range(n_min)]
+            boot_diffs = [group_rmst_boots[g_i][k] - group_rmst_boots[g_j][k] for k in range(n_min)]
             diff_se = np.std(boot_diffs)
             diff_ci_low = diff_est - 1.96 * diff_se
             diff_ci_high = diff_est + 1.96 * diff_se
-            # Two-sided p-value: z = diff/se
             z = abs(diff_est / diff_se) if diff_se > 0 else 0
             p_val = 2 * (1 - norm.cdf(z))
         else:
-            diff_se = 0
-            diff_ci_low = diff_est
-            diff_ci_high = diff_est
-            p_val = 1.0
+            diff_se = 0; diff_ci_low = diff_est; diff_ci_high = diff_est; p_val = 1.0
         
-        difference = {
-            'group_a': g0, 'group_b': g1,
+        pairwise.append({
+            'group_a': g_i, 'group_b': g_j,
             'diff': diff_est, 'se': diff_se,
             'lower': diff_ci_low, 'upper': diff_ci_high,
             'p_value': p_val
-        }
+        })
+    
+    # Backward compat: 'difference' = first pair if exactly 2 groups
+    difference = pairwise[0] if len(pairwise) == 1 else None
     
     return {
         'group_results': group_results,
         'difference': difference,
+        'pairwise': pairwise,
         'tau': tau
     }
 
@@ -791,15 +791,16 @@ def compute_rmtl(df, time_col, event_col, group_col, event_of_interest, tau, n_b
         })
         group_rmtl_boots[grp] = boot_vals
     
-    # Pairwise difference (only for 2 groups)
-    difference = None
-    if len(groups) == 2:
-        g0, g1 = groups[0], groups[1]
-        diff_est = group_results[0]['rmtl'] - group_results[1]['rmtl']
+    # Pairwise differences (all pairs)
+    pairwise = []
+    from itertools import combinations
+    for i, j in combinations(range(len(groups)), 2):
+        g_i, g_j = groups[i], groups[j]
+        diff_est = group_results[i]['rmtl'] - group_results[j]['rmtl']
         
-        n_min = min(len(group_rmtl_boots[g0]), len(group_rmtl_boots[g1]))
+        n_min = min(len(group_rmtl_boots[g_i]), len(group_rmtl_boots[g_j]))
         if n_min > 5:
-            boot_diffs = [group_rmtl_boots[g0][i] - group_rmtl_boots[g1][i] for i in range(n_min)]
+            boot_diffs = [group_rmtl_boots[g_i][k] - group_rmtl_boots[g_j][k] for k in range(n_min)]
             diff_se = np.std(boot_diffs)
             diff_ci_low = diff_est - 1.96 * diff_se
             diff_ci_high = diff_est + 1.96 * diff_se
@@ -808,15 +809,19 @@ def compute_rmtl(df, time_col, event_col, group_col, event_of_interest, tau, n_b
         else:
             diff_se = 0; diff_ci_low = diff_est; diff_ci_high = diff_est; p_val = 1.0
         
-        difference = {
-            'group_a': g0, 'group_b': g1,
+        pairwise.append({
+            'group_a': g_i, 'group_b': g_j,
             'diff': diff_est, 'se': diff_se,
             'lower': diff_ci_low, 'upper': diff_ci_high,
             'p_value': p_val
-        }
+        })
+    
+    # Backward compat: 'difference' = first pair if exactly 2 groups
+    difference = pairwise[0] if len(pairwise) == 1 else None
     
     return {
         'group_results': group_results,
         'difference': difference,
+        'pairwise': pairwise,
         'tau': tau
     }

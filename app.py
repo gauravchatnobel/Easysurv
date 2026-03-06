@@ -1921,8 +1921,10 @@ if df is not None:
                         columns={'group': 'Group', 'n': 'N'}
                     ), hide_index=True, use_container_width=True)
                     
-                    # Difference (2 groups)
-                    if _rmst_r['difference']:
+                    # Pairwise Differences
+                    _pw = _rmst_r.get('pairwise', [])
+                    if _rmst_r.get('difference'):
+                        # 2-group: single metric (backward compat)
                         d = _rmst_r['difference']
                         _p_fmt = format_p_value(d['p_value'], narrator_style_name, context="table")
                         _sig = "✅" if d['p_value'] < 0.05 else ""
@@ -1930,6 +1932,33 @@ if df is not None:
                             f"RMST Difference ({d['group_a']} − {d['group_b']})",
                             f"{d['diff']:.2f}",
                             delta=f"95% CI: {d['lower']:.2f} to {d['upper']:.2f}, {_p_fmt} {_sig}"
+                        )
+                    elif _pw:
+                        # >2 groups: pairwise table
+                        st.write("### Pairwise RMST Differences")
+                        _pw_data = []
+                        for d in _pw:
+                            _pw_data.append({
+                                'Comparison': f"{d['group_a']} vs {d['group_b']}",
+                                'Δ RMST': f"{d['diff']:.2f}",
+                                '95% CI': f"{d['lower']:.2f} to {d['upper']:.2f}",
+                                'p-value': format_p_value(d['p_value'], narrator_style_name, context="table"),
+                                'p_raw': d['p_value']
+                            })
+                        _pw_df = pd.DataFrame(_pw_data)
+                        
+                        def _hl_rmst(row):
+                            try:
+                                if row['p_raw'] < 0.05:
+                                    return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
+                            except: pass
+                            return [''] * len(row)
+                        
+                        st.dataframe(
+                            _pw_df[['Comparison', 'Δ RMST', '95% CI', 'p-value']].style.apply(
+                                lambda row: _hl_rmst(_pw_df.iloc[row.name]), axis=1
+                            ),
+                            hide_index=True, use_container_width=True
                         )
                     
                     # Visualization: shaded area under KM curves
@@ -4391,8 +4420,10 @@ if df is not None:
                                 columns={'group': 'Group', 'n': 'N'}
                             ), hide_index=True, use_container_width=True)
                             
-                            # Difference (2 groups)
-                            if _rmtl_r['difference']:
+                            # Pairwise Differences
+                            _pw_rmtl = _rmtl_r.get('pairwise', [])
+                            if _rmtl_r.get('difference'):
+                                # 2-group: single metric
                                 d = _rmtl_r['difference']
                                 _p_fmt = format_p_value(d['p_value'], narrator_style_name, context="table")
                                 _sig = "✅" if d['p_value'] < 0.05 else ""
@@ -4400,6 +4431,33 @@ if df is not None:
                                     f"RMTL Difference ({d['group_a']} − {d['group_b']})",
                                     f"{d['diff']:.2f}",
                                     delta=f"95% CI: {d['lower']:.2f} to {d['upper']:.2f}, {_p_fmt} {_sig}"
+                                )
+                            elif _pw_rmtl:
+                                # >2 groups: pairwise table
+                                st.write("### Pairwise RMTL Differences")
+                                _pw_rmtl_data = []
+                                for d in _pw_rmtl:
+                                    _pw_rmtl_data.append({
+                                        'Comparison': f"{d['group_a']} vs {d['group_b']}",
+                                        'Δ RMTL': f"{d['diff']:.2f}",
+                                        '95% CI': f"{d['lower']:.2f} to {d['upper']:.2f}",
+                                        'p-value': format_p_value(d['p_value'], narrator_style_name, context="table"),
+                                        'p_raw': d['p_value']
+                                    })
+                                _pw_rmtl_df = pd.DataFrame(_pw_rmtl_data)
+                                
+                                def _hl_rmtl_pw(row):
+                                    try:
+                                        if row['p_raw'] < 0.05:
+                                            return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
+                                    except: pass
+                                    return [''] * len(row)
+                                
+                                st.dataframe(
+                                    _pw_rmtl_df[['Comparison', 'Δ RMTL', '95% CI', 'p-value']].style.apply(
+                                        lambda row: _hl_rmtl_pw(_pw_rmtl_df.iloc[row.name]), axis=1
+                                    ),
+                                    hide_index=True, use_container_width=True
                                 )
                             
                             # Visualization: shaded area under CIF curves
