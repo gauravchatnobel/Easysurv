@@ -1946,18 +1946,17 @@ if df is not None:
                                 'p_raw': d['p_value']
                             })
                         _pw_df = pd.DataFrame(_pw_data)
+                        _pw_display_cols = ['Comparison', 'Δ RMST', '95% CI', 'p-value']
+                        _p_raw_vals = _pw_df['p_raw'].values
                         
                         def _hl_rmst(row):
-                            try:
-                                if row['p_raw'] < 0.05:
-                                    return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
-                            except: pass
+                            p = _p_raw_vals[row.name]
+                            if p < 0.05:
+                                return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
                             return [''] * len(row)
                         
                         st.dataframe(
-                            _pw_df[['Comparison', 'Δ RMST', '95% CI', 'p-value']].style.apply(
-                                lambda row: _hl_rmst(_pw_df.iloc[row.name]), axis=1
-                            ),
+                            _pw_df[_pw_display_cols].style.apply(_hl_rmst, axis=1),
                             hide_index=True, use_container_width=True
                         )
                     
@@ -4445,18 +4444,17 @@ if df is not None:
                                         'p_raw': d['p_value']
                                     })
                                 _pw_rmtl_df = pd.DataFrame(_pw_rmtl_data)
+                                _pw_rmtl_display = ['Comparison', 'Δ RMTL', '95% CI', 'p-value']
+                                _p_raw_rmtl = _pw_rmtl_df['p_raw'].values
                                 
                                 def _hl_rmtl_pw(row):
-                                    try:
-                                        if row['p_raw'] < 0.05:
-                                            return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
-                                    except: pass
+                                    p = _p_raw_rmtl[row.name]
+                                    if p < 0.05:
+                                        return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
                                     return [''] * len(row)
                                 
                                 st.dataframe(
-                                    _pw_rmtl_df[['Comparison', 'Δ RMTL', '95% CI', 'p-value']].style.apply(
-                                        lambda row: _hl_rmtl_pw(_pw_rmtl_df.iloc[row.name]), axis=1
-                                    ),
+                                    _pw_rmtl_df[_pw_rmtl_display].style.apply(_hl_rmtl_pw, axis=1),
                                     hide_index=True, use_container_width=True
                                 )
                             
