@@ -4221,6 +4221,122 @@ if df is not None:
                     st.info("ℹ️ Configure the cumulative incidence analysis above first.")
 
                 # ================================================================
+                # C-Index for Competing Risks (Cause-Specific)
+                # ================================================================
+                st.divider()
+                st.subheader("📊 C-Index for Cumulative Incidence (Cause-Specific)")
+                st.caption(
+                    "Harrell's C-index for competing risks uses the **cause-specific approach**: "
+                    "competing events are treated as censored, and a standard Cox PH model is fitted. "
+                    "This measures how well the model discriminates who will experience the event of interest. "
+                    "Ref: Wolbers et al., *Statistics in Medicine* 2014. "
+                    "Equivalent to R's `concordance(coxph(Surv(time, cs_event) ~ covariates))`."
+                )
+                
+                if cif_df is not None and cif_time_col is not None and cif_event_col is not None and cif_event_of_interest is not None:
+                    _cs_columns = [c for c in cif_df.columns if c not in [cif_time_col, cif_event_col, 'id', 'Composite_Time', 'Composite_Status']]
+                    
+                    _cs_c1, _cs_c2 = st.columns(2)
+                    with _cs_c1:
+                        st.write("#### Model A (Base)")
+                        _cs_vars_a = st.multiselect("Covariates A", _cs_columns, key="cs_cindex_a")
+                    with _cs_c2:
+                        st.write("#### Model B (+Biomarker)")
+                        _cs_vars_b = st.multiselect("Covariates B", _cs_columns, key="cs_cindex_b")
+                    
+                    if st.button("Compare C-Index (CIR)", key="calc_cs_cindex"):
+                        if not _cs_vars_a or not _cs_vars_b:
+                            st.error("Please define at least Model A and Model B.")
+                        else:
+                            try:
+                                with st.spinner("Bootstrapping C-Indices for CIR (n=50)..."):
+                                    # Create cause-specific binary event: 1 if event of interest, 0 otherwise
+                                    _cs_df = cif_df.copy()
+                                    _cs_df['_cs_event'] = (_cs_df[cif_event_col] == cif_event_of_interest).astype(int)
+                                    
+                                    # Use the bootstrap C-index function with cause-specific event
+                                    _cs_res_a = statistics.get_c_index_bootstrap(
+                                        _cs_df, cif_time_col, '_cs_event', _cs_vars_a, "Model A",
+                                        n_boot=50, penalizer=0.0, l1_ratio=0.0
+                                    )
+                                    _cs_res_b = statistics.get_c_index_bootstrap(
+                                        _cs_df, cif_time_col, '_cs_event', _cs_vars_b, "Model B",
+                                        n_boot=50, penalizer=0.0, l1_ratio=0.0
+                                    )
+                                
+                                # LRT for nested models
+                                _cs_lrt = []
+                                try:
+                                    from scipy.stats import chi2 as _chi2_dist
+                                    _cs_all_vars = list(set(_cs_vars_a + _cs_vars_b))
+                                    _cs_lrt_df = _cs_df[[cif_time_col, '_cs_event'] + _cs_all_vars].dropna()
+                                    _cs_lrt_enc = pd.get_dummies(_cs_lrt_df, drop_first=True)
+                                    _cs_lrt_enc.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in _cs_lrt_enc.columns]
+                                    
+                                    _san_a = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in _cs_vars_a]
+                                    _san_b = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in _cs_vars_b]
+                                    _ca = [c for c in _cs_lrt_enc.columns if c not in [cif_time_col, '_cs_event'] and any(c.startswith(v) for v in _san_a)]
+                                    _cb = [c for c in _cs_lrt_enc.columns if c not in [cif_time_col, '_cs_event'] and any(c.startswith(v) for v in _san_b)]
+                                    
+                                    _cph_la = CoxPHFitter(); _cph_la.fit(_cs_lrt_enc[[cif_time_col, '_cs_event'] + _ca], duration_col=cif_time_col, event_col='_cs_event')
+                                    _cph_lb = CoxPHFitter(); _cph_lb.fit(_cs_lrt_enc[[cif_time_col, '_cs_event'] + _cb], duration_col=cif_time_col, event_col='_cs_event')
+                                    
+                                    _ddf = len(_cb) - len(_ca)
+                                    if _ddf > 0:
+                                        _lrt_s = -2 * (_cph_la.log_likelihood_ - _cph_lb.log_likelihood_)
+                                        _lrt_p = 1 - _chi2_dist.cdf(max(0, _lrt_s), df=_ddf)
+                                        _cs_lrt.append({
+                                            'Comparison': 'Model B vs A',
+                                            'χ² statistic': f"{_lrt_s:.3f}",
+                                            'df': _ddf,
+                                            'p-value': format_p_value(_lrt_p, narrator_style_name, context="table"),
+                                            'p_raw': _lrt_p,
+                                            'Interpretation': 'Significant improvement' if _lrt_p < 0.05 else 'No significant improvement'
+                                        })
+                                except Exception as _le:
+                                    st.caption(f"LRT note: {_le}")
+                                
+                                st.session_state['cs_cindex_results'] = {
+                                    'res_a': _cs_res_a, 'res_b': _cs_res_b,
+                                    'lrt': _cs_lrt
+                                }
+                            except Exception as e:
+                                st.error(f"C-Index computation failed: {e}")
+                    
+                    if 'cs_cindex_results' in st.session_state:
+                        _csr = st.session_state['cs_cindex_results']
+                        _res_list = [r for r in [_csr['res_a'], _csr['res_b']] if r is not None]
+                        
+                        if _res_list:
+                            st.write("### Cause-Specific C-Index Comparison")
+                            _res_df = pd.DataFrame(_res_list)
+                            _res_df["95% CI"] = _res_df.apply(lambda x: f"{x['Lower']:.3f} – {x['Upper']:.3f}", axis=1)
+                            st.table(_res_df.set_index("Label")[["C-Index", "95% CI", "Vars"]].style.format({"C-Index": "{:.3f}"}))
+                            
+                            if len(_res_list) == 2:
+                                _delta = _res_list[1]["C-Index"] - _res_list[0]["C-Index"]
+                                st.metric("Δ C-Index (Model B − Model A)", f"{_delta:+.3f}", delta_color="normal")
+                            
+                            # LRT
+                            if _csr.get('lrt'):
+                                st.write("### Likelihood Ratio Test")
+                                _lrt_df = pd.DataFrame(_csr['lrt'])
+                                
+                                def _hl_cs(row):
+                                    try:
+                                        if row.get('p_raw', 1) < 0.05:
+                                            return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
+                                    except: pass
+                                    return [''] * len(row)
+                                
+                                st.dataframe(
+                                    _lrt_df[['Comparison', 'χ² statistic', 'df', 'p-value', 'Interpretation']].style.apply(_hl_cs, axis=1),
+                                    hide_index=True, use_container_width=True
+                                )
+                else:
+                    st.info("ℹ️ Configure the cumulative incidence analysis above first.")
+
+                # ================================================================
                 # RMTL (Restricted Mean Time Lost)
                 # ================================================================
                 st.divider()
