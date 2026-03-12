@@ -1901,7 +1901,7 @@ if df is not None:
                     )
                 
                 if st.button("Calculate RMST", key="calc_rmst"):
-                    with st.spinner("Bootstrapping RMST (n=500)..."):
+                    with st.spinner("Computing RMST (analytical)..."):
                         _rmst_result = statistics.compute_rmst(
                             df_clean, time_col, event_col, group_col, _rmst_tau
                         )
@@ -5643,51 +5643,77 @@ if df is not None:
              *   **Aalen-Johansen Estimator**: Aalen, O. O., & Johansen, S. (1978). An empirical transition matrix for non-homogeneous Markov chains based on censored observations. *Scandinavian Journal of Statistics*, 141-150.
              *   **Gray's K-sample Test**: Gray, R. J. (1988). A class of K-sample tests for comparing the cumulative incidence of a competing risk. *Annals of Statistics*, 16(3), 1141-1154.
              *   **Fine-Gray Regression**: Fine, J. P., & Gray, R. J. (1999). A proportional hazards model for the subdistribution of a competing risk. *Journal of the American Statistical Association*, 94(446), 496-509.
-             
-             #### Advanced Methods
-             *   **Landmark Analysis**: Anderson, J. R., Cain, K. C., & Gelber, R. D. (1983). Analysis of survival by tumor response. *Journal of Clinical Oncology*, 1(11), 710-719.
-             
-             #### Diagnostic Accuracy
-             *   **Wilson Score Interval**: Wilson, E. B. (1927). Probable inference, the law of succession, and statistical inference. *Journal of the American Statistical Association*, 22(158), 209-212.
-             *   **Harrell's C-Index**: Harrell Jr, F. E., Lee, K. L., & Mark, D. B. (1996). Multivariable prognostic models: issues in developing models, evaluating assumptions and adequacy, and measuring and reducing errors. *Statistics in medicine*, 15(4), 361-387.
-             
-             ---
-             
-             ### 🔬 Methodology Notes
-             
-             #### Kaplan-Meier & Cox PH
-             Kaplan-Meier survival is estimated using the product-limit estimator. Group comparisons use the **log-rank test** (Mantel, 1966). Hazard ratios (HRs) are estimated using the **Cox proportional hazards** model (Cox, 1972). The proportional hazards assumption is assessed using scaled Schoenfeld residuals.
-             
-             #### Time-Dependent Covariates
-             When a covariate changes during follow-up (e.g., transplant), including it as a baseline variable introduces **immortal time bias**. EasySurv uses the **counting-process** formulation: each patient's record is split at the time the covariate changes, creating (start, stop] intervals with the covariate coded 0 before and 1 after. The Cox model is then fit with `entry_col` for left-truncation, equivalent to R's `survival::tmerge()` + `coxph(Surv(start, stop, event) ~ ...)`.
-             
-             #### Cumulative Incidence (Competing Risks)
-             
-             Cumulative incidence functions (CIF) are estimated using the **Aalen-Johansen estimator** (lifelines `AalenJohansenFitter`), which correctly accounts for competing events. This is equivalent to R's `cmprsk::cuminc()` point estimates.
-             
-             **Group comparison** on the CIF plot uses **Gray's K-sample test** (Gray, 1988), the nonparametric analogue of the log-rank test for competing risks. It tests whether the CIF of the event of interest is equal across groups using a modified risk set where competing-event subjects remain at risk with inverse-probability-of-censoring (IPCW) weights *G(t)/G(Tᵢ)*. This is equivalent to the test statistic reported by R's `cmprsk::cuminc()$Tests`.
-             
-             **Subdistribution hazard ratios (SHRs)** are estimated using the **Fine-Gray regression model** (Fine & Gray, 1999), implemented via an IPCW-weighted Cox proportional hazards model in counting-process format. Subjects experiencing competing events are kept in the subdistribution risk set with weights derived from the Kaplan-Meier estimate of the censoring distribution. The model-based (Hessian) variance is used for confidence intervals and p-values, which is equivalent to the variance estimator used by R's `cmprsk::crr()`.
-             
-             **Pairwise SHRs** are computed by fitting separate Fine-Gray models on each pair of groups, providing 1 d.f. tests with higher power for detecting differences in small subgroups.
-             
-             **Multivariable Fine-Gray regression** uses the same IPCW-weighted Cox framework but with multiple covariates, reporting **adjusted subdistribution hazard ratios (aSHR)**. Categorical covariates are dummy-encoded with a user-selected reference group. The model-based (Hessian) variance is used for SE/CI/p-values, identical to R's `cmprsk::crr()` with a design matrix. Statistical guardrails (EPV, VIF, collinearity checks) are applied before fitting.
-             
-             #### Implementation Equivalence with R
-             | EasySurv Component | R Equivalent |
-             |---|---|
-             | Aalen-Johansen CIF | `cmprsk::cuminc()` point estimates |
-             | Gray's test (plot p-value) | `cmprsk::cuminc()$Tests` |
-             | Fine-Gray SHR table | `cmprsk::crr()` coefficients & SE |
-             | Pairwise SHR table | `cmprsk::crr()` on each pair |
-             | **Multivariable Fine-Gray (aSHR)** | **`cmprsk::crr()` with covariate matrix** |
-             | **Cause-Specific Cox (csHR)** | **`survival::coxph()` with competing events censored** |
-             | **TD Covariate (counting process)** | **`survival::tmerge()` + `coxph(Surv(start, stop, event) ~ ...)`** |
-             
-             ### 📝 How to Cite EasySurv
-             If you use this tool for your research, please cite it as:
-             > **EasySurv: An Interactive Platform for Survival Analysis (v2.0)**. Powered by Lifelines & Streamlit. Available at: [https://easysurv.streamlit.app](https://easysurv.streamlit.app)
-             """)
+                          #### Advanced Methods
+              *   **Landmark Analysis**: Anderson, J. R., Cain, K. C., & Gelber, R. D. (1983). Analysis of survival by tumor response. *Journal of Clinical Oncology*, 1(11), 710-719.
+              *   **RMST**: Uno, H., Claggett, B., Tian, L., Inoue, E., Gallo, P., Miyata, T., ... & Wei, L. J. (2014). Moving beyond the hazard ratio in quantifying the between-group difference in survival analysis. *Journal of Clinical Oncology*, 32(22), 2380-2385.
+              *   **survRM2**: Uno, H., Tian, L., Cronin, A., Battioui, C., & Horiguchi, M. (2020). survRM2: Comparing Restricted Mean Survival Time. R package.
+              *   **RMTL (Competing Risks)**: Andersen, P. K. (2013). Decomposition of number of life years lost according to causes of death. *Statistics in Medicine*, 32(30), 5278-5285.
+              *   **RMTL Inference**: Zhao, L., et al. (2016). Utilizing the integrated difference of two survival functions. *Clinical Trials*, 9(5), 570-577.
+              
+              #### Diagnostic Accuracy
+              *   **Wilson Score Interval**: Wilson, E. B. (1927). *JASA*, 22(158), 209-212.
+              *   **Harrell's C-Index**: Harrell Jr, F. E., et al. (1996). *Statistics in Medicine*, 15(4), 361-387.
+              *   **C-Index for Competing Risks**: Wolbers, M., et al. (2014). Concordance for prognostic models with competing risks. *Biostatistics*, 15(3), 526-539.
+              
+              ---
+              
+              ### 🔬 Methodology Notes
+              
+              #### Kaplan-Meier & Cox PH
+              Kaplan-Meier survival is estimated using the product-limit estimator. Group comparisons use the **log-rank test** (Mantel, 1966). Hazard ratios (HRs) are estimated using the **Cox proportional hazards** model (Cox, 1972). The proportional hazards assumption is assessed using scaled Schoenfeld residuals.
+              
+              #### Time-Dependent Covariates
+              When a covariate changes during follow-up (e.g., transplant), including it as a baseline variable introduces **immortal time bias**. EasySurv uses the **counting-process** formulation: each patient's record is split at the time the covariate changes, creating (start, stop] intervals with the covariate coded 0 before and 1 after. The Cox model is then fit with `entry_col` for left-truncation, equivalent to R's `survival::tmerge()` + `coxph(Surv(start, stop, event) ~ ...)`.
+              
+              #### Restricted Mean Survival Time (RMST)
+              
+              RMST(τ) = ∫₀^τ S(t) dt, the area under the Kaplan-Meier curve from 0 to τ, interpretable as the average survival time within [0, τ].
+              
+              **Variance**: Uses the **analytical Greenwood-based formula** from `survRM2::rmst1()`:
+              
+              `Var(RMST) = Σ [ψᵢ² × dᵢ / (nᵢ × (nᵢ − dᵢ))]`, where `ψᵢ = ∫_{tᵢ}^τ S(u) du`.
+              
+              This is the **exact same formula** used by R's `survRM2::rmst2()`. No bootstrap is used — results are fully deterministic.
+              
+              **Difference**: `SE(Δ) = √[Var(RMST₁) + Var(RMST₂)]` from independent groups. P-value from `z = Δ/SE`, two-sided normal.
+              
+              **Pairwise comparisons**: For >2 groups, all C(k,2) pairwise differences are computed with individual analytical p-values. A reference group selector allows showing only comparisons vs. a chosen reference.
+              
+              #### Restricted Mean Time Lost (RMTL) for Competing Risks
+              
+              RMTL(τ) = ∫₀^τ F(t) dt, the area under the cause-specific CIF from 0 to τ, interpretable as the average time lost to the event of interest within [0, τ] (Andersen, 2013).
+              
+              The CIF is estimated using the **Aalen-Johansen estimator** (lifelines `AalenJohansenFitter`), equivalent to R's `cmprsk::cuminc()`.
+              
+              **Variance**: Uses **bootstrap resampling** (n=500, fixed seed=42 for reproducibility) with Wald-type CIs. This is the standard approach for CIF-based RMTL in the literature (Zhao et al., 2016), as the analytical variance for the CIF integral requires influence functions that are computationally complex. Bootstrap inference is used by many R implementations for the same reason.
+              
+              #### Cause-Specific C-Index for Competing Risks
+              
+              Harrell's C-index for competing risks uses the **cause-specific approach** (Wolbers et al., 2014): competing events are treated as censored, and a standard Cox PH model is fitted. This measures how well the model discriminates who will experience the event of interest. Equivalent to R's `concordance(coxph(Surv(time, cs_event) ~ covariates))`.
+              
+              #### Cumulative Incidence (Competing Risks)
+              
+              Cumulative incidence functions (CIF) are estimated using the **Aalen-Johansen estimator** (lifelines `AalenJohansenFitter`), which correctly accounts for competing events. This is equivalent to R's `cmprsk::cuminc()` point estimates.
+              
+              **Gray's K-sample test** (Gray, 1988) is used for group comparisons. **Fine-Gray SHRs** (Fine & Gray, 1999) are estimated via IPCW-weighted Cox in counting-process format.
+              
+              #### Implementation Equivalence with R
+              | EasySurv Component | R Equivalent | Variance Method |
+              |---|---|---|
+              | **RMST** | **`survRM2::rmst2()`** | **Analytical (Greenwood)** |
+              | **RMTL (CIF)** | **`cmprsk::cuminc()` + trapezoidal** | **Bootstrap (n=500, seed=42)** |
+              | **Cause-Specific C-Index** | **`concordance(coxph(...))`** | **Bootstrap (n=50)** |
+              | Aalen-Johansen CIF | `cmprsk::cuminc()` | — |
+              | Gray's test | `cmprsk::cuminc()$Tests` | Analytical |
+              | Fine-Gray SHR | `cmprsk::crr()` | Model-based (Hessian) |
+              | Multivariable Fine-Gray | `cmprsk::crr()` with design matrix | Model-based |
+              | Cause-Specific Cox | `survival::coxph()` | Model-based |
+              | TD Covariate | `survival::tmerge()` + `coxph()` | Model-based |
+              
+              ### 📝 How to Cite EasySurv
+              If you use this tool for your research, please cite it as:
+              > **EasySurv: An Interactive Platform for Survival Analysis (v2.0)**. Powered by Lifelines & Streamlit. Available at: [https://easysurv.streamlit.app](https://easysurv.streamlit.app)
+              """)
 
 else:
     st.info("Please upload a CSV or Excel file to begin analysis.")

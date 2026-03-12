@@ -608,112 +608,100 @@ def summarize_model_risk(epv_res, collinearity_list, vif_df, separation_warnings
     }
 
 
-def compute_rmst(df, time_col, event_col, group_col, tau, n_boot=500):
+def compute_rmst(df, time_col, event_col, group_col, tau):
     """
     Compute Restricted Mean Survival Time (RMST) per group.
     
+    Uses analytical Greenwood-based variance — exact match to R's 
+    survRM2::rmst2() (Uno et al., Statistics in Medicine 2014).
+    
     RMST(τ) = ∫₀^τ S(t) dt = area under KM curve up to time τ.
     
-    Difference tested via bootstrap (group1 - group2).
-    Equivalent to R's survRM2::rmst2().
+    Variance formula:
+        Var(RMST) = Σ [ψᵢ² × dᵢ / (nᵢ × (nᵢ − dᵢ))]
+        where ψᵢ = ∫_{tᵢ}^τ S(u) du  (remaining area from tᵢ to τ)
     
-    Parameters
-    ----------
-    df : pd.DataFrame
-    time_col : str
-    event_col : str
-    group_col : str
-    tau : float
-        Restriction time (must be ≤ min of max observed time per group).
-    n_boot : int
-        Number of bootstrap replicates.
-    
-    Returns
-    -------
-    dict with keys:
-      'group_results': list of {group, rmst, se, lower, upper, n}
-      'difference': {diff, se, lower, upper, p_value} or None (if >2 groups)
-      'tau': float
+    For differences: Var(diff) = Var(RMST₁) + Var(RMST₂)  (independent groups)
+    P-value: z = diff / SE(diff), two-sided normal.
     """
+    from itertools import combinations
+    
     groups = sorted(df[group_col].dropna().unique())
-    
-    def _rmst_single(data, time_c, event_c, tau_val):
-        """Compute RMST for a single dataset."""
-        kmf = KaplanMeierFitter()
-        kmf.fit(data[time_c], data[event_c])
-        # Get survival function up to tau
-        sf = kmf.survival_function_at_times(np.sort(np.unique(np.append(
-            data[time_c][data[time_c] <= tau_val].values, [0, tau_val]
-        )))).values
-        times = np.sort(np.unique(np.append(
-            data[time_c][data[time_c] <= tau_val].values, [0, tau_val]
-        )))
-        # Trapezoidal integration
-        return np.trapezoid(sf, times)
-    
-    def _rmst_from_kmf(data, time_c, event_c, tau_val):
-        """More robust RMST using lifelines KMF timeline."""
-        kmf = KaplanMeierFitter()
-        kmf.fit(data[time_c], data[event_c])
-        # Build timeline from 0 to tau
-        timeline = np.linspace(0, tau_val, 500)
-        sf = kmf.predict(timeline)
-        return np.trapezoid(sf.values, timeline)
-    
-    # Per-group RMST with bootstrap
-    np.random.seed(42)  # Fixed seed for reproducibility
     group_results = []
-    group_rmst_boots = {}
     
     for grp in groups:
         gdf = df[df[group_col] == grp].copy()
-        rmst_est = _rmst_from_kmf(gdf, time_col, event_col, tau)
         
-        # Bootstrap
-        boot_vals = []
-        for _ in range(n_boot):
-            boot_df = gdf.sample(n=len(gdf), replace=True)
-            try:
-                boot_vals.append(_rmst_from_kmf(boot_df, time_col, event_col, tau))
-            except:
-                pass
+        # Administrative censoring at τ (equivalent to R's survRM2 logic)
+        times = gdf[time_col].values.astype(float).copy()
+        events = gdf[event_col].values.astype(float).copy()
+        events[times > tau] = 0  # Censor at τ
+        times = np.minimum(times, tau)
         
-        se = np.std(boot_vals) if len(boot_vals) > 5 else 0
-        ci_low = max(0, rmst_est - 1.96 * se)
-        ci_high = rmst_est + 1.96 * se
+        # Fit KM
+        kmf = KaplanMeierFitter()
+        kmf.fit(times, events)
+        
+        # Event table — only event times (observed > 0) up to τ
+        et = kmf.event_table
+        event_mask = (et['observed'] > 0) & (et.index <= tau)
+        et_events = et[event_mask]
+        
+        wk_time = et_events.index.values.astype(float)
+        wk_n_risk = et_events['at_risk'].values.astype(float)
+        wk_n_event = et_events['observed'].values.astype(float)
+        
+        # KM survival at event times
+        wk_surv = kmf.survival_function_at_times(wk_time).values
+        
+        if len(wk_time) > 0:
+            # ── RMST = area under KM step function [0, τ] ──
+            # S(t)=1 for [0,t₁), S(t₁) for [t₁,t₂), ..., S(tₖ) for [tₖ,τ)
+            all_times = np.concatenate([[0], wk_time, [tau]])
+            all_surv = np.concatenate([[1], wk_surv])
+            widths = np.diff(all_times)
+            rmst_est = float(np.sum(all_surv * widths))
+            
+            # ── Variance: Greenwood formula (matches survRM2::rmst1) ──
+            # ψᵢ = remaining area from tᵢ to τ
+            intervals = np.diff(np.concatenate([wk_time, [tau]]))
+            psi = np.flip(np.cumsum(np.flip(wk_surv * intervals)))
+            
+            denom = wk_n_risk * (wk_n_risk - wk_n_event)
+            greenwood = np.where(denom > 0, wk_n_event / denom, 0)
+            rmst_var = float(np.sum(greenwood * psi**2))
+        else:
+            rmst_est = float(tau)
+            rmst_var = 0.0
+        
+        rmst_se = np.sqrt(rmst_var)
         
         group_results.append({
-            'group': grp, 'rmst': rmst_est, 'se': se,
-            'lower': ci_low, 'upper': ci_high, 'n': len(gdf)
+            'group': grp, 'rmst': rmst_est, 'se': rmst_se,
+            'var': rmst_var,
+            'lower': rmst_est - 1.96 * rmst_se,
+            'upper': rmst_est + 1.96 * rmst_se,
+            'n': len(gdf)
         })
-        group_rmst_boots[grp] = boot_vals
     
-    # Pairwise differences (all pairs)
+    # Pairwise differences — analytical SE from independent variances
     pairwise = []
-    from itertools import combinations
     for i, j in combinations(range(len(groups)), 2):
         g_i, g_j = groups[i], groups[j]
         diff_est = group_results[i]['rmst'] - group_results[j]['rmst']
-        
-        n_min = min(len(group_rmst_boots[g_i]), len(group_rmst_boots[g_j]))
-        if n_min > 5:
-            boot_diffs = [group_rmst_boots[g_i][k] - group_rmst_boots[g_j][k] for k in range(n_min)]
-            diff_se = np.std(boot_diffs)
-            diff_ci_low = diff_est - 1.96 * diff_se
-            diff_ci_high = diff_est + 1.96 * diff_se
-            z = abs(diff_est / diff_se) if diff_se > 0 else 0
-            p_val = 2 * (1 - norm.cdf(z))
-        else:
-            diff_se = 0; diff_ci_low = diff_est; diff_ci_high = diff_est; p_val = 1.0
+        diff_var = group_results[i]['var'] + group_results[j]['var']
+        diff_se = np.sqrt(diff_var)
+        z = abs(diff_est / diff_se) if diff_se > 0 else 0
+        p_val = 2 * (1 - norm.cdf(z))
         
         pairwise.append({
             'group_a': g_i, 'group_b': g_j,
             'diff': diff_est, 'se': diff_se,
-            'lower': diff_ci_low, 'upper': diff_ci_high,
+            'lower': diff_est - 1.96 * diff_se,
+            'upper': diff_est + 1.96 * diff_se,
             'p_value': p_val
         })
     
-    # Backward compat: 'difference' = first pair if exactly 2 groups
     difference = pairwise[0] if len(pairwise) == 1 else None
     
     return {
