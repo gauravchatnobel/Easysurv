@@ -1934,31 +1934,68 @@ if df is not None:
                             delta=f"95% CI: {d['lower']:.2f} to {d['upper']:.2f}, {_p_fmt} {_sig}"
                         )
                     elif _pw:
-                        # >2 groups: pairwise table
+                        # >2 groups: pairwise table with reference selector
                         st.write("### Pairwise RMST Differences")
+                        
+                        # Get unique groups from pairwise results
+                        _rmst_all_grps = sorted(set(
+                            [p['group_a'] for p in _pw] + [p['group_b'] for p in _pw]
+                        ))
+                        _rmst_ref_opts = ["All pairwise"] + _rmst_all_grps
+                        _rmst_ref = st.selectbox(
+                            "Reference group (denominator)", _rmst_ref_opts,
+                            key="rmst_pw_ref",
+                            help="Select a reference group to show comparisons as 'Other − Reference'. Or choose 'All pairwise' to see every combination."
+                        )
+                        
                         _pw_data = []
                         for d in _pw:
-                            _pw_data.append({
-                                'Comparison': f"{d['group_a']} vs {d['group_b']}",
-                                'Δ RMST': f"{d['diff']:.2f}",
-                                '95% CI': f"{d['lower']:.2f} to {d['upper']:.2f}",
-                                'p-value': format_p_value(d['p_value'], narrator_style_name, context="table"),
-                                'p_raw': d['p_value']
-                            })
-                        _pw_df = pd.DataFrame(_pw_data)
-                        _pw_display_cols = ['Comparison', 'Δ RMST', '95% CI', 'p-value']
-                        _p_raw_vals = _pw_df['p_raw'].values
+                            ga, gb = d['group_a'], d['group_b']
+                            diff, lo, hi = d['diff'], d['lower'], d['upper']
+                            
+                            if _rmst_ref == "All pairwise":
+                                # Show all pairs as-is
+                                _pw_data.append({
+                                    'Comparison': f"{ga} vs {gb}",
+                                    'Δ RMST': f"{diff:.2f}",
+                                    '95% CI': f"{lo:.2f} to {hi:.2f}",
+                                    'p-value': format_p_value(d['p_value'], narrator_style_name, context="table"),
+                                    'p_raw': d['p_value']
+                                })
+                            elif _rmst_ref == gb:
+                                # Reference is already group_b → show as: group_a − reference
+                                _pw_data.append({
+                                    'Comparison': f"{ga} vs {gb}",
+                                    'Δ RMST': f"{diff:.2f}",
+                                    '95% CI': f"{lo:.2f} to {hi:.2f}",
+                                    'p-value': format_p_value(d['p_value'], narrator_style_name, context="table"),
+                                    'p_raw': d['p_value']
+                                })
+                            elif _rmst_ref == ga:
+                                # Reference is group_a → flip: group_b − reference
+                                _pw_data.append({
+                                    'Comparison': f"{gb} vs {ga}",
+                                    'Δ RMST': f"{-diff:.2f}",
+                                    '95% CI': f"{-hi:.2f} to {-lo:.2f}",
+                                    'p-value': format_p_value(d['p_value'], narrator_style_name, context="table"),
+                                    'p_raw': d['p_value']
+                                })
                         
-                        def _hl_rmst(row):
-                            p = _p_raw_vals[row.name]
-                            if p < 0.05:
-                                return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
-                            return [''] * len(row)
-                        
-                        st.dataframe(
-                            _pw_df[_pw_display_cols].style.apply(_hl_rmst, axis=1),
-                            hide_index=True, use_container_width=True
-                        )
+                        if _pw_data:
+                            _pw_df = pd.DataFrame(_pw_data)
+                            _pw_display_cols = ['Comparison', 'Δ RMST', '95% CI', 'p-value']
+                            _p_raw_vals = _pw_df['p_raw'].values
+                            
+                            def _hl_rmst(row):
+                                p = _p_raw_vals[row.name]
+                                if p < 0.05:
+                                    return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
+                                return [''] * len(row)
+                            
+                            st.dataframe(
+                                _pw_df[_pw_display_cols].style.apply(_hl_rmst, axis=1),
+                                hide_index=True, use_container_width=True
+                            )
                     
                     # Visualization: shaded area under KM curves
                     st.write("### RMST Visualization")
@@ -4432,31 +4469,64 @@ if df is not None:
                                     delta=f"95% CI: {d['lower']:.2f} to {d['upper']:.2f}, {_p_fmt} {_sig}"
                                 )
                             elif _pw_rmtl:
-                                # >2 groups: pairwise table
+                                # >2 groups: pairwise table with reference selector
                                 st.write("### Pairwise RMTL Differences")
+                                
+                                _rmtl_all_grps = sorted(set(
+                                    [p['group_a'] for p in _pw_rmtl] + [p['group_b'] for p in _pw_rmtl]
+                                ))
+                                _rmtl_ref_opts = ["All pairwise"] + _rmtl_all_grps
+                                _rmtl_ref = st.selectbox(
+                                    "Reference group (denominator)", _rmtl_ref_opts,
+                                    key="rmtl_pw_ref",
+                                    help="Select a reference group to show comparisons as 'Other − Reference'. Or choose 'All pairwise' to see every combination."
+                                )
+                                
                                 _pw_rmtl_data = []
                                 for d in _pw_rmtl:
-                                    _pw_rmtl_data.append({
-                                        'Comparison': f"{d['group_a']} vs {d['group_b']}",
-                                        'Δ RMTL': f"{d['diff']:.2f}",
-                                        '95% CI': f"{d['lower']:.2f} to {d['upper']:.2f}",
-                                        'p-value': format_p_value(d['p_value'], narrator_style_name, context="table"),
-                                        'p_raw': d['p_value']
-                                    })
-                                _pw_rmtl_df = pd.DataFrame(_pw_rmtl_data)
-                                _pw_rmtl_display = ['Comparison', 'Δ RMTL', '95% CI', 'p-value']
-                                _p_raw_rmtl = _pw_rmtl_df['p_raw'].values
+                                    ga, gb = d['group_a'], d['group_b']
+                                    diff, lo, hi = d['diff'], d['lower'], d['upper']
+                                    
+                                    if _rmtl_ref == "All pairwise":
+                                        _pw_rmtl_data.append({
+                                            'Comparison': f"{ga} vs {gb}",
+                                            'Δ RMTL': f"{diff:.2f}",
+                                            '95% CI': f"{lo:.2f} to {hi:.2f}",
+                                            'p-value': format_p_value(d['p_value'], narrator_style_name, context="table"),
+                                            'p_raw': d['p_value']
+                                        })
+                                    elif _rmtl_ref == gb:
+                                        _pw_rmtl_data.append({
+                                            'Comparison': f"{ga} vs {gb}",
+                                            'Δ RMTL': f"{diff:.2f}",
+                                            '95% CI': f"{lo:.2f} to {hi:.2f}",
+                                            'p-value': format_p_value(d['p_value'], narrator_style_name, context="table"),
+                                            'p_raw': d['p_value']
+                                        })
+                                    elif _rmtl_ref == ga:
+                                        _pw_rmtl_data.append({
+                                            'Comparison': f"{gb} vs {ga}",
+                                            'Δ RMTL': f"{-diff:.2f}",
+                                            '95% CI': f"{-hi:.2f} to {-lo:.2f}",
+                                            'p-value': format_p_value(d['p_value'], narrator_style_name, context="table"),
+                                            'p_raw': d['p_value']
+                                        })
                                 
-                                def _hl_rmtl_pw(row):
-                                    p = _p_raw_rmtl[row.name]
-                                    if p < 0.05:
-                                        return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
-                                    return [''] * len(row)
-                                
-                                st.dataframe(
-                                    _pw_rmtl_df[_pw_rmtl_display].style.apply(_hl_rmtl_pw, axis=1),
-                                    hide_index=True, use_container_width=True
-                                )
+                                if _pw_rmtl_data:
+                                    _pw_rmtl_df = pd.DataFrame(_pw_rmtl_data)
+                                    _pw_rmtl_display = ['Comparison', 'Δ RMTL', '95% CI', 'p-value']
+                                    _p_raw_rmtl = _pw_rmtl_df['p_raw'].values
+                                    
+                                    def _hl_rmtl_pw(row):
+                                        p = _p_raw_rmtl[row.name]
+                                        if p < 0.05:
+                                            return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
+                                        return [''] * len(row)
+                                    
+                                    st.dataframe(
+                                        _pw_rmtl_df[_pw_rmtl_display].style.apply(_hl_rmtl_pw, axis=1),
+                                        hide_index=True, use_container_width=True
+                                    )
                             
                             # Visualization: shaded area under CIF curves
                             st.write("### RMTL Visualization")
