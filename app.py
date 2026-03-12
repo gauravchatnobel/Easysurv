@@ -1901,7 +1901,7 @@ if df is not None:
                     )
                 
                 if st.button("Calculate RMST", key="calc_rmst"):
-                    with st.spinner("Bootstrapping RMST (n=200)..."):
+                    with st.spinner("Bootstrapping RMST (n=500)..."):
                         _rmst_result = statistics.compute_rmst(
                             df_clean, time_col, event_col, group_col, _rmst_tau
                         )
@@ -4435,7 +4435,7 @@ if df is not None:
                             )
                         
                         if st.button("Calculate RMTL", key="calc_rmtl"):
-                            with st.spinner("Bootstrapping RMTL (n=200)..."):
+                            with st.spinner("Bootstrapping RMTL (n=500)..."):
                                 _rmtl_result = statistics.compute_rmtl(
                                     cif_df, cif_time_col, cif_event_col, group_col,
                                     cif_event_of_interest, _rmtl_tau

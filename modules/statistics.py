@@ -608,7 +608,7 @@ def summarize_model_risk(epv_res, collinearity_list, vif_df, separation_warnings
     }
 
 
-def compute_rmst(df, time_col, event_col, group_col, tau, n_boot=200):
+def compute_rmst(df, time_col, event_col, group_col, tau, n_boot=500):
     """
     Compute Restricted Mean Survival Time (RMST) per group.
     
@@ -661,6 +661,7 @@ def compute_rmst(df, time_col, event_col, group_col, tau, n_boot=200):
         return np.trapezoid(sf.values, timeline)
     
     # Per-group RMST with bootstrap
+    np.random.seed(42)  # Fixed seed for reproducibility
     group_results = []
     group_rmst_boots = {}
     
@@ -723,7 +724,7 @@ def compute_rmst(df, time_col, event_col, group_col, tau, n_boot=200):
     }
 
 
-def compute_rmtl(df, time_col, event_col, group_col, event_of_interest, tau, n_boot=200):
+def compute_rmtl(df, time_col, event_col, group_col, event_of_interest, tau, n_boot=500):
     """
     Compute Restricted Mean Time Lost (RMTL) per group from CIF.
     
@@ -762,6 +763,7 @@ def compute_rmtl(df, time_col, event_col, group_col, event_of_interest, tau, n_b
         return np.trapezoid(cif.values, timeline)
     
     # Per-group RMTL with bootstrap
+    np.random.seed(42)  # Fixed seed for reproducibility
     group_results = []
     group_rmtl_boots = {}
     
