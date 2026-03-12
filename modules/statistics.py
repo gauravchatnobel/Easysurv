@@ -751,7 +751,7 @@ def compute_rmtl(df, time_col, event_col, group_col, event_of_interest, tau, n_b
         return np.trapezoid(cif.values, timeline)
     
     # Per-group RMTL with bootstrap
-    np.random.seed(42)  # Fixed seed for reproducibility
+    _rng = np.random.RandomState(42)  # Isolated RNG for reproducibility
     group_results = []
     group_rmtl_boots = {}
     
@@ -762,10 +762,10 @@ def compute_rmtl(df, time_col, event_col, group_col, event_of_interest, tau, n_b
         except:
             rmtl_est = 0
         
-        # Bootstrap
+        # Bootstrap with explicit RNG (deterministic across reruns)
         boot_vals = []
         for _ in range(n_boot):
-            boot_df = gdf.sample(n=len(gdf), replace=True)
+            boot_df = gdf.sample(n=len(gdf), replace=True, random_state=_rng)
             try:
                 boot_vals.append(_rmtl_from_aj(boot_df, time_col, event_col, event_of_interest, tau))
             except:
