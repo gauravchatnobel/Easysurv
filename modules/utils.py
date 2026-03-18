@@ -30,7 +30,7 @@ fun_themes = {
     "Existential Emptiness": ["#2C3E50", "#D35400", "#2980B9", "#C0392B", "#bdc3c7", "#F39C12"], # Bojack Horseman
     "Alienation of Adolescence": ["#E8C97A", "#7BA7BC", "#D4A0B0", "#5B7E8C", "#F5ECD7", "#3D5A6E"], # Sonny Boy
     "Violence of Survival": ["#5D4037", "#D84315", "#388E3C", "#FBC02D", "#455A64", "#212121"], # Primal
-    "Anatomy of Evil": ["#4A5568", "#8B0000", "#2C5282", "#D4A76A", "#1A202C", "#A0AEC0"], # Monster
+    "Anatomy of a Monster": ["#4A5568", "#8B0000", "#2C5282", "#D4A76A", "#1A202C", "#A0AEC0"], # Monster
     "Cosmic Nihilism": ["#A6EEE6", "#F0F035", "#44281D", "#E4A71B", "#8BCF21", "#FBFBFB"], # Rick & Morty
     
     # === More Themes ===
