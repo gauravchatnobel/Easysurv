@@ -32,6 +32,7 @@ fun_themes = {
     "Violence of Survival": ["#5D4037", "#D84315", "#388E3C", "#FBC02D", "#455A64", "#212121"], # Primal
     "Anatomy of a Monster": ["#4A5568", "#8B0000", "#2C5282", "#D4A76A", "#1A202C", "#A0AEC0"], # Monster
     "Cosmic Nihilism": ["#A6EEE6", "#F0F035", "#44281D", "#E4A71B", "#8BCF21", "#FBFBFB"], # Rick & Morty
+    "Digital Dissociation": ["#00C853", "#B71C1C", "#37474F", "#78909C", "#CFD8DC", "#1B5E20"], # Mr Robot
     
     # === More Themes ===
     "Fractured Timeline": ["#5C3D6E", "#E6A550", "#4DA8A0", "#C97B8B", "#7B8FA1", "#2E1F3E"], # Rotoscope dreamscape
