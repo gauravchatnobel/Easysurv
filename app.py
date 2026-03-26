@@ -2618,8 +2618,8 @@ if df is not None:
                                 
                                 # Retrieve TD columns from the ORIGINAL (pre-encoded) data
                                 # We need the index alignment from mv_df
-                                _td_time_values = df_clean.loc[mv_df.index, _td_time_col]
-                                _td_stat_values = df_clean.loc[mv_df.index, _td_status_col]
+                                _td_time_values = pd.to_numeric(df_clean.loc[mv_df.index, _td_time_col], errors='coerce')
+                                _td_stat_values = pd.to_numeric(df_clean.loc[mv_df.index, _td_status_col], errors='coerce')
                                 
                                 # Sanitize the TD variable name
                                 _td_var_safe = _td_var_name.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
