@@ -2677,6 +2677,13 @@ if df is not None:
                             final_penalizer = st.session_state.penalizer_val if use_penalizer else 0.0
                             final_l1 = st.session_state.l1_ratio_val if use_penalizer else 0.0
                             
+                            # Drop rows with NaN in any column used for fitting
+                            _n_before_drop = len(mv_data_encoded)
+                            mv_data_encoded = mv_data_encoded.dropna()
+                            _n_after_drop = len(mv_data_encoded)
+                            if _n_before_drop > _n_after_drop:
+                                st.caption(f"ℹ️ Dropped {_n_before_drop - _n_after_drop} rows with missing values.")
+                            
                             cph_mv = CoxPHFitter(penalizer=final_penalizer, l1_ratio=final_l1)
                             if _td_entry_col:
                                 cph_mv.fit(mv_data_encoded, duration_col=_san_time, event_col=_san_event, entry_col=_td_entry_col)
