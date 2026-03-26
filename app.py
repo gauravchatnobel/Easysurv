@@ -2618,8 +2618,58 @@ if df is not None:
                                 
                                 # Retrieve TD columns from the ORIGINAL (pre-encoded) data
                                 # We need the index alignment from mv_df
-                                _td_time_values = pd.to_numeric(df_clean.loc[mv_df.index, _td_time_col], errors='coerce')
+                                _td_time_raw = df_clean.loc[mv_df.index, _td_time_col].copy()
                                 _td_stat_values = pd.to_numeric(df_clean.loc[mv_df.index, _td_status_col], errors='coerce')
+                                
+                                # Detect if TD time column is a date or numeric
+                                _td_time_values = pd.to_numeric(_td_time_raw, errors='coerce')
+                                _td_numeric_pct = _td_time_values.notna().mean()
+                                
+                                if _td_numeric_pct < 0.1:
+                                    # Likely a date column — try to parse as datetime
+                                    try:
+                                        _td_dates = pd.to_datetime(_td_time_raw, errors='coerce')
+                                        _td_dates_valid = _td_dates.notna().mean()
+                                        
+                                        if _td_dates_valid > 0.5:
+                                            # Find an anchor date column (diagnosis date, enrollment, etc.)
+                                            _date_candidates = [c for c in df_clean.columns if any(
+                                                kw in c.lower() for kw in ['diagnosis', 'dx_date', 'enrollment', 'registration', 'date_of_diagnosis', 'date_diagnosis']
+                                            )]
+                                            
+                                            _anchor_col = None
+                                            for _cand in _date_candidates:
+                                                _cand_dates = pd.to_datetime(df_clean.loc[mv_df.index, _cand], errors='coerce')
+                                                if _cand_dates.notna().mean() > 0.5:
+                                                    _anchor_col = _cand
+                                                    break
+                                            
+                                            if _anchor_col:
+                                                _anchor_dates = pd.to_datetime(df_clean.loc[mv_df.index, _anchor_col], errors='coerce')
+                                                # Determine time unit from survival column name
+                                                _time_unit = 'months'
+                                                if 'day' in time_col.lower():
+                                                    _time_unit = 'days'
+                                                elif 'year' in time_col.lower():
+                                                    _time_unit = 'years'
+                                                
+                                                _diff_days = (_td_dates - _anchor_dates).dt.total_seconds() / 86400
+                                                if _time_unit == 'months':
+                                                    _td_time_values = _diff_days / 30.4375
+                                                elif _time_unit == 'years':
+                                                    _td_time_values = _diff_days / 365.25
+                                                else:
+                                                    _td_time_values = _diff_days
+                                                
+                                                st.caption(f"📅 Converted '{_td_time_col}' from dates to {_time_unit} "
+                                                          f"(relative to '{_anchor_col}').")
+                                            else:
+                                                st.warning(f"⚠️ '{_td_time_col}' appears to be a date column but no diagnosis/enrollment "
+                                                          f"date column was found to compute the time difference. "
+                                                          f"Please ensure this column contains **numeric time** in the same "
+                                                          f"unit as '{time_col}' (e.g., months from diagnosis).")
+                                    except Exception:
+                                        pass
                                 
                                 # Sanitize the TD variable name
                                 _td_var_safe = _td_var_name.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
@@ -2629,6 +2679,7 @@ if df is not None:
                                 _san_event = event_col.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
                                 
                                 rows_expanded = []
+                                _n_split = 0
                                 for idx in mv_data_encoded.index:
                                     row = mv_data_encoded.loc[idx].to_dict()
                                     end_time = row[_san_time]
@@ -2637,7 +2688,7 @@ if df is not None:
                                     td_occurred = _td_stat_values.loc[idx]
                                     td_time = _td_time_values.loc[idx]
                                     
-                                    if pd.notna(td_occurred) and td_occurred == 1 and pd.notna(td_time) and td_time < end_time and td_time > 0:
+                                    if pd.notna(td_occurred) and td_occurred == 1 and pd.notna(td_time) and pd.notna(end_time) and td_time < end_time and td_time > 0:
                                         # SPLIT: Two rows
                                         # Row 1: (0, td_time) — before event, TD=0, no outcome event
                                         row1 = row.copy()
@@ -2654,6 +2705,7 @@ if df is not None:
                                         row2[_san_event] = event    # original event status
                                         row2[_td_var_safe] = 1
                                         rows_expanded.append(row2)
+                                        _n_split += 1
                                     else:
                                         # NO SPLIT: Single row, TD=0
                                         row['_start'] = 0
@@ -2663,8 +2715,17 @@ if df is not None:
                                 mv_data_encoded = pd.DataFrame(rows_expanded)
                                 _td_entry_col = '_start'
                                 
+                                # Ensure all model columns are numeric after dict→DataFrame round-trip
+                                for _col in mv_data_encoded.columns:
+                                    if _col not in ['_start']:
+                                        mv_data_encoded[_col] = pd.to_numeric(mv_data_encoded[_col], errors='coerce')
+                                
+                                if _n_split == 0:
+                                    st.warning(f"⚠️ No patients were split. Check that '{_td_time_col}' contains "
+                                              f"**numeric time values** in the same unit as '{time_col}'.")
+                                
                                 st.success(f"✅ Data expanded: {len(mv_data_encoded)} rows "
-                                           f"(from {len(mv_df)} patients). "
+                                           f"(from {len(mv_df)} patients, {_n_split} split). "
                                            f"Time-dependent covariate: **{_td_var_safe}**")
                                 
                                 with st.expander("Preview Counting-Process Data (first 10 rows)"):
