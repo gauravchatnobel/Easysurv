@@ -55,18 +55,19 @@ class TestPValueFormatter:
 # ============================================================
 
 class TestInterpretHR:
+    # Wording is hazard-based (an HR describes the hazard rate, not absolute risk).
     def test_high_risk(self):
         result = _interpret_hr(3.0)
-        assert "3.0-fold increased risk" in result
+        assert "3.0-fold higher hazard" in result
 
     def test_very_high_risk(self):
         result = _interpret_hr(7.0)
-        assert "markedly elevated" in result
+        assert "markedly higher hazard" in result
 
     def test_moderate_risk(self):
         result = _interpret_hr(1.6)
         assert "60%" in result
-        assert "increased" in result
+        assert "higher hazard" in result
 
     def test_modest_risk(self):
         result = _interpret_hr(1.2)
@@ -79,15 +80,15 @@ class TestInterpretHR:
     def test_reduced_risk(self):
         result = _interpret_hr(0.7)
         assert "30%" in result
-        assert "reduced" in result
+        assert "lower hazard" in result
 
     def test_substantial_reduction(self):
         result = _interpret_hr(0.5)
-        assert "substantial" in result or "50%" in result
+        assert "substantially" in result or "50%" in result
 
     def test_marked_reduction(self):
         result = _interpret_hr(0.3)
-        assert "markedly reduced" in result
+        assert "markedly lower hazard" in result
 
 
 class TestInterpretSHR:
@@ -186,7 +187,7 @@ class TestUnivariableNarrator:
         )
         assert "High_Risk" in text
         assert "2.5" in text
-        assert "increased risk" in text
+        assert "higher hazard" in text
 
     def test_with_median_data(self):
         median_data = [

@@ -100,32 +100,38 @@ def _interpret_hr(hr, variable_name=""):
     """
     Translate a hazard ratio into plain clinical language.
 
+    Uses *hazard* wording rather than absolute "risk", because an HR
+    describes the relative hazard rate, not a change in absolute risk.
+    "Associated with" keeps the statement non-causal, appropriate for
+    observational data. Callers should reserve this effect-size wording
+    for statistically significant, precisely estimated results.
+
     Examples:
-        HR=2.45 -> "associated with a 2.5-fold increased risk"
-        HR=0.45 -> "associated with a 55% reduced risk"
-        HR=1.02 -> "not meaningfully associated with risk"
+        HR=2.45 -> "associated with a 2.5-fold higher hazard"
+        HR=0.45 -> "associated with a 55% lower hazard"
+        HR=1.02 -> "not meaningfully associated with the hazard"
     """
     if hr > 5.0:
-        return f"associated with a markedly elevated risk ({hr:.1f}-fold increase)"
+        return f"associated with a markedly higher hazard ({hr:.1f}-fold)"
     elif hr > 2.0:
-        return f"associated with a {hr:.1f}-fold increased risk of the event"
+        return f"associated with a {hr:.1f}-fold higher hazard of the event"
     elif hr > 1.5:
         pct = (hr - 1) * 100
-        return f"associated with a {pct:.0f}% increased risk of the event"
+        return f"associated with a {pct:.0f}% higher hazard of the event"
     elif hr > 1.1:
         pct = (hr - 1) * 100
-        return f"associated with a modestly increased risk ({pct:.0f}% higher)"
+        return f"associated with a modestly higher hazard ({pct:.0f}% higher)"
     elif hr >= 0.9:
-        return "not meaningfully associated with altered risk"
+        return "not meaningfully associated with the hazard"
     elif hr >= 0.67:
         pct = (1 - hr) * 100
-        return f"associated with a {pct:.0f}% reduced risk of the event"
+        return f"associated with a {pct:.0f}% lower hazard of the event"
     elif hr >= 0.5:
         pct = (1 - hr) * 100
-        return f"associated with a substantial risk reduction ({pct:.0f}% lower)"
+        return f"associated with a substantially lower hazard ({pct:.0f}% lower)"
     else:
         fold = 1 / hr
-        return f"associated with a markedly reduced risk ({fold:.1f}-fold lower)"
+        return f"associated with a markedly lower hazard ({fold:.1f}-fold lower)"
 
 
 def _interpret_shr(shr):
@@ -367,6 +373,10 @@ def generate_univariable_narrative(
                 text += f"* **{idx}**: HR {hr:.2f}, 95% CI {ci_str}, {p_str}\n"
         else:
             text += "Univariable Cox regression:\n"
+            # Only narrate an effect size for statistically significant results;
+            # for non-significant HRs, report the numbers without interpretation
+            # (a wide/non-significant HR is not evidence of a real effect).
+            _sig, _nonsig = [], []
             for idx, row in cox_summary.iterrows():
                 hr = row['Hazard Ratio (HR)']
                 p = row['p-value']
@@ -374,10 +384,20 @@ def generate_univariable_narrative(
                     ci_low, ci_high = row['Lower 95% CI'], row['Upper 95% CI']
                 else:
                     ci_low, ci_high = row['Lower 95%'], row['Upper 95%']
+                (_sig if p < 0.05 else _nonsig).append((idx, hr, p, ci_low, ci_high))
+
+            for idx, hr, p, ci_low, ci_high in _sig:
                 ci_str = _format_ci(ci_low, ci_high, style)
                 p_str = _format_p(p, style)
                 interpretation = _interpret_hr(hr, idx)
                 text += f"* **{idx}** was {interpretation} (HR {hr:.2f}, 95% CI {ci_str}, {p_str}).\n"
+
+            if _nonsig:
+                text += "The following were not statistically significant:\n"
+                for idx, hr, p, ci_low, ci_high in _nonsig:
+                    ci_str = _format_ci(ci_low, ci_high, style)
+                    p_str = _format_p(p, style)
+                    text += f"* **{idx}**: HR {hr:.2f}, 95% CI {ci_str}, {p_str}.\n"
 
     return text
 

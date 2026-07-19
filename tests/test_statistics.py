@@ -26,7 +26,37 @@ from modules.statistics import (
     get_c_index_bootstrap,
     summarize_model_risk,
     grays_test,
+    adjust_pvalues,
 )
+
+
+class TestAdjustPvalues:
+    """adjust_pvalues must match R's p.adjust."""
+
+    def test_benjamini_hochberg(self):
+        p = [0.01, 0.04, 0.03, 0.005, 0.2]
+        out = adjust_pvalues(p, "Benjamini-Hochberg")
+        expected = [0.025, 0.05, 0.05, 0.025, 0.2]  # R p.adjust(p, "BH")
+        assert np.allclose(out, expected, atol=1e-6)
+
+    def test_bonferroni(self):
+        p = [0.01, 0.04, 0.03, 0.005, 0.2]
+        out = adjust_pvalues(p, "Bonferroni")
+        expected = [0.05, 0.2, 0.15, 0.025, 1.0]
+        assert np.allclose(out, expected, atol=1e-6)
+
+    def test_none_passthrough(self):
+        p = [0.01, 0.5]
+        assert np.allclose(adjust_pvalues(p, "None"), p)
+
+    def test_nan_preserved(self):
+        out = adjust_pvalues([0.01, np.nan, 0.04], "Benjamini-Hochberg")
+        assert np.isnan(out[1])
+        assert not np.isnan(out[0]) and not np.isnan(out[2])
+
+    def test_capped_at_one(self):
+        out = adjust_pvalues([0.6, 0.7, 0.8], "Bonferroni")
+        assert (out <= 1.0).all()
 
 
 class TestGraysTest:

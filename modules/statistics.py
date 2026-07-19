@@ -16,6 +16,44 @@ def _cache_data(func):
         return st.cache_data(show_spinner=False)(func)
     return func
 
+
+def adjust_pvalues(pvals, method="Benjamini-Hochberg"):
+    """Adjust a list of p-values for multiple comparisons.
+
+    Parameters
+    ----------
+    pvals : array-like of float (may contain NaN, which is passed through)
+    method : "Benjamini-Hochberg" (FDR), "Bonferroni", or "None".
+
+    Returns
+    -------
+    np.ndarray of adjusted p-values (same order as input), NaN preserved.
+    """
+    p = np.asarray(pvals, dtype=float)
+    out = np.full_like(p, np.nan, dtype=float)
+    valid = ~np.isnan(p)
+    pv = p[valid]
+    m = pv.size
+    if m == 0:
+        return out
+    if method in (None, "None", "none"):
+        out[valid] = pv
+        return out
+    if method == "Bonferroni":
+        out[valid] = np.minimum(pv * m, 1.0)
+        return out
+    # Benjamini-Hochberg (FDR): sort ascending, adjust, enforce monotonicity
+    order = np.argsort(pv)
+    ranked = pv[order]
+    adj = ranked * m / (np.arange(m) + 1)
+    # step-up: ensure non-decreasing from the largest p downward
+    adj = np.minimum.accumulate(adj[::-1])[::-1]
+    adj = np.minimum(adj, 1.0)
+    result = np.empty(m, dtype=float)
+    result[order] = adj
+    out[valid] = result
+    return out
+
 def compute_fine_gray_weights(df, time_col, event_col, event_of_interest=1):
     """
     Prepares a dataset for Fine-Gray regression using Inverse Probability of Censoring Weighting (IPCW).
@@ -358,9 +396,13 @@ def pairwise_fine_gray(df, time_col, event_col, group_col, event_of_interest=1, 
             
             cols_to_fit = ['start', 'stop', 'status', 'weight', 'id', '_group_indicator']
             
-            # Fit weighted Cox with model-based (Hessian) SE
-            # This matches R's cmprsk::crr() variance estimator.
-            # Do NOT use robust=True (sandwich SE is overly conservative).
+            # Fit weighted Cox for the subdistribution hazard. The correct
+            # Fine-Gray variance is the cluster-robust (sandwich) estimator
+            # clustered on subject id — passing cluster_col already forces
+            # the sandwich estimator, so robust=True is stated explicitly to
+            # keep intent and behaviour aligned. (The naive Hessian on the
+            # IPCW-expanded data is far too small because it treats each
+            # subject's pseudo-rows as independent.)
             import warnings as _w
             with _w.catch_warnings():
                 _w.simplefilter("ignore")
@@ -369,7 +411,7 @@ def pairwise_fine_gray(df, time_col, event_col, group_col, event_of_interest=1, 
                     fg_pair[cols_to_fit],
                     duration_col='stop', entry_col='start',
                     event_col='status', weights_col='weight',
-                    cluster_col='id', robust=False
+                    cluster_col='id', robust=True
                 )
             
             from scipy.stats import norm as _norm

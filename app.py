@@ -1861,20 +1861,38 @@ if df is not None:
                 
                 if len(groups) > 2:
                     st.write("Comparison between specific pairs of groups (p-values).")
-                    
+
+                    _pw_adjust = st.selectbox(
+                        "Multiple-comparison adjustment",
+                        ["Benjamini-Hochberg", "Bonferroni", "None"],
+                        key="pw_lr_adjust",
+                        help="With k groups there are k(k-1)/2 pairwise tests. Adjusting controls "
+                             "the inflated false-positive rate. Report the adjusted column, or state "
+                             "'unadjusted' if you choose None.",
+                    )
+
                     # Run Pairwise Test
                     results = pairwise_logrank_test(df_clean[time_col], df_clean[group_col], df_clean[event_col])
-                    
+
                     # The results summary is a rich dataframe, but we want a matrix or list
                     # summary_df contains p-values
-                    pairwise_df = results.summary
-                    
-                    # Formatting for display — use journal style for p-value column
+                    pairwise_df = results.summary.copy()
+                    if 'p' in pairwise_df.columns:
+                        pairwise_df['p (adjusted)'] = statistics.adjust_pvalues(
+                            pairwise_df['p'].values, _pw_adjust)
+
+                    # Formatting for display — use journal style for p-value columns
                     _display_pair = pairwise_df.copy()
-                    if 'p' in _display_pair.columns:
-                        _display_pair['p'] = _display_pair['p'].apply(lambda p: format_p_value(p, narrator_style_name, context="table"))
+                    for _pc in ('p', 'p (adjusted)'):
+                        if _pc in _display_pair.columns:
+                            _display_pair[_pc] = _display_pair[_pc].apply(
+                                lambda p: format_p_value(p, narrator_style_name, context="table") if pd.notna(p) else "—")
                     st.dataframe(_display_pair)
-                    
+                    if _pw_adjust == "None":
+                        st.caption("⚠️ P-values are **unadjusted** for multiple comparisons — disclose this when reporting.")
+                    else:
+                        st.caption(f"'p (adjusted)' uses the **{_pw_adjust}** method across {len(pairwise_df)} pairwise tests.")
+
                     # Download Pairwise Table
                     csv_pair = pairwise_df.to_csv().encode('utf-8')
                     st.download_button(
@@ -1996,19 +2014,34 @@ if df is not None:
                         
                         if _pw_data:
                             _pw_df = pd.DataFrame(_pw_data)
-                            _pw_display_cols = ['Comparison', 'Δ RMST', '95% CI', 'p-value']
+                            _rmst_adjust = st.selectbox(
+                                "Multiple-comparison adjustment (RMST)",
+                                ["Benjamini-Hochberg", "Bonferroni", "None"],
+                                key="rmst_pw_adjust",
+                                help="Adjust across the pairwise RMST comparisons shown.",
+                            )
                             _p_raw_vals = _pw_df['p_raw'].values
-                            
+                            _p_adj_vals = statistics.adjust_pvalues(_p_raw_vals, _rmst_adjust)
+                            _pw_df['p (adjusted)'] = [
+                                format_p_value(p, narrator_style_name, context="table") if pd.notna(p) else "—"
+                                for p in _p_adj_vals
+                            ]
+                            _pw_display_cols = ['Comparison', 'Δ RMST', '95% CI', 'p-value', 'p (adjusted)']
+                            _hl_vals = _p_adj_vals if _rmst_adjust != "None" else _p_raw_vals
+
                             def _hl_rmst(row):
-                                p = _p_raw_vals[row.name]
-                                if p < 0.05:
+                                p = _hl_vals[row.name]
+                                if pd.notna(p) and p < 0.05:
                                     return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
                                 return [''] * len(row)
-                            
+
                             st.dataframe(
                                 _pw_df[_pw_display_cols].style.apply(_hl_rmst, axis=1),
                                 hide_index=True, use_container_width=True
                             )
+                            st.caption("⚠️ Unadjusted for multiple comparisons — disclose when reporting."
+                                       if _rmst_adjust == "None"
+                                       else f"'p (adjusted)': **{_rmst_adjust}** across {len(_pw_df)} comparisons.")
                     
                     # Visualization: shaded area under KM curves
                     st.write("### RMST Visualization")
@@ -3398,9 +3431,9 @@ if df is not None:
                                   with _w.catch_warnings():
                                       _w.simplefilter("ignore")
                                       cph_fg = CoxPHFitter()
-                                      cph_fg.fit(_fg_fit_data, 
-                                                 duration_col='stop', entry_col='start', event_col='status', 
-                                                 weights_col='weight', cluster_col='id', robust=False)
+                                      cph_fg.fit(_fg_fit_data,
+                                                 duration_col='stop', entry_col='start', event_col='status',
+                                                 weights_col='weight', cluster_col='id', robust=True)
                                   
                                   # 4. Extract P-value for CIF plot — Gray's Test
                                   # Gray's test is the proper nonparametric test for 
@@ -3419,9 +3452,10 @@ if df is not None:
                                           _fg_p_fmt = format_p_value(_wald_p, narrator_style_name, context="plot")
                                           fg_p_value_text = f"Fine-Gray (Wald) {_fg_p_fmt}"
                                   
-                                  # 5. Extract HR Table using model-based (Hessian) SE
-                                  # The model-based variance from the IPCW-weighted Cox is the
-                                  # correct Fine-Gray variance (equivalent to R's crr() output).
+                                  # 5. Extract HR Table using the cluster-robust (sandwich) SE.
+                                  # cluster_col='id' + robust=True gives the correct Fine-Gray
+                                  # variance on the IPCW-expanded data (the naive Hessian would
+                                  # be far too small); this approximates R's crr() output.
                                   from scipy.stats import norm as _norm
                                   _betas = cph_fg.params_
                                   _model_se = np.sqrt(np.diag(cph_fg.variance_matrix_.values))
@@ -3692,7 +3726,7 @@ if df is not None:
                     st.dataframe(_display_fg.style.apply(_highlight_fg_uv, axis=1).format(
                         {c: "{:.3f}" for c in _display_fg.columns if c != 'p-value'}
                     ))
-                    st.caption(f"Reference Group: **{fg_ref_group}** | Model-based SE (equivalent to R's cmprsk::crr)")
+                    st.caption(f"Reference Group: **{fg_ref_group}** | Cluster-robust (sandwich) SE clustered on subject id (approximates R's cmprsk::crr)")
 
                 # Pairwise Fine-Gray Comparisons (Gray's Test)
                 if group_col != "None" and group_col in cif_df.columns:
@@ -3713,37 +3747,54 @@ if df is not None:
                         
                         if pw_fg is not None and not pw_fg.empty:
                             _display_pw = pw_fg.copy()
-                            
-                            # Format p-value column
-                            if 'p-value' in _display_pw.columns:
-                                # Highlight significant rows
-                                _raw_p = _display_pw['p-value'].copy()
-                                _display_pw['p-value'] = _display_pw['p-value'].apply(
-                                    lambda p: format_p_value(p, narrator_style_name, context="table") if not pd.isna(p) else "—"
+
+                            # Multiple-comparison adjustment (only meaningful for >2 groups / >1 test)
+                            _pw_fg_adjust = "None"
+                            if 'p-value' in _display_pw.columns and _display_pw['p-value'].notna().sum() > 1:
+                                _pw_fg_adjust = st.selectbox(
+                                    "Multiple-comparison adjustment (pairwise Fine-Gray)",
+                                    ["Benjamini-Hochberg", "Bonferroni", "None"],
+                                    key="pw_fg_adjust",
+                                    help="Adjust across the multiple pairwise subdistribution tests.",
                                 )
-                            
+                                _display_pw['p (adjusted)'] = statistics.adjust_pvalues(
+                                    _display_pw['p-value'].values, _pw_fg_adjust)
+
+                            # Keep raw p for highlighting before formatting
+                            _raw_p = _display_pw['p-value'].copy() if 'p-value' in _display_pw.columns else None
+
+                            # Format p-value columns
+                            for _pc in ('p-value', 'p (adjusted)'):
+                                if _pc in _display_pw.columns:
+                                    _display_pw[_pc] = _display_pw[_pc].apply(
+                                        lambda p: format_p_value(p, narrator_style_name, context="table") if not pd.isna(p) else "—"
+                                    )
+
                             # Drop Note column if all empty
                             if 'Note' in _display_pw.columns:
                                 if _display_pw['Note'].isna().all():
                                     _display_pw = _display_pw.drop(columns=['Note'])
-                            
-                            # Style: highlight significant rows
+
+                            # Style: highlight significant rows (by adjusted p when available)
+                            _hl_p = statistics.adjust_pvalues(pw_fg['p-value'].values, _pw_fg_adjust) \
+                                if 'p-value' in pw_fg.columns else None
                             def _highlight_pw(row):
                                 idx = row.name
-                                p = _raw_p.iloc[idx] if idx < len(_raw_p) else 1.0
+                                p = _hl_p[idx] if _hl_p is not None and idx < len(_hl_p) else 1.0
                                 if not pd.isna(p) and p < 0.05:
                                     return ['background-color: rgba(0, 180, 0, 0.1)'] * len(row)
                                 return [''] * len(row)
-                            
-                            num_cols = [c for c in _display_pw.columns if c not in ('Reference', 'Comparison', 'p-value', 'Note')]
+
+                            num_cols = [c for c in _display_pw.columns if c not in ('Reference', 'Comparison', 'p-value', 'p (adjusted)', 'Note')]
                             st.dataframe(
                                 _display_pw.style.format(
                                     {c: "{:.3f}" for c in num_cols}
                                 ).apply(_highlight_pw, axis=1)
                             )
                             _ref_label = _pw_ref if _pw_ref else "first group (alphabetical)"
+                            _adj_note = "unadjusted" if _pw_fg_adjust == "None" else f"{_pw_fg_adjust}-adjusted"
                             st.caption(
-                                f"🟩 Green: p<0.05 | "
+                                f"🟩 Green: significant ({_adj_note} p<0.05) | "
                                 f"Reference: **{_ref_label}** | "
                                 f"HR>1 means the Comparison group has higher cumulative incidence than Reference."
                             )
@@ -4045,7 +4096,9 @@ if df is not None:
                                                      "covariate values. Select covariates with fewer missing entries.")
                                             st.stop()
 
-                                        # 3. Fit Weighted Cox (Fine-Gray MV)
+                                        # 3. Fit Weighted Cox (Fine-Gray MV). cluster_col + robust=True
+                                        # yields the correct cluster-robust (sandwich) Fine-Gray variance
+                                        # on the IPCW-expanded data.
                                         import warnings as _w
                                         with _w.catch_warnings():
                                             _w.simplefilter("ignore")
@@ -4054,10 +4107,10 @@ if df is not None:
                                                 _fg_mv_fit_data,
                                                 duration_col='stop', entry_col='start',
                                                 event_col='status', weights_col='weight',
-                                                cluster_col='id', robust=False
+                                                cluster_col='id', robust=True
                                             )
-                                        
-                                        # 4. Extract SHR table using model-based SE
+
+                                        # 4. Extract SHR table using the cluster-robust (sandwich) SE
                                         from scipy.stats import norm as _norm
                                         _betas_mv = _cph_fg_mv.params_
                                         _se_mv = np.sqrt(np.diag(_cph_fg_mv.variance_matrix_.values))
@@ -4607,19 +4660,34 @@ if df is not None:
                                 
                                 if _pw_rmtl_data:
                                     _pw_rmtl_df = pd.DataFrame(_pw_rmtl_data)
-                                    _pw_rmtl_display = ['Comparison', 'Δ RMTL', '95% CI', 'p-value']
+                                    _rmtl_adjust = st.selectbox(
+                                        "Multiple-comparison adjustment (RMTL)",
+                                        ["Benjamini-Hochberg", "Bonferroni", "None"],
+                                        key="rmtl_pw_adjust",
+                                        help="Adjust across the pairwise RMTL comparisons shown.",
+                                    )
                                     _p_raw_rmtl = _pw_rmtl_df['p_raw'].values
-                                    
+                                    _p_adj_rmtl = statistics.adjust_pvalues(_p_raw_rmtl, _rmtl_adjust)
+                                    _pw_rmtl_df['p (adjusted)'] = [
+                                        format_p_value(p, narrator_style_name, context="table") if pd.notna(p) else "—"
+                                        for p in _p_adj_rmtl
+                                    ]
+                                    _pw_rmtl_display = ['Comparison', 'Δ RMTL', '95% CI', 'p-value', 'p (adjusted)']
+                                    _hl_rmtl_vals = _p_adj_rmtl if _rmtl_adjust != "None" else _p_raw_rmtl
+
                                     def _hl_rmtl_pw(row):
-                                        p = _p_raw_rmtl[row.name]
-                                        if p < 0.05:
+                                        p = _hl_rmtl_vals[row.name]
+                                        if pd.notna(p) and p < 0.05:
                                             return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
                                         return [''] * len(row)
-                                    
+
                                     st.dataframe(
                                         _pw_rmtl_df[_pw_rmtl_display].style.apply(_hl_rmtl_pw, axis=1),
                                         hide_index=True, use_container_width=True
                                     )
+                                    st.caption("⚠️ Unadjusted for multiple comparisons — disclose when reporting."
+                                               if _rmtl_adjust == "None"
+                                               else f"'p (adjusted)': **{_rmtl_adjust}** across {len(_pw_rmtl_df)} comparisons.")
                             
                             # Visualization: shaded area under CIF curves
                             st.write("### RMTL Visualization")
@@ -5018,8 +5086,8 @@ if df is not None:
                                      if group_roc.sum() > 0 and (len(group_roc) - group_roc.sum()) > 0:
                                          res_roc = multivariate_logrank_test(cox_df[time_col], group_roc, cox_df[event_col])
                                          roc_p_val = res_roc.p_value
-                                 except:
-                                     pass
+                                 except Exception:
+                                     roc_p_val = np.nan
                                  
                                  st.success(f"**Optimal ROC Cutoff:** {best_thresh_roc:.2f} (AUC = {roc_auc:.3f})")
                                  
@@ -5032,7 +5100,15 @@ if df is not None:
                                           st.metric("Survival Separation P-value", format_p_value(roc_p_val, narrator_style_name, context="table"), help="P-value from Log-Rank test using this cutoff.")
                                       else:
                                           st.write("P-value: N/A")
-                                 
+
+                                 st.warning(
+                                     "⚠️ **Optimism warning**: this cutoff was chosen from the same data used "
+                                     "to compute the separation p-value (data-driven Youden index). This inflates "
+                                     "the apparent significance and the p-value should **not** be reported as a "
+                                     "confirmatory result. Validate the cutoff on an independent cohort before use."
+                                 )
+
+
                                  # Plot ROC
                                  fig_roc, ax_roc = plt.subplots(figsize=(6, 4))
                                  ax_roc.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (AUC = {roc_auc:.2f})')
@@ -5050,7 +5126,7 @@ if df is not None:
                                  st.session_state.optimal_cut = {
                                      'col': bio_col,
                                      'cut': best_thresh_roc,
-                                     'p': 0.0 # Placeholder
+                                     'p': float(roc_p_val) if not np.isnan(roc_p_val) else None
                                  }
                                  
                              except Exception as e:
