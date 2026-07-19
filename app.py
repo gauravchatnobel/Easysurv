@@ -2090,6 +2090,7 @@ if df is not None:
                         n_patients=len(df_clean),
                         n_events=int(df_clean[event_col].sum()),
                         landmark_time=landmark_time if landmark_time > 0 else None,
+                        median_followup=statistics.median_followup(df_clean[time_col], df_clean[event_col]),
                     )
                     st.success("Summary Generated (click the copy icon to copy):")
                     st.code(summary, language=None)
@@ -2889,6 +2890,8 @@ if df is not None:
                                     detail_level=narrator_detail_level,
                                     event_name=narrator_event_name,
                                     landmark_time=landmark_time if landmark_time > 0 else None,
+                                    median_followup=(statistics.median_followup(mv_df[time_col], mv_df[event_col])
+                                                     if 'mv_df' in globals() else None),
                                 )
                                 st.success("Summary Generated (click the copy icon to copy):")
                                 st.code(mv_narrative, language=None)
@@ -4660,6 +4663,9 @@ if df is not None:
                          n_primary_events=_cif_n_primary,
                          n_competing_events=_cif_n_competing,
                          landmark_time=landmark_time if landmark_time > 0 else None,
+                         median_followup=(statistics.median_followup(
+                             cif_df[cif_time_col], (cif_df[cif_event_col] != 0).astype(int))
+                             if cif_df is not None else None),
                      )
                      st.success("Summary Generated (click the copy icon to copy):")
                      st.code(cif_narrative, language=None)

@@ -189,6 +189,33 @@ class TestUnivariableNarrator:
         assert "2.5" in text
         assert "higher hazard" in text
 
+    def test_median_followup_reported(self):
+        text = generate_univariable_narrative(
+            group_col="Risk", groups=["Low", "High"], logrank_p=0.2,
+            n_patients=100, n_events=40, median_followup=24.6,
+        )
+        assert "median follow-up of 24.6 months" in text
+
+    def test_direction_names_worst_group(self):
+        med = [
+            {"Group": "High", "Median Survival": "12.3", "95% CI (Median)": "(8-16)"},
+            {"Group": "Low", "Median Survival": "34.5", "95% CI (Median)": "(28-40)"},
+        ]
+        text = generate_univariable_narrative(
+            group_col="Risk", groups=["Low", "High"], logrank_p=0.001, median_data=med,
+        )
+        assert "shortest median" in text and "**High**" in text
+
+    def test_nonsig_no_direction(self):
+        med = [
+            {"Group": "High", "Median Survival": "20", "95% CI (Median)": "(8-30)"},
+            {"Group": "Low", "Median Survival": "24", "95% CI (Median)": "(18-30)"},
+        ]
+        text = generate_univariable_narrative(
+            group_col="Risk", groups=["Low", "High"], logrank_p=0.6, median_data=med,
+        )
+        assert "shortest median" not in text
+
     def test_with_median_data(self):
         median_data = [
             {"Group": "A", "Median Survival": "24.5", "95% CI (Median)": "(18.0 - 30.0)"},

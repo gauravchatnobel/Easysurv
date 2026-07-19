@@ -30,7 +30,26 @@ from modules.statistics import (
     sanitize_name,
     sanitize_columns,
     encode_with_reference,
+    median_followup,
 )
+
+
+class TestMedianFollowup:
+    def test_reverse_km_basic(self):
+        # Everyone censored at their time -> reverse-KM median = median of times
+        times = [10, 20, 30, 40, 50]
+        events = [0, 0, 0, 0, 0]
+        mfu = median_followup(times, events)
+        assert mfu is not None and 25 <= mfu <= 35
+
+    def test_all_events_not_reached(self):
+        # No censoring -> follow-up distribution never drops to 0.5 as 'censoring events'
+        mfu = median_followup([5, 10, 15], [1, 1, 1])
+        assert mfu is None  # not reached / undefined
+
+    def test_handles_nan(self):
+        mfu = median_followup([10, np.nan, 30, 40], [0, 0, 0, 1])
+        assert mfu is not None
 
 
 class TestSanitizeAndEncode:

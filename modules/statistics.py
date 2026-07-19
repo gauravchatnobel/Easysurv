@@ -64,6 +64,30 @@ def encode_with_reference(df, cat_cols, refs, dtype=float):
     return out, dummy_cols
 
 
+def median_followup(times, events):
+    """Median follow-up via the reverse Kaplan-Meier estimator (Schemper & Smith, 1996).
+
+    Censoring is treated as the 'event', so the median is the time by which half
+    the cohort would still be under observation. Returns a float in the same time
+    units, or None if it cannot be estimated (e.g. not reached).
+    """
+    times = np.asarray(times, dtype=float)
+    events = np.asarray(events, dtype=float)
+    mask = ~(np.isnan(times) | np.isnan(events))
+    times, events = times[mask], events[mask]
+    if len(times) == 0:
+        return None
+    try:
+        kmf = KaplanMeierFitter()
+        kmf.fit(times, 1 - events)  # flip: censoring becomes the 'event'
+        m = kmf.median_survival_time_
+    except Exception:
+        return None
+    if m is None or np.isinf(m) or np.isnan(m):
+        return None
+    return float(m)
+
+
 def adjust_pvalues(pvals, method="Benjamini-Hochberg"):
     """Adjust a list of p-values for multiple comparisons.
 

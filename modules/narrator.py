@@ -204,6 +204,26 @@ def _format_median_ci(med_str, ci_str_raw, style):
     return f"{med_str} (95% CI {lo}{sep}{hi})"
 
 
+def _worst_median_group(median_data):
+    """Return the group label with the shortest (numeric) median survival, or None.
+
+    Non-numeric medians (e.g. 'NR' / 'Not Reached') are treated as the longest
+    survival and never selected as worst.
+    """
+    if not median_data:
+        return None
+    worst_label, worst_val = None, None
+    for item in median_data:
+        raw = str(item.get('Median Survival', '')).strip()
+        try:
+            val = float(raw)
+        except (ValueError, TypeError):
+            continue
+        if worst_val is None or val < worst_val:
+            worst_val, worst_label = val, item.get('Group')
+    return worst_label
+
+
 def _event_display_name(event_name):
     """
     Convert short parameter codes to readable names.
@@ -243,6 +263,7 @@ def generate_univariable_narrative(
     n_patients=None,
     n_events=None,
     landmark_time=None,
+    median_followup=None,
 ):
     """
     Generate a narrative for univariable (Kaplan-Meier) survival analysis.
@@ -314,11 +335,16 @@ def generate_univariable_narrative(
     # --- Results ---
     text += f"{style['results_header']}\n"
 
-    # Cohort context
+    # Lead-in: median follow-up (reverse Kaplan-Meier) + cohort context, as a
+    # single flowing clause that runs into the median-survival sentence.
+    lead = ""
+    if median_followup and median_followup > 0:
+        lead += f"After a median follow-up of {median_followup:.1f} months, "
     if n_patients and n_events:
-        text += f"Among {n_patients} patients ({n_events} events), "
+        lead += f"{'among' if lead else 'Among'} {n_patients} patients ({n_events} events), "
     elif n_patients:
-        text += f"Among {n_patients} patients, "
+        lead += f"{'among' if lead else 'Among'} {n_patients} patients, "
+    text += lead
 
     # Median survival (lead with the clinical finding)
     if median_data:
@@ -330,19 +356,24 @@ def generate_univariable_narrative(
             label = item['Group']
             med_parts.append(f"{label}: {formatted}")
 
-        if n_patients:
-            text += f"median {endpoint_short} by **{group_col}** was "
-        else:
-            text += f"Median {endpoint_short} by **{group_col}** was "
+        text += f"{'median' if lead else 'Median'} {endpoint_short} by **{group_col}** was "
         text += "; ".join(med_parts) + ". "
+    elif lead:
+        # Close the lead-in clause if there is no median sentence to attach to.
+        text = text.rstrip().rstrip(",") + ". "
 
-    # Log-rank result
+    # Determine the worst-outcome group for direction-aware phrasing
+    worst_group = _worst_median_group(median_data)
+
+    # Log-rank result (direction-aware when significant)
     p_str = _format_p(logrank_p, style)
     if logrank_p < 0.05:
-        if style.get("bold_significant"):
-            text += f"The difference between groups was **statistically significant** ({p_str})."
+        sig_phrase = "**statistically significant**" if style.get("bold_significant") else "statistically significant"
+        text += f"The difference between groups was {sig_phrase} ({p_str})"
+        if worst_group is not None and len(median_data) >= 2:
+            text += f", with the shortest median {endpoint_short} observed in **{worst_group}**."
         else:
-            text += f"The difference between groups was statistically significant ({p_str})."
+            text += "."
     else:
         text += f"The difference between groups was not statistically significant ({p_str})."
 
@@ -417,6 +448,7 @@ def generate_multivariable_narrative(
     detail_level="Detailed",
     event_name=None,
     landmark_time=None,
+    median_followup=None,
 ):
     """
     Generate a narrative for multivariable Cox regression analysis.
@@ -489,6 +521,9 @@ def generate_multivariable_narrative(
 
     if n_patients and n_events:
         text += f" The analysis included {n_patients} patients with {n_events} events."
+
+    if median_followup and median_followup > 0:
+        text += f" The median follow-up was {median_followup:.1f} months."
 
     if landmark_time and landmark_time > 0:
         text += (
@@ -563,6 +598,7 @@ def generate_cif_narrative(
     n_primary_events=None,
     n_competing_events=None,
     landmark_time=None,
+    median_followup=None,
 ):
     """
     Generate a narrative for competing risks analysis.
@@ -632,13 +668,16 @@ def generate_cif_narrative(
     text += f"{style['results_header']}\n"
 
     # Cohort context
+    if median_followup and median_followup > 0:
+        text += f"After a median follow-up of {median_followup:.1f} months, "
     if n_patients:
         parts = [f"{n_patients} patients"]
         if n_primary_events is not None:
             parts.append(f"{n_primary_events} {event_label} events")
         if n_competing_events is not None:
             parts.append(f"{n_competing_events} {compete_label}")
-        text += "Among " + ", ".join(parts) + ". "
+        _lead = "among" if (median_followup and median_followup > 0) else "Among"
+        text += _lead + " " + ", ".join(parts) + ". "
 
     # Point-in-time cumulative incidence
     if cif_est_data and cif_target_time is not None:
@@ -675,6 +714,8 @@ def generate_cif_narrative(
                 text += f"* **{idx}**: SHR {shr:.2f}, 95% CI {ci_str}, {p_str}\n"
         else:
             text += "**Fine-Gray regression** (subdistribution hazard model):\n"
+            # Interpret the effect size only for significant SHRs; otherwise report
+            # the numbers without asserting a real effect (consistent with the Cox narrator).
             for idx, row in fg_summary.iterrows():
                 shr = row['Subdist HR']
                 p = row['p-value']
@@ -682,9 +723,11 @@ def generate_cif_narrative(
                 ci_high = row['Upper 95%']
                 ci_str = _format_ci(ci_low, ci_high, style)
                 p_str = _format_p(p, style)
-                interp = _interpret_shr(shr)
-                sig = _significance_phrase(p, style)
-                text += f"* **{idx}** was {sig} {interp} (SHR {shr:.2f}, 95% CI {ci_str}, {p_str}).\n"
+                if p < 0.05:
+                    interp = _interpret_shr(shr)
+                    text += f"* **{idx}** was {interp} (SHR {shr:.2f}, 95% CI {ci_str}, {p_str}).\n"
+                else:
+                    text += f"* **{idx}**: SHR {shr:.2f}, 95% CI {ci_str}, {p_str} (not statistically significant).\n"
 
     # Multivariable Fine-Gray (adjusted SHRs)
     if fg_mv_summary is not None and len(fg_mv_summary) > 0:
