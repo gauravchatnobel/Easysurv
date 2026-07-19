@@ -2919,7 +2919,18 @@ if df is not None:
                                 st.download_button("💾 Download High-Res Forest Plot (600 DPI)", plotting.save_plot_to_buffer(fig_forest, dpi=600), "forest_plot_600dpi.png", "image/png")
                             with col3:
                                 st.download_button("📄 Download Forest Plot (PDF)", plotting.save_plot_to_buffer(fig_forest, fmt="pdf"), "forest_plot.pdf", "application/pdf")
-                            
+
+                            if st.button("📌 Pin to Session", key="pin_mv_cox",
+                                         help="Save this multivariable Cox model to the session bank."):
+                                _mv_tbl = st.session_state.get('mv_summary_df', None)
+                                _used = _pin_analysis(
+                                    'Cox', f"Multivariable Cox: {narrator_event_name}", fig=fig_forest,
+                                    title="Multivariable Cox", tables={'Adjusted HRs': _mv_tbl},
+                                    narrative=st.session_state.get('last_mv_narrative'),
+                                    meta={'endpoint': narrator_event_name, 'group_col': 'multivariable',
+                                          'n_patients': len(mv_df) if 'mv_df' in globals() else None})
+                                st.success(f"📌 Pinned: **{_used}**")
+
                             # --- AI NARRATOR (Multivariable) ---
                             st.divider()
                             st.write("### 🤖 AI Result Narrator")
@@ -2945,6 +2956,7 @@ if df is not None:
                                                      if 'mv_df' in globals() else None),
                                 )
                                 st.success("Summary Generated (click the copy icon to copy):")
+                                st.session_state['last_mv_narrative'] = mv_narrative
                                 st.code(mv_narrative, language=None)
 
                         except Exception as e:
@@ -4229,7 +4241,17 @@ if df is not None:
                                         st.download_button("📄 Forest Plot (PDF)",
                                                            plotting.save_plot_to_buffer(_fig_forest_fg, fmt="pdf"),
                                                            "fg_mv_forest.pdf", "application/pdf", key="dl_fg_mv_pdf")
-                                    
+
+                                    if st.button("📌 Pin to Session", key="pin_fg_mv",
+                                                 help="Save this multivariable Fine-Gray model to the session bank."):
+                                        _used = _pin_analysis(
+                                            'FineGray', f"Multivariable Fine-Gray: {cif_event_of_interest}",
+                                            fig=_fig_forest_fg, title="Multivariable Fine-Gray",
+                                            tables={'Adjusted SHRs': _fg_mv_summary},
+                                            meta={'event_of_interest': cif_event_of_interest, 'group_col': 'multivariable',
+                                                  'n_patients': len(_fg_mv_df) if '_fg_mv_df' in globals() else None})
+                                        st.success(f"📌 Pinned: **{_used}**")
+
                                     plt.close(_fig_forest_fg)
                                     
                                 except Exception as e:
@@ -4741,6 +4763,16 @@ if df is not None:
                                 st.download_button("📄 RMTL Plot (PDF)",
                                                    plotting.save_plot_to_buffer(_fig_rmtl, fmt="pdf"),
                                                    "rmtl_plot.pdf", "application/pdf", key="dl_rmtl_pdf")
+
+                            if st.button("📌 Pin to Session", key="pin_rmtl",
+                                         help="Save this RMTL analysis to the session bank."):
+                                _used = _pin_analysis(
+                                    'RMTL', f"RMTL (τ={_rmtl_r['tau']:.0f})", fig=_fig_rmtl,
+                                    title="Restricted Mean Time Lost",
+                                    tables={'RMTL by group': _rmtl_table},
+                                    meta={'group_col': group_col if group_col != 'None' else 'All',
+                                          'tau': round(float(_rmtl_r['tau']), 1)})
+                                st.success(f"📌 Pinned: **{_used}**")
                             plt.close(_fig_rmtl)
                     else:
                         st.info("ℹ️ RMTL requires a grouping variable with ≥2 groups.")
@@ -5529,11 +5561,21 @@ if df is not None:
                              st.caption("Tests used: " + ", ".join(_tests) +
                                         ". Continuous: Mann-Whitney U / Kruskal-Wallis (or t-test / ANOVA if parametric); "
                                         "categorical: chi-square (Fisher's exact for small 2×2). P-values are unadjusted.")
-                     st.download_button(
-                         "💾 Download Table 1 (CSV)",
-                         _t1_table.to_csv(index=False).encode('utf-8'),
-                         "table1_baseline.csv", "text/csv", key="dl_table1",
-                     )
+                     _t1c1, _t1c2 = st.columns([1, 1])
+                     with _t1c1:
+                         st.download_button(
+                             "💾 Download Table 1 (CSV)",
+                             _t1_table.to_csv(index=False).encode('utf-8'),
+                             "table1_baseline.csv", "text/csv", key="dl_table1",
+                         )
+                     with _t1c2:
+                         if st.button("📌 Pin to Session", key="pin_table1"):
+                             _tl = f"Table 1 by {_t1_group_col}" if _t1_group_col else "Table 1 (overall)"
+                             _used = _pin_analysis('Table1', _tl,
+                                                   tables={'Baseline characteristics': _t1_table},
+                                                   meta={'group_col': _t1_group_col or 'overall',
+                                                         'n_patients': len(df_clean)})
+                             st.success(f"📌 Pinned: **{_used}**")
                  except Exception as e:
                      st.error(f"Could not build Table 1: {e}")
              else:
