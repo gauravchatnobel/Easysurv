@@ -13,12 +13,23 @@ import numpy as np
 # Style Definitions
 # ============================================================
 
+def _p_no_leading_zero(p):
+    """JCO/Blood house style: p-value with no leading zero, guarded at both
+    extremes so a value near 1.0 never renders as '.000' (which reads as
+    highly significant) and a value near 0 never renders as '.000' either."""
+    if p < 0.001:
+        return "P < .001"
+    if p >= 0.9995:          # would round to 1.000
+        return "P > .99"
+    return f"P = .{f'{p:.3f}'[2:]}"
+
+
 JOURNAL_STYLES = {
     "Standard": {
         "label": "Standard (Most Journals)",
         "ci_format": "({low}-{high})",
         "ci_sep": "-",
-        "p_format": lambda p: "p<0.001" if p < 0.001 else f"p={p:.3f}",
+        "p_format": lambda p: "p<0.001" if p < 0.001 else ("p>0.999" if p >= 0.9995 else f"p={p:.3f}"),
         "hr_inline": True,
         "bold_significant": True,
         "methods_header": "**Methods**",
@@ -30,7 +41,7 @@ JOURNAL_STYLES = {
         "label": "NEJM Style",
         "ci_format": "({low} to {high})",
         "ci_sep": " to ",
-        "p_format": lambda p: "P<0.001" if p < 0.001 else f"P={p:.2f}",
+        "p_format": lambda p: "P<0.001" if p < 0.001 else ("P>0.99" if p >= 0.995 else f"P={p:.2f}"),
         "hr_inline": True,
         "bold_significant": False,
         "methods_header": "**Methods**",
@@ -42,7 +53,7 @@ JOURNAL_STYLES = {
         "label": "Lancet Style",
         "ci_format": "({low}-{high})",
         "ci_sep": "-",
-        "p_format": lambda p: "p<0.0001" if p < 0.0001 else f"p={p:.4f}",
+        "p_format": lambda p: "p<0.0001" if p < 0.0001 else ("p>0.9999" if p >= 0.99995 else f"p={p:.4f}"),
         "hr_inline": True,
         "bold_significant": False,
         "methods_header": "**Methods**",
@@ -54,7 +65,7 @@ JOURNAL_STYLES = {
         "label": "JCO (Journal of Clinical Oncology)",
         "ci_format": "({low} to {high})",
         "ci_sep": " to ",
-        "p_format": lambda p: "P < .001" if p < 0.001 else f"P = .{f'{p:.3f}'[2:]}",
+        "p_format": lambda p: _p_no_leading_zero(p),
         "hr_inline": True,
         "bold_significant": False,
         "methods_header": "**Methods**",
@@ -67,7 +78,7 @@ JOURNAL_STYLES = {
         "label": "Blood (ASH)",
         "ci_format": "({low}-{high})",
         "ci_sep": "-",
-        "p_format": lambda p: "P < .001" if p < 0.001 else f"P = .{f'{p:.3f}'[2:]}",
+        "p_format": lambda p: _p_no_leading_zero(p),
         "hr_inline": True,
         "bold_significant": False,
         "methods_header": "**Methods**",

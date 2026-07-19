@@ -25,7 +25,47 @@ from modules.statistics import (
     compute_fine_gray_weights,
     get_c_index_bootstrap,
     summarize_model_risk,
+    grays_test,
 )
+
+
+class TestGraysTest:
+    """Gray's K-sample test must match R's cmprsk::cuminc()$Tests.
+
+    Ground-truth values below were produced by cmprsk 2.2-12 on the
+    deterministic fixture in gray_fixture() (see cencode=0).
+    """
+
+    @staticmethod
+    def gray_fixture():
+        rows = [
+            (2, 1, 'A'), (4, 2, 'A'), (5, 1, 'A'), (6, 0, 'A'), (8, 1, 'A'),
+            (9, 1, 'A'), (11, 2, 'A'), (12, 0, 'A'), (14, 1, 'A'), (18, 0, 'A'),
+            (3, 0, 'B'), (4, 1, 'B'), (7, 1, 'B'), (7, 2, 'B'), (10, 0, 'B'),
+            (13, 1, 'B'), (15, 0, 'B'), (16, 1, 'B'), (20, 1, 'B'), (24, 1, 'B'),
+            (5, 1, 'A'), (6, 1, 'A'), (9, 2, 'B'), (10, 1, 'B'), (12, 1, 'A'),
+            (13, 0, 'B'), (17, 1, 'A'), (19, 1, 'B'), (21, 0, 'A'), (22, 1, 'B'),
+        ]
+        return pd.DataFrame(rows, columns=['time', 'status', 'group'])
+
+    def test_matches_cmprsk_cause1(self):
+        df = self.gray_fixture()
+        r = grays_test(df, 'time', 'status', 'group', event_of_interest=1)
+        assert abs(r['statistic'] - 1.1898957497) < 1e-4, r
+        assert abs(r['p_value'] - 0.2753505858) < 1e-4, r
+        assert r['df'] == 1
+
+    def test_matches_cmprsk_cause2(self):
+        df = self.gray_fixture()
+        r = grays_test(df, 'time', 'status', 'group', event_of_interest=2)
+        assert abs(r['statistic'] - 0.0006042079) < 1e-4, r
+        assert abs(r['p_value'] - 0.9803894604) < 1e-4, r
+
+    def test_single_group_returns_nan(self):
+        df = self.gray_fixture()
+        df = df[df['group'] == 'A']
+        r = grays_test(df, 'time', 'status', 'group', event_of_interest=1)
+        assert np.isnan(r['statistic'])
 
 
 # ============================================================

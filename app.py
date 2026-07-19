@@ -1,4 +1,4 @@
-APP_VERSION = "2.1.2"  # V2.1.2 — fix categorical detection for multivariable regression
+APP_VERSION = "2.1.3"  # V2.1.3 — exact Gray's test, p-value & reproducibility fixes, pinned deps
 
 import streamlit as st
 import pandas as pd
@@ -1334,7 +1334,7 @@ if df is not None:
                 # Attempt Cox for plot? (Optional, maybe for future HR on plot)
                 try:
                     cox_df = df_clean[[time_col, event_col, group_col]].dropna()
-                    cox_data_encoded = pd.get_dummies(cox_df, columns=[group_col], drop_first=True)
+                    cox_data_encoded = pd.get_dummies(cox_df, columns=[group_col], drop_first=True, dtype=float)
                     cox_data_encoded.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in cox_data_encoded.columns]
                     # This might fail on separation, but we don't strictly need it for the p-value text anymore
                     cph_plot = CoxPHFitter()
@@ -2609,9 +2609,10 @@ if df is not None:
                             
                             for col in cat_cols:
                                 ref = categorical_refs.get(col)
-                                # Get Dummies
-                                dummies = pd.get_dummies(mv_df[col], prefix=col)
-                                
+                                # Get Dummies (numeric dtype — avoids bool-column dtype-inference
+                                # failures in some pandas/lifelines version combinations)
+                                dummies = pd.get_dummies(mv_df[col], prefix=col, dtype=float)
+
                                 # Drop the reference column
                                 ref_col_name = f"{col}_{ref}"
                                 if ref_col_name in dummies.columns:
@@ -3375,7 +3376,7 @@ if df is not None:
                                   # Track columns before/after to identify ONLY the new dummy columns
                                   # (startswith is too greedy — catches original data columns with same prefix)
                                   _cols_before = set(fg_data.columns)
-                                  fg_data_encoded = pd.get_dummies(fg_data, columns=[group_col], drop_first=False)
+                                  fg_data_encoded = pd.get_dummies(fg_data, columns=[group_col], drop_first=False, dtype=float)
                                   _cols_after = set(fg_data_encoded.columns)
                                   _new_dummy_cols = list(_cols_after - _cols_before)  # ONLY new dummies
                                   
@@ -3488,7 +3489,7 @@ if df is not None:
                         cif_labels.append(label)
                             
                         # Fit Aalen-Johansen
-                        ajf = AalenJohansenFitter(calculate_variance=True)
+                        ajf = AalenJohansenFitter(calculate_variance=True, seed=42)
                         ajf.fit(cif_df[cif_time_col][mask], cif_df[cif_event_col][mask], event_of_interest=cif_event_of_interest, label=label)
                         ajf.plot(ax=ax_cif, ci_show=show_ci, show_censors=False, color=color, linewidth=line_width) # Disable built-in to avoid error
                         cif_fitters.append(ajf)
@@ -3524,7 +3525,7 @@ if df is not None:
                      elif selected_theme == "Custom":
                          color = st.sidebar.color_picker("Color for All Patients (CIF)", "#1f77b4")
                      
-                     ajf = AalenJohansenFitter(calculate_variance=True)
+                     ajf = AalenJohansenFitter(calculate_variance=True, seed=42)
                      ajf.fit(cif_df[cif_time_col], cif_df[cif_event_col], event_of_interest=cif_event_of_interest, label="All Patients")
                      ajf.plot(ax=ax_cif, ci_show=show_ci, show_censors=False, color=color, linewidth=line_width) # Disable built-in
                      
@@ -4001,7 +4002,7 @@ if df is not None:
                                         _fg_mv_dummy_cols = []
                                         for col in _fg_cat_cols:
                                             if col in _fg_mv_weighted.columns:
-                                                _dummies = pd.get_dummies(_fg_mv_weighted[col], prefix=col, drop_first=False)
+                                                _dummies = pd.get_dummies(_fg_mv_weighted[col], prefix=col, drop_first=False, dtype=float)
                                                 # Drop reference column
                                                 _ref_col = f"{col}_{_fg_cat_refs.get(col, '')}"
                                                 if _ref_col in _dummies.columns:
@@ -4032,7 +4033,18 @@ if df is not None:
                                         for c in _fg_mv_model_covs:
                                             _fg_mv_fit_data[c] = pd.to_numeric(_fg_mv_fit_data[c], errors='coerce')
                                         _fg_mv_fit_data = _fg_mv_fit_data.dropna()
-                                        
+
+                                        # Guard: a clear message beats an opaque pandas/lifelines error
+                                        # (e.g. "no types given") when encoding leaves nothing to fit.
+                                        if not _fg_mv_model_covs:
+                                            st.error("No usable covariates after encoding. Check that each selected "
+                                                     "categorical covariate has at least two levels (one becomes the reference).")
+                                            st.stop()
+                                        if len(_fg_mv_fit_data) < 5:
+                                            st.error(f"Too few complete rows ({len(_fg_mv_fit_data)}) after removing missing "
+                                                     "covariate values. Select covariates with fewer missing entries.")
+                                            st.stop()
+
                                         # 3. Fit Weighted Cox (Fine-Gray MV)
                                         import warnings as _w
                                         with _w.catch_warnings():
@@ -4250,7 +4262,7 @@ if df is not None:
                                 # Encode categoricals
                                 for col in _cs_cat_cols:
                                     ref = _cs_refs.get(col)
-                                    dummies = pd.get_dummies(_cs_fit_df[col], prefix=col)
+                                    dummies = pd.get_dummies(_cs_fit_df[col], prefix=col, dtype=float)
                                     ref_name = f"{col}_{ref}"
                                     if ref_name in dummies.columns:
                                         dummies = dummies.drop(columns=[ref_name])
@@ -4617,7 +4629,7 @@ if df is not None:
                             
                             for i, grp in enumerate(_cif_groups):
                                 gdf = cif_df[cif_df[group_col] == grp]
-                                aj = AalenJohansenFitter(calculate_variance=False)
+                                aj = AalenJohansenFitter(calculate_variance=False, seed=42)
                                 aj.fit(gdf[cif_time_col], gdf[cif_event_col], event_of_interest=cif_event_of_interest)
                                 timeline = np.linspace(0, _rmtl_r['tau'], 500)
                                 cif_vals = aj.predict(timeline)
@@ -5793,7 +5805,7 @@ if df is not None:
               
               ### 📝 How to Cite EasySurv
               If you use this tool for your research, please cite it as:
-              > **EasySurv: An Interactive Platform for Survival Analysis (v2.0)**. Powered by Lifelines & Streamlit. Available at: [https://easysurv.streamlit.app](https://easysurv.streamlit.app)
+              > **EasySurv: An Interactive Platform for Survival Analysis (v2.1.3)**. Powered by Lifelines & Streamlit. Available at: [https://easysurv.streamlit.app](https://easysurv.streamlit.app)
               """)
 
 else:

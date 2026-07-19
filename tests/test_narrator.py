@@ -23,7 +23,31 @@ from modules.narrator import (
     generate_prognostic_narrative,
     get_available_styles,
     get_style_labels,
+    format_p_value,
 )
+
+
+class TestPValueFormatter:
+    """Guards against the regression where p≈1.0 rendered as '.000'
+    (JCO/Blood no-leading-zero styles), inverting significance."""
+
+    def test_large_p_not_rendered_as_zero(self):
+        for style in get_available_styles():
+            for context in ("text", "plot", "table"):
+                for p in (0.9996, 0.99999, 1.0):
+                    s = format_p_value(p, style, context)
+                    assert ".000" not in s and "0.000" not in s, (style, context, p, s)
+
+    def test_jco_no_leading_zero(self):
+        assert format_p_value(0.043, "JCO", "table") == "P = .043"
+        assert format_p_value(0.0001, "JCO", "table") == "P < .001"
+        assert format_p_value(0.9999, "JCO", "table") == "P > .99"
+
+    def test_small_p_significant(self):
+        # A tiny p must read as highly significant, never as '=.000'
+        for style in get_available_styles():
+            s = format_p_value(1e-7, style, "table")
+            assert "<" in s
 
 
 # ============================================================
@@ -136,7 +160,8 @@ class TestUnivariableNarrator:
             logrank_p=0.001,
             style_name="Standard",
         )
-        assert "significantly" in text.lower()
+        assert "statistically significant" in text.lower()
+        assert "not statistically significant" not in text.lower()
 
     def test_nonsignificant_logrank(self):
         text = generate_univariable_narrative(
@@ -144,7 +169,7 @@ class TestUnivariableNarrator:
             groups=["Low", "High"],
             logrank_p=0.45,
         )
-        assert "not significantly" in text.lower()
+        assert "not statistically significant" in text.lower()
 
     def test_with_cox_summary(self):
         cox_df = pd.DataFrame({
@@ -371,7 +396,8 @@ class TestPrognosticNarrator:
 
     def test_best_model_identified(self, res_list):
         text = generate_prognostic_narrative(res_list)
-        assert "best performing model was **Model B**" in text
+        assert "**Model B**" in text
+        assert "Best model" in text
 
 
 # ============================================================

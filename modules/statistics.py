@@ -90,160 +90,211 @@ def compute_fine_gray_weights(df, time_col, event_col, event_of_interest=1):
     return pd.DataFrame(new_rows)
 
 
-def grays_test(df, time_col, event_col, group_col, event_of_interest=1):
+def grays_test(df, time_col, event_col, group_col, event_of_interest=1, rho=0.0):
     """
     Gray's K-sample test for comparing cumulative incidence functions.
-    
-    This is the competing-risks analogue of the log-rank test, equivalent
-    to R's cmprsk::cuminc()$Tests. It tests the null hypothesis that the 
-    CIF of the event of interest is equal across all groups.
-    
-    Uses a modified weighted log-rank statistic where subjects with 
-    competing events remain in the subdistribution risk set with IPCW
-    weights G(t)/G(Ti).
-    
+
+    This is a faithful port of the Fortran ``crst`` routine in R's
+    ``cmprsk`` package (Robert Gray), so its output matches
+    ``cmprsk::cuminc()$Tests`` to numerical precision. It is the
+    competing-risks analogue of the log-rank test and tests the null
+    hypothesis that the CIF of the event of interest is equal across
+    all groups.
+
     Parameters
     ----------
     df : pd.DataFrame
     time_col : str
     event_col : str
-        0 = censored, event_of_interest = primary event, other values = competing events.
+        0 = censored, ``event_of_interest`` = primary event, any other
+        non-zero value = competing event.
     group_col : str
     event_of_interest : int
-    
+    rho : float
+        Power in the Fleming-Harrington-type weight ``(1 - F(t))**rho``
+        (cmprsk default 0, i.e. unweighted).
+
     Returns
     -------
     dict with keys: 'statistic', 'p_value', 'df'
-    
+
     References
     ----------
-    Gray RJ. A class of K-sample tests for comparing the cumulative 
+    Gray RJ. A class of K-sample tests for comparing the cumulative
     incidence of a competing risk. Ann Stat 1988;16:1141-1154.
+    Validated against cmprsk 2.2-12 (crst.f).
     """
     from scipy.stats import chi2
-    
+
     df_clean = df[[time_col, event_col, group_col]].dropna().copy()
     groups = sorted(df_clean[group_col].unique())
-    K = len(groups)
-    
-    if K < 2:
+    ng = len(groups)
+    if ng < 2:
         return {'statistic': np.nan, 'p_value': np.nan, 'df': 0}
-    
-    # ---- Step 1: Estimate censoring survival G(t) = P(C > t) ----
-    # Reverse KM: "event" = censoring (event_col == 0)
-    times_all = df_clean[time_col].values
-    events_all = df_clean[event_col].values
-    
-    # Build censoring KM manually for efficiency
-    cens_indicator = (events_all == 0).astype(int)
-    unique_times = np.sort(np.unique(times_all))
-    
-    # At each time: n at risk, n censored (= "event" for G)
-    G_values = {}
-    n_remaining = len(times_all)
-    G_current = 1.0
-    
-    for t in unique_times:
-        at_t = times_all == t
-        d_cens = int(cens_indicator[at_t].sum())  # censoring events
-        n_events = int((~cens_indicator.astype(bool) & at_t).sum())  # real events
-        
-        if n_remaining > 0 and d_cens > 0:
-            G_current *= (1 - d_cens / n_remaining)
-        
-        G_values[t] = max(G_current, 1e-10)
-        n_remaining -= (d_cens + n_events)
-    
-    def G_at(t):
-        """G(t-): censoring survival just before time t."""
-        prev = 1.0
-        for ut in unique_times:
-            if ut >= t:
-                return prev
-            prev = G_values[ut]
-        return prev
-    
-    # ---- Step 2: Identify event-of-interest times ----
-    eoi_mask = events_all == event_of_interest
-    eoi_times = np.sort(np.unique(times_all[eoi_mask]))
-    
-    if len(eoi_times) == 0:
-        return {'statistic': np.nan, 'p_value': np.nan, 'df': K - 1}
-    
-    # ---- Step 3: Pre-compute per-subject info ----
+
     group_idx = {g: i for i, g in enumerate(groups)}
-    subj_time = times_all
-    subj_event = events_all
-    subj_group = np.array([group_idx[g] for g in df_clean[group_col].values])
-    
-    # Identify competing event subjects
-    is_competing = np.array([e != 0 and e != event_of_interest for e in subj_event])
-    competing_times = subj_time[is_competing]
-    competing_groups = subj_group[is_competing]
-    competing_G_Ti = np.array([G_at(t) for t in competing_times])
-    
-    # ---- Step 4: Compute U and V ----
-    U = np.zeros(K - 1)
-    V = np.zeros((K - 1, K - 1))
-    
-    for t in eoi_times:
-        G_t = G_at(t)
-        
-        # d_j(t): events of interest in each group at time t
-        at_t_eoi = (subj_time == t) & (subj_event == event_of_interest)
-        d = np.zeros(K)
-        for j in range(K):
-            d[j] = int(at_t_eoi[subj_group == j].sum())
-        
-        # R_j(t): subdistribution risk set for each group
-        # = subjects with T_i >= t (still in study)
-        # + competing event subjects with T_i < t, weighted by G(t)/G(T_i)
-        still_at_risk = subj_time >= t
-        R = np.zeros(K)
-        for j in range(K):
-            R[j] = int(still_at_risk[subj_group == j].sum())
-        
-        # Add IPCW contribution from competing events before t
-        before_t = competing_times < t
-        if before_t.any():
-            weights = np.where(competing_G_Ti[before_t] > 1e-10,
-                              G_t / competing_G_Ti[before_t], 0.0)
-            for j in range(K):
-                in_group = competing_groups[before_t] == j
-                R[j] += weights[in_group].sum()
-        
-        d_total = d.sum()
-        R_total = R.sum()
-        
-        if R_total < 1e-10 or d_total == 0:
+    ig = df_clean[group_col].map(group_idx).to_numpy()
+    ev = df_clean[event_col].to_numpy()
+    # Recode to crst convention: 0 censored, 1 cause of interest, 2 competing
+    m = np.where(ev == 0, 0, np.where(ev == event_of_interest, 1, 2)).astype(int)
+    y = df_clean[time_col].to_numpy(dtype=float)
+
+    stat, p_val, dfree = _grays_crst(y, m, ig, ng, rho)
+    return {'statistic': stat, 'p_value': p_val, 'df': dfree}
+
+
+def _grays_crst(y, m, ig, ng, rho=0.0):
+    """Core of Gray's test — direct translation of cmprsk's crst.f (single stratum).
+
+    y: failure times (sorted internally); m: 0=censored, 1=cause of interest,
+    2=competing; ig: group index 0..ng-1. Returns (statistic, p_value, df).
+    """
+    from scipy.stats import chi2
+
+    y = np.asarray(y, dtype=float)
+    m = np.asarray(m, dtype=int)
+    ig = np.asarray(ig, dtype=int)
+    order = np.argsort(y, kind='mergesort')
+    y, m, ig = y[order], m[order], ig[order]
+    n = len(y)
+    ng1 = ng - 1
+    if ng1 < 1:
+        return np.nan, np.nan, 0
+
+    rs = np.zeros(ng)          # risk set size per group (ordinary)
+    for j in ig:
+        rs[j] += 1
+    f1m = np.zeros(ng)         # CIF (cause 1), left-continuous
+    f1 = np.zeros(ng)          # CIF (cause 1), right-continuous
+    skmm = np.ones(ng)         # overall KM survival, left-continuous
+    skm = np.ones(ng)          # overall KM survival, right-continuous
+    v3 = np.zeros(ng)
+    c = np.zeros((ng, ng))     # persistent across times
+    v2 = np.zeros((ng1, ng))   # persistent across times
+    a = np.zeros((ng, ng))
+    V = np.zeros((ng1, ng1))   # variance, lower triangle accumulated
+    s = np.zeros(ng1)          # score vector
+    fm = 0.0
+    f = 0.0
+
+    ll = 0
+    while ll < n:
+        lu = ll
+        while lu + 1 < n and y[lu + 1] == y[ll]:
+            lu += 1
+
+        d = np.zeros((3, ng))
+        for i in range(ll, lu + 1):
+            d[m[i], ig[i]] += 1
+        nd1 = d[1].sum()
+        nd2 = d[2].sum()
+
+        if nd1 == 0 and nd2 == 0:
+            # censoring-only time: reduce risk sets, leave S/F unchanged
+            for i in range(ll, lu + 1):
+                rs[ig[i]] -= 1
+            ll = lu + 1
             continue
-        
-        # Score: U_j += d_j - R_j * d/R
-        for j in range(K - 1):
-            U[j] += d[j] - R[j] * d_total / R_total
-        
-        # Variance: V_j1j2 = Σ_t R_j1*(delta_{j1j2}*R - R_j2) * d*(R-d) / (R^2*(R-1))
-        # For j1==j2: R_j * (R - R_j) * d*(R-d) / (R^2*(R-1))
-        # For j1!=j2: -R_j1 * R_j2 * d*(R-d) / (R^2*(R-1))
-        if R_total > 1 and d_total < R_total:
-            factor = d_total * (R_total - d_total) / (R_total * R_total * (R_total - 1))
-            for j1 in range(K - 1):
-                for j2 in range(K - 1):
-                    if j1 == j2:
-                        V[j1, j2] += R[j1] * (R_total - R[j1]) * factor
-                    else:
-                        V[j1, j2] -= R[j1] * R[j2] * factor
-    
-    # ---- Step 5: Test statistic ----
+
+        tr = 0.0
+        tq = 0.0
+        for i in range(ng):
+            if rs[i] <= 0:
+                continue
+            td = d[1, i] + d[2, i]
+            skm[i] = skmm[i] * (rs[i] - td) / rs[i]
+            f1[i] = f1m[i] + (skmm[i] * d[1, i]) / rs[i]
+            tr += rs[i] / skmm[i]
+            tq += rs[i] * (1 - f1m[i]) / skmm[i]
+
+        f = fm + nd1 / tr
+        fb = (1 - fm) ** rho
+
+        a[:] = 0.0
+        for i in range(ng):
+            if rs[i] <= 0:
+                continue
+            t1 = rs[i] / skmm[i]
+            a[i, i] = fb * t1 * (1 - t1 / tr)
+            if a[i, i] != 0:
+                c[i, i] += a[i, i] * nd1 / (tr * (1 - fm))
+            for j in range(i + 1, ng):
+                if rs[j] <= 0:
+                    continue
+                a[i, j] = -fb * t1 * rs[j] / (skmm[j] * tr)
+                if a[i, j] != 0:
+                    c[i, j] += a[i, j] * nd1 / (tr * (1 - fm))
+        for i in range(ng):
+            for j in range(i):
+                a[i, j] = a[j, i]
+                c[i, j] = c[j, i]
+
+        for i in range(ng1):
+            if rs[i] <= 0:
+                continue
+            s[i] += fb * (d[1, i] - nd1 * rs[i] * (1 - f1m[i]) / (skmm[i] * tq))
+
+        if nd1 > 0:
+            for k in range(ng):
+                if rs[k] <= 0:
+                    continue
+                t4 = 1.0
+                if skm[k] > 0:
+                    t4 = 1 - (1 - f) / skm[k]
+                t5 = 1.0
+                if nd1 > 1:
+                    t5 = 1 - (nd1 - 1) / (tr * skmm[k] - 1)
+                t3 = t5 * skmm[k] * nd1 / (tr * rs[k])
+                v3[k] += t4 * t4 * t3
+                for i in range(ng1):
+                    t1 = a[i, k] - t4 * c[i, k]
+                    v2[i, k] += t1 * t4 * t3
+                    for j in range(i + 1):
+                        t2 = a[j, k] - t4 * c[j, k]
+                        V[i, j] += t1 * t2 * t3
+
+        if nd2 > 0:
+            for k in range(ng):
+                if skm[k] <= 0 or d[2, k] <= 0:
+                    continue
+                t4 = (1 - f) / skm[k]
+                t5 = 1.0
+                if d[2, k] > 1:
+                    t5 = 1 - (d[2, k] - 1.0) / (rs[k] - 1.0)
+                t3 = t5 * ((skmm[k] ** 2) * d[2, k]) / (rs[k] ** 2)
+                v3[k] += t4 * t4 * t3
+                for i in range(ng1):
+                    t1 = t4 * c[i, k]
+                    v2[i, k] -= t1 * t4 * t3
+                    for j in range(i + 1):
+                        t2 = t4 * c[j, k]
+                        V[i, j] += t1 * t2 * t3
+
+        if lu >= n - 1:
+            break
+        for i in range(ll, lu + 1):
+            rs[ig[i]] -= 1
+        fm = f
+        f1m[:] = f1
+        skmm[:] = skm
+        ll = lu + 1
+
+    for i in range(ng1):
+        for j in range(i + 1):
+            for k in range(ng):
+                V[i, j] += c[i, k] * c[j, k] * v3[k]
+                V[i, j] += c[i, k] * v2[j, k]
+                V[i, j] += c[j, k] * v2[i, k]
+    for i in range(ng1):
+        for j in range(i):
+            V[j, i] = V[i, j]
+
     try:
-        V_inv = np.linalg.inv(V)
-        stat = float(U @ V_inv @ U)
-        p_val = 1 - chi2.cdf(stat, df=K - 1)
+        stat = float(s @ np.linalg.inv(V) @ s)
+        p_val = float(1 - chi2.cdf(stat, ng1))
     except np.linalg.LinAlgError:
-        stat = np.nan
-        p_val = np.nan
-    
-    return {'statistic': stat, 'p_value': p_val, 'df': K - 1}
+        return np.nan, np.nan, ng1
+    return stat, p_val, ng1
 
 
 def pairwise_fine_gray(df, time_col, event_col, group_col, event_of_interest=1, reference_group=None):
@@ -743,7 +794,7 @@ def compute_rmtl(df, time_col, event_col, group_col, event_of_interest, tau, n_b
     
     def _rmtl_from_aj(data, time_c, event_c, eoi, tau_val):
         """Compute RMTL from Aalen-Johansen CIF."""
-        aj = AalenJohansenFitter(calculate_variance=False)
+        aj = AalenJohansenFitter(calculate_variance=False, seed=42)
         aj.fit(data[time_c], data[event_c], event_of_interest=eoi)
         # Build timeline from 0 to tau
         timeline = np.linspace(0, tau_val, 500)
