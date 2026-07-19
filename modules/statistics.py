@@ -298,6 +298,47 @@ def compute_calibration(df, time_col, event_col, covariates, horizon, n_bins=5, 
     return pd.DataFrame(rows), {'horizon': horizon, 'n_bins': len(rows)}
 
 
+_DATE_UNIT_DIVISORS = {"days": 1.0, "weeks": 7.0, "months": 30.4375, "years": 365.25}
+
+
+def date_interval(start, end, unit="months", dayfirst=True):
+    """Numeric interval (end − start) between two date columns.
+
+    Parses both inputs as dates (tolerant of mixed formats, e.g. '31/08/2018'
+    and '2018-01-06'), and returns the signed difference as a float Series in
+    the requested unit, aligned to the input index. NaT on either side → NaN.
+
+    Returns (values, meta) where meta reports parse/validity counts so the UI
+    can warn about unparseable dates or negative (end-before-start) intervals.
+    """
+    def _parse(x):
+        col = pd.Series(x)
+        import warnings as _w
+        with _w.catch_warnings():
+            _w.simplefilter("ignore")
+            # format='mixed' parses each element independently, so a column with
+            # both '31/08/2018' and '2018-01-06' is handled correctly (pandas
+            # otherwise locks onto the first element's format for the whole column).
+            try:
+                return pd.to_datetime(col, errors="coerce", dayfirst=dayfirst, format="mixed")
+            except (ValueError, TypeError):
+                return pd.to_datetime(col, errors="coerce", dayfirst=dayfirst)
+
+    s = _parse(start)
+    e = _parse(end)
+    div = _DATE_UNIT_DIVISORS.get(unit, 30.4375)
+    vals = (e - s).dt.days / div
+    meta = {
+        "unit": unit,
+        "n": int(len(vals)),
+        "n_computed": int(vals.notna().sum()),
+        "n_start_unparsed": int(s.isna().sum()),
+        "n_end_unparsed": int(e.isna().sum()),
+        "n_negative": int((vals < 0).sum()),
+    }
+    return vals, meta
+
+
 def median_followup(times, events):
     """Median follow-up via the reverse Kaplan-Meier estimator (Schemper & Smith, 1996).
 

@@ -441,10 +441,21 @@ if df is not None:
                         df[r_name] = np.select(conds, choic, default="Intermediate Risk")
                      
                     st.toast(f"✅ Risk Variable '{r_name}' loaded successfully!", icon="🧬")
-                        
+
                 except Exception as e:
                     st.error(f"Failed to rebuild Risk System {combo_def['name']}: {e}")
-    
+
+            elif combo_def['type'] == 'date_interval':
+                try:
+                    if combo_def['start'] in df.columns and combo_def['end'] in df.columns:
+                        _vals, _ = statistics.date_interval(
+                            df[combo_def['start']], df[combo_def['end']],
+                            unit=combo_def.get('unit', 'months'),
+                            dayfirst=combo_def.get('dayfirst', True))
+                        df[combo_def['name']] = _vals
+                except Exception as e:
+                    st.error(f"Failed to compute date interval {combo_def['name']}: {e}")
+
     # --- DATA FILTRATION ---
     # --- DATA FILTRATION ---
     with st.expander("🔍 Step 1: Filter Data (Optional)", expanded=True):
@@ -5223,7 +5234,8 @@ if df is not None:
              st.header("🧪 Variable Generation")
              st.write("Create advanced variables by combining existing columns or applying logical rules.")
              
-             tab5_meth1, tab5_meth2 = st.tabs(["Method 1: Interaction Combiner", "Method 2: Boolean Logic"])
+             tab5_meth1, tab5_meth2, tab5_meth3 = st.tabs([
+                 "Method 1: Interaction Combiner", "Method 2: Boolean Logic", "Method 3: Date Interval"])
              
              # --- METHOD 1: INTERACTION COMBINER ---
              with tab5_meth1:
@@ -5329,10 +5341,63 @@ if df is not None:
                          st.session_state.custom_combinations = []
                      
                      st.session_state.custom_combinations.append(bool_def)
-                     
+
                      st.success(f"Logic Variable **{new_bool_name}** created!")
                      st.rerun()
-                         
+
+             with tab5_meth3:
+                 st.subheader("Compute Time Between Two Dates")
+                 st.caption("Create a numeric duration column from two date columns — e.g. **months from diagnosis to transplant**, "
+                            "so it can be used as a time-dependent covariate's event time (on the same scale as your survival time).")
+                 _di_c1, _di_c2, _di_c3 = st.columns([2, 2, 1])
+                 with _di_c1:
+                     _di_start = st.selectbox("Start date (time zero)", cols_avail, key="di_start",
+                                              help="The baseline date, e.g. diagnosis or registration date.")
+                 with _di_c2:
+                     _di_end = st.selectbox("End date (event)", cols_avail, key="di_end",
+                                            help="The later date, e.g. date of transplant. Blank for patients without the event.")
+                 with _di_c3:
+                     _di_unit = st.selectbox("Unit", ["months", "days", "weeks", "years"], key="di_unit")
+                 _di_dayfirst = st.checkbox("Day-first dates (DD/MM/YYYY)", value=True, key="di_dayfirst",
+                                            help="Tick for DD/MM/YYYY; untick for MM/DD/YYYY. ISO dates (YYYY-MM-DD) parse either way.")
+                 _di_name = st.text_input("New column name", value=f"Months_{_di_end}"[:40].replace(" ", "_"), key="di_name")
+
+                 # Live preview
+                 if _di_start and _di_end and _di_start != _di_end:
+                     _di_vals, _di_meta = statistics.date_interval(
+                         df_clean[_di_start], df_clean[_di_end], unit=_di_unit, dayfirst=_di_dayfirst)
+                     st.info(f"Preview: **{_di_meta['n_computed']}** of {_di_meta['n']} rows produce a value "
+                             f"({_di_meta['n_start_unparsed']} unparsed start, {_di_meta['n_end_unparsed']} unparsed/blank end). "
+                             f"Median = {_di_vals.median():.1f} {_di_unit}." if _di_meta['n_computed']
+                             else "Preview: no rows produced a value — check the columns actually contain dates.")
+                     if _di_meta['n_negative'] > 0:
+                         st.warning(f"⚠️ {_di_meta['n_negative']} rows are **negative** (end date before start date). "
+                                    "Check the column order or the source data.")
+                     if _di_meta['n_computed']:
+                         st.dataframe(pd.DataFrame({
+                             _di_start: df_clean[_di_start], _di_end: df_clean[_di_end],
+                             _di_name or 'interval': _di_vals.round(2),
+                         }).dropna(subset=[_di_name or 'interval']).head(8), hide_index=True, use_container_width=True)
+                 elif _di_start == _di_end:
+                     st.warning("Choose two different columns.")
+
+                 if st.button("Add Duration Column", key="add_date_interval"):
+                     if not _di_name:
+                         st.error("Please enter a column name.")
+                     elif _di_start == _di_end:
+                         st.error("Start and end must be different columns.")
+                     else:
+                         if 'custom_combinations' not in st.session_state:
+                             st.session_state.custom_combinations = []
+                         st.session_state.custom_combinations.append({
+                             'type': 'date_interval', 'name': _di_name,
+                             'start': _di_start, 'end': _di_end,
+                             'unit': _di_unit, 'dayfirst': _di_dayfirst,
+                         })
+                         st.success(f"Added **{_di_name}** ({_di_unit}) to the dataset. "
+                                    "You can now select it as the *Time of Event Column* for a time-dependent covariate.")
+                         st.rerun()
+
     # --- TAB 6: CORRELATIONS ---
     if 'tab6' in locals() and tab6 is not None and df_clean is not None:
          with tab6:

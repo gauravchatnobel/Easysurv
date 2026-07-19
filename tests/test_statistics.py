@@ -34,7 +34,43 @@ from modules.statistics import (
     bootstrap_optimism_c_index,
     compute_calibration,
     subgroup_hazard_ratios,
+    date_interval,
 )
+
+
+class TestDateInterval:
+    def test_basic_months(self):
+        s = pd.Series(["2020-01-01", "2020-01-01"])
+        e = pd.Series(["2020-02-01", "2021-01-01"])
+        vals, meta = date_interval(s, e, unit="months")
+        assert abs(vals.iloc[0] - 31 / 30.4375) < 0.05
+        assert abs(vals.iloc[1] - 366 / 30.4375) < 0.05
+        assert meta["n_computed"] == 2
+
+    def test_mixed_formats_parse(self):
+        # ISO + day-first in the same column must both parse
+        s = pd.Series(["2020-01-01", "01/03/2020"])
+        e = pd.Series(["2020-02-01", "01/04/2020"])
+        vals, meta = date_interval(s, e, unit="days")
+        assert abs(vals.iloc[0] - 31) < 0.5
+        assert abs(vals.iloc[1] - 31) < 0.5
+        assert meta["n_computed"] == 2
+
+    def test_unparseable_becomes_nan(self):
+        vals, meta = date_interval(pd.Series(["not a date"]), pd.Series(["2020-01-01"]))
+        assert pd.isna(vals.iloc[0])
+        assert meta["n_start_unparsed"] == 1
+
+    def test_negative_flagged(self):
+        vals, meta = date_interval(pd.Series(["2020-06-01"]), pd.Series(["2020-01-01"]), unit="days")
+        assert vals.iloc[0] < 0
+        assert meta["n_negative"] == 1
+
+    def test_index_aligned(self):
+        s = pd.Series(["2020-01-01", "2020-01-01"], index=[7, 9])
+        e = pd.Series(["2020-02-01", "2020-03-01"], index=[7, 9])
+        vals, _ = date_interval(s, e, unit="days")
+        assert list(vals.index) == [7, 9]
 
 
 class TestSubgroupForest:
