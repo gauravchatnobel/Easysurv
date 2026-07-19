@@ -27,7 +27,36 @@ from modules.statistics import (
     summarize_model_risk,
     grays_test,
     adjust_pvalues,
+    sanitize_name,
+    sanitize_columns,
+    encode_with_reference,
 )
+
+
+class TestSanitizeAndEncode:
+    def test_sanitize_name(self):
+        assert sanitize_name("LSC+") == "LSCpos"
+        assert sanitize_name("a b-c") == "a_bnegc"
+        assert sanitize_name("ELN Adv") == "ELN_Adv"
+
+    def test_sanitize_columns_no_mutation(self):
+        df = pd.DataFrame({"a b": [1], "c+": [2]})
+        out = sanitize_columns(df)
+        assert list(out.columns) == ["a_b", "cpos"]
+        assert list(df.columns) == ["a b", "c+"]  # original untouched
+
+    def test_encode_with_reference_drops_ref(self):
+        df = pd.DataFrame({"G": ["A", "B", "C", "A"], "x": [1, 2, 3, 4]})
+        enc, dummies = encode_with_reference(df, ["G"], {"G": "A"})
+        assert "G" not in enc.columns
+        assert "G_A" not in enc.columns          # reference dropped
+        assert set(dummies) == {"G_B", "G_C"}
+        assert enc["G_B"].dtype == float          # numeric, not bool
+
+    def test_encode_numeric_untouched(self):
+        df = pd.DataFrame({"G": ["A", "B"], "x": [1.0, 2.0]})
+        enc, dummies = encode_with_reference(df, ["G"], {"G": "A"})
+        assert "x" in enc.columns and list(enc["x"]) == [1.0, 2.0]
 
 
 class TestAdjustPvalues:

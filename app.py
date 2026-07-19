@@ -405,7 +405,7 @@ if df is not None:
                     mask_low = pd.Series([False]*len(df), index=df.index)
                     
                     # Sanitize for matching
-                    clean_col_map = {c: c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in df.columns}
+                    clean_col_map = {c: statistics.sanitize_name(c) for c in df.columns}
                     df_renamed = df.rename(columns=clean_col_map)
                     
                     def find_var_persist(v_name, d, d_renamed):
@@ -414,12 +414,12 @@ if df is not None:
                             return (c > 0) if pd.api.types.is_numeric_dtype(c) else c.astype(bool)
                         # Prefix match
                         for col in d.columns:
-                            c_clean = col.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                            c_clean = statistics.sanitize_name(col)
                             if v_name.startswith(c_clean + "_"):
                                 val_part = v_name[len(c_clean)+1:]
                                 # Loose match against values
                                 for val in d[col].dropna().unique():
-                                     v_san = str(val).replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                     v_san = statistics.sanitize_name(str(val))
                                      if v_name == c_clean + "_" + v_san:
                                          return (d[col] == val)
                         return None
@@ -1335,7 +1335,7 @@ if df is not None:
                 try:
                     cox_df = df_clean[[time_col, event_col, group_col]].dropna()
                     cox_data_encoded = pd.get_dummies(cox_df, columns=[group_col], drop_first=True, dtype=float)
-                    cox_data_encoded.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in cox_data_encoded.columns]
+                    cox_data_encoded.columns = [statistics.sanitize_name(c) for c in cox_data_encoded.columns]
                     # This might fail on separation, but we don't strictly need it for the p-value text anymore
                     cph_plot = CoxPHFitter()
                     cph_plot.fit(cox_data_encoded, duration_col=time_col, event_col=event_col)
@@ -2508,17 +2508,8 @@ if df is not None:
                                      from sklearn.model_selection import KFold
                                      
                                      # Prepare Data (Silent Mode)
-                                     tune_df = mv_df.copy()
-                                     # Encoder logic duplicate (quick & dirty for tuner)
-                                     tune_encoded = tune_df.drop(columns=cat_cols)
-                                     for col in cat_cols:
-                                         ref = categorical_refs.get(col)
-                                         dummies = pd.get_dummies(tune_df[col], prefix=col)
-                                         ref_col_name = f"{col}_{ref}"
-                                         if ref_col_name in dummies.columns: dummies = dummies.drop(columns=[ref_col_name])
-                                         tune_encoded = pd.concat([tune_encoded, dummies], axis=1)
-                                     
-                                     tune_encoded.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in tune_encoded.columns]
+                                     tune_encoded, _ = statistics.encode_with_reference(mv_df, cat_cols, categorical_refs)
+                                     tune_encoded.columns = [statistics.sanitize_name(c) for c in tune_encoded.columns]
                                      
                                      # Search Space (Refined to R glmnet defaults approx)
                                      # 0.0001 to 10.0 (50 points)
@@ -2634,28 +2625,11 @@ if df is not None:
                         
                     if st.session_state.get('mv_analysis_active', False):
                         try:
-                            # Encore Categorical Variables MANUALLY to handle Reference Group
-                            mv_data_encoded = mv_df.copy()
-                            
-                            # Drop original categorical columns from encoding base, we will add dummies
-                            mv_data_encoded = mv_data_encoded.drop(columns=cat_cols)
-                            
-                            for col in cat_cols:
-                                ref = categorical_refs.get(col)
-                                # Get Dummies (numeric dtype — avoids bool-column dtype-inference
-                                # failures in some pandas/lifelines version combinations)
-                                dummies = pd.get_dummies(mv_df[col], prefix=col, dtype=float)
+                            # Encode categorical variables, dropping each chosen reference level.
+                            mv_data_encoded, _ = statistics.encode_with_reference(mv_df, cat_cols, categorical_refs)
 
-                                # Drop the reference column
-                                ref_col_name = f"{col}_{ref}"
-                                if ref_col_name in dummies.columns:
-                                    dummies = dummies.drop(columns=[ref_col_name])
-                                    
-                                # Concatenate
-                                mv_data_encoded = pd.concat([mv_data_encoded, dummies], axis=1)
-                            
                             # Sanitize Column Names for Lifelines/Stats (remove spaces/special chars)
-                            mv_data_encoded.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in mv_data_encoded.columns]
+                            mv_data_encoded.columns = [statistics.sanitize_name(c) for c in mv_data_encoded.columns]
                             
                             # --- TIME-DEPENDENT COVARIATE: Expand to counting-process format ---
                             _td_entry_col = None  # Will be set if TD is active
@@ -2719,11 +2693,11 @@ if df is not None:
                                         pass
                                 
                                 # Sanitize the TD variable name
-                                _td_var_safe = _td_var_name.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                _td_var_safe = statistics.sanitize_name(_td_var_name)
                                 
                                 # Sanitized time/event column names
-                                _san_time = time_col.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
-                                _san_event = event_col.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                _san_time = statistics.sanitize_name(time_col)
+                                _san_event = statistics.sanitize_name(event_col)
                                 
                                 rows_expanded = []
                                 _n_split = 0
@@ -3062,7 +3036,7 @@ if df is not None:
                              pass
                     
                     # Better Strategy: Sanitize ALL DF columns temporarily to match Model
-                    clean_col_map = {c: c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in score_df.columns}
+                    clean_col_map = {c: statistics.sanitize_name(c) for c in score_df.columns}
                     score_df_renamed = score_df.rename(columns=clean_col_map)
                     
                     # Smart Variable Matcher
@@ -3077,7 +3051,7 @@ if df is not None:
                         # 2. Categorical Reconstruction (e.g., v_name="ICC_BCR::ABL1", col="ICC", val="BCR::ABL1")
                         # We try to match v_name prefix to a column in dframe
                         for col in dframe.columns:
-                            clean_col = col.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                            clean_col = statistics.sanitize_name(col)
                             if v_name.startswith(clean_col + "_"):
                                 # Extracted value part
                                 val_part_sanitized = v_name[len(clean_col)+1:]
@@ -3087,7 +3061,7 @@ if df is not None:
                                 # Let's iterate unique values in original col
                                 unique_vals = dframe[col].dropna().unique()
                                 for val in unique_vals:
-                                    val_sanitized = str(val).replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                    val_sanitized = statistics.sanitize_name(str(val))
                                     # Handle specialized characters if needed (Tab 2 logic might be more complex)
                                     # But usually Tab 2 just does get_dummies with prefix.
                                     
@@ -3095,10 +3069,10 @@ if df is not None:
                                     # So we check if v_name == clean_col + "_" + val_sanitized (or similar)
                                     # Actually, get_dummies uses the original value string.
                                     # But we sanitized the *result* columns in Tab 2 line 1459:
-                                    # [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')...]
+                                    # [statistics.sanitize_name(c)...]
                                     
                                     # So yes, we just need to replicate that chain.
-                                    candidate_name = clean_col + "_" + str(val).replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                    candidate_name = clean_col + "_" + statistics.sanitize_name(str(val))
                                     
                                     if v_name == candidate_name:
                                         # MATCH FOUND!
@@ -4049,21 +4023,10 @@ if df is not None:
                                             _fg_mv_df, cif_time_col, cif_event_col, cif_event_of_interest
                                         )
                                         
-                                        # 2. Encode categorical variables
-                                        _fg_mv_encoded = _fg_mv_weighted.copy()
-                                        _fg_mv_encoded = _fg_mv_encoded.drop(columns=[c for c in _fg_cat_cols if c in _fg_mv_encoded.columns], errors='ignore')
-                                        
-                                        _fg_mv_dummy_cols = []
-                                        for col in _fg_cat_cols:
-                                            if col in _fg_mv_weighted.columns:
-                                                _dummies = pd.get_dummies(_fg_mv_weighted[col], prefix=col, drop_first=False, dtype=float)
-                                                # Drop reference column
-                                                _ref_col = f"{col}_{_fg_cat_refs.get(col, '')}"
-                                                if _ref_col in _dummies.columns:
-                                                    _dummies = _dummies.drop(columns=[_ref_col])
-                                                _fg_mv_dummy_cols.extend(_dummies.columns.tolist())
-                                                _fg_mv_encoded = pd.concat([_fg_mv_encoded, _dummies], axis=1)
-                                        
+                                        # 2. Encode categorical variables (drop each reference level)
+                                        _fg_mv_encoded, _fg_mv_dummy_cols = statistics.encode_with_reference(
+                                            _fg_mv_weighted, _fg_cat_cols, _fg_cat_refs)
+
                                         # Numeric covariate columns (not categorical, not structural)
                                         _fg_mv_numeric_cols = [c for c in fg_mv_covariates if c not in _fg_cat_cols and c in _fg_mv_encoded.columns]
                                         
@@ -4073,7 +4036,7 @@ if df is not None:
                                         # Sanitize column names
                                         _col_rename = {}
                                         for c in _fg_mv_encoded.columns:
-                                            _clean = c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                            _clean = statistics.sanitize_name(c)
                                             if _clean != c:
                                                 _col_rename[c] = _clean
                                         _fg_mv_encoded = _fg_mv_encoded.rename(columns=_col_rename)
@@ -4316,25 +4279,18 @@ if df is not None:
                                 _cs_fit_cols = [cif_time_col, _cs_event_col_name] + _cs_covariates
                                 _cs_fit_df = _cs_df[_cs_fit_cols].dropna().copy()
                                 
-                                # Encode categoricals
-                                for col in _cs_cat_cols:
-                                    ref = _cs_refs.get(col)
-                                    dummies = pd.get_dummies(_cs_fit_df[col], prefix=col, dtype=float)
-                                    ref_name = f"{col}_{ref}"
-                                    if ref_name in dummies.columns:
-                                        dummies = dummies.drop(columns=[ref_name])
-                                    _cs_fit_df = _cs_fit_df.drop(columns=[col])
-                                    _cs_fit_df = pd.concat([_cs_fit_df, dummies], axis=1)
-                                
+                                # Encode categoricals (drop each reference level)
+                                _cs_fit_df, _ = statistics.encode_with_reference(_cs_fit_df, _cs_cat_cols, _cs_refs)
+
                                 # Sanitize column names
-                                _cs_fit_df.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in _cs_fit_df.columns]
-                                _san_cs_time = cif_time_col.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
-                                _san_cs_event = _cs_event_col_name.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                _cs_fit_df.columns = [statistics.sanitize_name(c) for c in _cs_fit_df.columns]
+                                _san_cs_time = statistics.sanitize_name(cif_time_col)
+                                _san_cs_event = statistics.sanitize_name(_cs_event_col_name)
                                 
                                 # --- TD Covariate Expansion ---
                                 _cs_entry_col = None
                                 if _cs_td_enabled and _cs_td_var_name and _cs_td_time_col and _cs_td_status_col:
-                                    _cs_td_var_safe = _cs_td_var_name.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                    _cs_td_var_safe = statistics.sanitize_name(_cs_td_var_name)
                                     _cs_td_time_vals = df_clean.loc[_cs_fit_df.index, _cs_td_time_col] if _cs_td_time_col in df_clean.columns else None
                                     _cs_td_stat_vals = df_clean.loc[_cs_fit_df.index, _cs_td_status_col] if _cs_td_status_col in df_clean.columns else None
                                     
@@ -4486,10 +4442,10 @@ if df is not None:
                                     _cs_all_vars = list(set(_cs_vars_a + _cs_vars_b))
                                     _cs_lrt_df = _cs_df[[cif_time_col, '_cs_event'] + _cs_all_vars].dropna()
                                     _cs_lrt_enc = pd.get_dummies(_cs_lrt_df, drop_first=True)
-                                    _cs_lrt_enc.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in _cs_lrt_enc.columns]
+                                    _cs_lrt_enc.columns = [statistics.sanitize_name(c) for c in _cs_lrt_enc.columns]
                                     
-                                    _san_a = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in _cs_vars_a]
-                                    _san_b = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in _cs_vars_b]
+                                    _san_a = [statistics.sanitize_name(c) for c in _cs_vars_a]
+                                    _san_b = [statistics.sanitize_name(c) for c in _cs_vars_b]
                                     _ca = [c for c in _cs_lrt_enc.columns if c not in [cif_time_col, '_cs_event'] and any(c.startswith(v) for v in _san_a)]
                                     _cb = [c for c in _cs_lrt_enc.columns if c not in [cif_time_col, '_cs_event'] and any(c.startswith(v) for v in _san_b)]
                                     
@@ -5593,11 +5549,11 @@ if df is not None:
                                   _all_vars = list(set(vars_a + vars_b + (vars_c if vars_c else [])))
                                   _lrt_df = df_clean[[time_col, event_col] + _all_vars].dropna()
                                   _lrt_enc = pd.get_dummies(_lrt_df, drop_first=True)
-                                  _lrt_enc.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in _lrt_enc.columns]
+                                  _lrt_enc.columns = [statistics.sanitize_name(c) for c in _lrt_enc.columns]
                                   
                                   # Fit Models A and B on same data
-                                  _san_vars_a = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in vars_a]
-                                  _san_vars_b = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in vars_b]
+                                  _san_vars_a = [statistics.sanitize_name(c) for c in vars_a]
+                                  _san_vars_b = [statistics.sanitize_name(c) for c in vars_b]
                                   
                                   # Get all dummy columns for each model's covariates
                                   _cols_a = [c for c in _lrt_enc.columns if c not in [time_col, event_col] and any(c.startswith(v) for v in _san_vars_a)]
@@ -5625,7 +5581,7 @@ if df is not None:
                                       })
                                   
                                   if vars_c:
-                                      _san_vars_c = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in vars_c]
+                                      _san_vars_c = [statistics.sanitize_name(c) for c in vars_c]
                                       _cols_c = [c for c in _lrt_enc.columns if c not in [time_col, event_col] and any(c.startswith(v) for v in _san_vars_c)]
                                       
                                       _cph_c = CoxPHFitter(penalizer=penalizer, l1_ratio=l1_ratio)

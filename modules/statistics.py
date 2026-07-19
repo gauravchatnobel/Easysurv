@@ -17,6 +17,53 @@ def _cache_data(func):
     return func
 
 
+def sanitize_name(name):
+    """Make a single column/level name safe for lifelines/formula fitting.
+
+    Equivalent to the historical inline idiom
+    ``x.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')``.
+    """
+    return str(name).replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+
+
+def sanitize_columns(df):
+    """Return a copy of *df* with all column names sanitized (input unchanged)."""
+    out = df.copy()
+    out.columns = [sanitize_name(c) for c in out.columns]
+    return out
+
+
+def encode_with_reference(df, cat_cols, refs, dtype=float):
+    """One-hot encode categorical columns, dropping each column's reference level.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+    cat_cols : list[str] — categorical columns to encode.
+    refs : dict[str, str] — reference level per column (the dropped dummy).
+    dtype : numeric dtype for the dummy columns (float avoids bool-related
+        dtype-inference issues in some pandas/lifelines versions).
+
+    Returns
+    -------
+    (encoded_df, dummy_cols) — the frame with cat_cols replaced by dummies,
+    and the list of new dummy column names (pre-sanitization).
+    """
+    out = df.copy()
+    out = out.drop(columns=[c for c in cat_cols if c in out.columns], errors='ignore')
+    dummy_cols = []
+    for col in cat_cols:
+        if col not in df.columns:
+            continue
+        dummies = pd.get_dummies(df[col], prefix=col, dtype=dtype)
+        ref_col = f"{col}_{refs.get(col, '')}"
+        if ref_col in dummies.columns:
+            dummies = dummies.drop(columns=[ref_col])
+        dummy_cols.extend(dummies.columns.tolist())
+        out = pd.concat([out, dummies], axis=1)
+    return out, dummy_cols
+
+
 def adjust_pvalues(pvals, method="Benjamini-Hochberg"):
     """Adjust a list of p-values for multiple comparisons.
 
@@ -466,7 +513,7 @@ def get_c_index_bootstrap(df, time_col, event_col, covariates, label="", n_boot=
     # Data Prep
     d = df[[time_col, event_col] + covariates].dropna()
     d_enc = pd.get_dummies(d, drop_first=True)
-    d_enc.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in d_enc.columns]
+    d_enc.columns = [sanitize_name(c) for c in d_enc.columns]
     
     # Fit Main
     cph = CoxPHFitter(penalizer=penalizer, l1_ratio=l1_ratio)
