@@ -6003,8 +6003,7 @@ if df is not None:
 
               > **Gray's test note**: EasySurv's Gray test is a direct translation of Robert Gray's
               > Fortran `crst` routine from the `cmprsk` package, validated to agree with
-              > `cmprsk::cuminc()$Tests` to 6–7 decimal places across 2–4 groups and both event
-              > types. Earlier versions used an IPCW-weighted approximation; this is now exact.
+              > `cmprsk::cuminc()$Tests` to 6–7 decimal places across 2–4 groups and both event types.
 
               > **Fine-Gray variance note**: subdistribution-hazard SEs use the **cluster-robust
               > (sandwich) estimator clustered on subject id**, which is the correct variance for
