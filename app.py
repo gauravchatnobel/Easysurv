@@ -16,11 +16,11 @@ except ImportError:
 
 # --- MODULE IMPORTS ---
 try:
-    from survival_analysis.modules import utils, statistics, plotting, narrator
+    from survival_analysis.modules import utils, statistics, plotting, narrator, tableone
     from survival_analysis.modules.validation import validate_dataset, format_validation_report
     from survival_analysis.modules.session_manager import save_session, load_session, get_session_filename, SIDEBAR_CONFIG_KEYS
 except ImportError:
-    from modules import utils, statistics, plotting, narrator
+    from modules import utils, statistics, plotting, narrator, tableone
     from modules.validation import validate_dataset, format_validation_report
     from modules.session_manager import save_session, load_session, get_session_filename, SIDEBAR_CONFIG_KEYS
 
@@ -5251,6 +5251,62 @@ if df is not None:
     # --- TAB 6: CORRELATIONS ---
     if 'tab6' in locals() and tab6 is not None and df_clean is not None:
          with tab6:
+             # ============================================================
+             # BASELINE CHARACTERISTICS ("TABLE 1")
+             # ============================================================
+             st.header("📋 Baseline Characteristics (Table 1)")
+             st.write("Generate a publication-ready, by-group summary of your cohort with appropriate descriptive statistics and tests.")
+
+             _t1_group_opts = ["(Overall only)"] + [c for c in df_clean.columns]
+             _t1_group = st.selectbox(
+                 "Stratify by (grouping variable)", _t1_group_opts, key="t1_group",
+                 help="Choose a column to compare groups (adds per-group columns and a p-value), or 'Overall only' for a single-column summary.",
+             )
+             _t1_group_col = None if _t1_group == "(Overall only)" else _t1_group
+
+             _t1_var_opts = [c for c in df_clean.columns if c != _t1_group_col]
+             _t1_default = [c for c in _t1_var_opts if c.lower() in
+                            ('age', 'sex', 'gender', 'eln', 'stage', 'bm_blast%', 'ngs', 'lsc', 'fcm')][:8]
+             _t1_vars = st.multiselect(
+                 "Variables to summarise", _t1_var_opts, default=_t1_default, key="t1_vars",
+                 help="Continuous variables are summarised as median [IQR]; categorical as n (%).",
+             )
+             _t1_style = st.radio(
+                 "Continuous variable summary", ["Median [IQR] (non-parametric)", "Mean (SD) (parametric)"],
+                 horizontal=True, key="t1_style",
+                 help="Median [IQR] with rank-based tests is the robust default for skewed clinical data.",
+             )
+
+             if _t1_vars:
+                 _t1_nonnormal = None
+                 _t1_cstyle = "median"
+                 if _t1_style.startswith("Mean"):
+                     _t1_nonnormal = []
+                     _t1_cstyle = "mean"
+                 try:
+                     _t1_table, _t1_meta = tableone.generate_table_one(
+                         df_clean, group_col=_t1_group_col, variables=_t1_vars,
+                         nonnormal_vars=_t1_nonnormal, continuous_style=_t1_cstyle,
+                     )
+                     st.dataframe(_t1_table, hide_index=True, use_container_width=True)
+                     if _t1_group_col:
+                         _tests = sorted(set(t for t in _t1_meta['tests'].values() if t))
+                         if _tests:
+                             st.caption("Tests used: " + ", ".join(_tests) +
+                                        ". Continuous: Mann-Whitney U / Kruskal-Wallis (or t-test / ANOVA if parametric); "
+                                        "categorical: chi-square (Fisher's exact for small 2×2). P-values are unadjusted.")
+                     st.download_button(
+                         "💾 Download Table 1 (CSV)",
+                         _t1_table.to_csv(index=False).encode('utf-8'),
+                         "table1_baseline.csv", "text/csv", key="dl_table1",
+                     )
+                 except Exception as e:
+                     st.error(f"Could not build Table 1: {e}")
+             else:
+                 st.info("Select at least one variable to summarise.")
+
+             st.divider()
+
              st.header("🔥 Correlation Heatmap")
              st.write("Visualize relationships between variables. Useful for checking multicollinearity.")
              
