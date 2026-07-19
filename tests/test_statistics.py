@@ -33,7 +33,39 @@ from modules.statistics import (
     median_followup,
     bootstrap_optimism_c_index,
     compute_calibration,
+    subgroup_hazard_ratios,
 )
+
+
+class TestSubgroupForest:
+    def _data(self, n=300):
+        rng = np.random.RandomState(3)
+        tx = rng.choice(["Ctrl", "Drug"], n)
+        sub = rng.choice(["Low", "High"], n)
+        base = np.where(tx == "Drug", 1.8, 1.0)  # drug protective -> longer survival
+        time = np.clip(rng.exponential(20 * base), 0.1, None)
+        event = rng.binomial(1, 0.7, n)
+        return pd.DataFrame({"T": time, "E": event, "Tx": tx, "Sub": sub})
+
+    def test_requires_binary_treatment(self):
+        df = self._data()
+        df.loc[df.index[:5], "Tx"] = "Third"
+        out, reason = subgroup_hazard_ratios(df, "T", "E", "Tx", ["Sub"])
+        assert out is None
+
+    def test_overall_and_subgroup_rows(self):
+        tbl, meta = subgroup_hazard_ratios(self._data(), "T", "E", "Tx", ["Sub"])
+        assert tbl is not None
+        assert (tbl["Subgroup"] == "Overall").any()
+        assert (tbl["Subgroup"] == "Sub").any()
+        # subgroup header carries an interaction p in [0,1]
+        header = tbl[(tbl["Subgroup"] == "Sub") & (tbl["Level"] == "")].iloc[0]
+        assert 0.0 <= header["Interaction P"] <= 1.0
+
+    def test_protective_hr_below_one(self):
+        tbl, meta = subgroup_hazard_ratios(self._data(), "T", "E", "Tx", ["Sub"])
+        overall = tbl[tbl["Subgroup"] == "Overall"].iloc[0]
+        assert overall["HR"] < 1.0  # drug is protective
 
 
 class TestOptimismCorrectedCIndex:

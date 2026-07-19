@@ -64,6 +64,108 @@ def encode_with_reference(df, cat_cols, refs, dtype=float):
     return out, dummy_cols
 
 
+def subgroup_hazard_ratios(df, time_col, event_col, treatment_col, subgroup_vars,
+                           treatment_ref=None):
+    """Treatment hazard ratios within subgroups, with interaction tests.
+
+    For a binary `treatment_col`, computes the HR (treatment vs reference) overall
+    and within each level of each subgroup variable, plus a likelihood-ratio
+    interaction p-value (treatment x subgroup) per subgroup variable. This is the
+    standard 'subgroup forest plot' used in trials and retrospective series.
+
+    Returns a DataFrame with columns:
+      Subgroup, Level, n, Events, HR, Lower, Upper, p-value, Interaction P
+    (Interaction P is populated on the subgroup header rows only.)
+    """
+    from lifelines.statistics import proportional_hazard_test  # noqa: F401 (import parity)
+
+    tvals = sorted(df[treatment_col].dropna().unique())
+    if len(tvals) != 2:
+        return None, "Treatment variable must have exactly two levels."
+    ref = treatment_ref if treatment_ref in tvals else tvals[0]
+    other = [v for v in tvals if v != ref][0]
+
+    def _fit_hr(sub):
+        d = sub[[time_col, event_col, treatment_col]].dropna()
+        d = d.assign(_tx=(d[treatment_col] == other).astype(float))
+        if d['_tx'].nunique() < 2 or d[event_col].sum() < 3:
+            return None
+        import warnings as _w
+        with _w.catch_warnings():
+            _w.simplefilter("ignore")
+            try:
+                cph = CoxPHFitter()
+                cph.fit(d[[time_col, event_col, '_tx']], duration_col=time_col, event_col=event_col)
+                s = cph.summary.loc['_tx']
+                return {
+                    'n': len(d), 'Events': int(d[event_col].sum()),
+                    'HR': float(s['exp(coef)']),
+                    'Lower': float(s['exp(coef) lower 95%']),
+                    'Upper': float(s['exp(coef) upper 95%']),
+                    'p-value': float(s['p']),
+                }
+            except Exception:
+                return None
+
+    rows = []
+    overall = _fit_hr(df)
+    if overall:
+        rows.append({'Subgroup': 'Overall', 'Level': '', **overall, 'Interaction P': np.nan})
+
+    for var in subgroup_vars:
+        if var not in df.columns:
+            continue
+        levels = sorted(df[var].dropna().unique(), key=lambda x: str(x))
+        if len(levels) < 2:
+            continue
+        # Interaction LRT: reduced (tx + var) vs full (tx * var)
+        inter_p = _interaction_pvalue(df, time_col, event_col, treatment_col, var, ref, other)
+        rows.append({'Subgroup': var, 'Level': '', 'n': np.nan, 'Events': np.nan,
+                     'HR': np.nan, 'Lower': np.nan, 'Upper': np.nan, 'p-value': np.nan,
+                     'Interaction P': inter_p})
+        for lvl in levels:
+            res = _fit_hr(df[df[var] == lvl])
+            if res:
+                rows.append({'Subgroup': var, 'Level': str(lvl), **res, 'Interaction P': np.nan})
+            else:
+                rows.append({'Subgroup': var, 'Level': str(lvl), 'n': int((df[var] == lvl).sum()),
+                             'Events': np.nan, 'HR': np.nan, 'Lower': np.nan, 'Upper': np.nan,
+                             'p-value': np.nan, 'Interaction P': np.nan})
+
+    if not rows:
+        return None, "No estimable subgroups."
+    return pd.DataFrame(rows), {'reference': str(ref), 'comparison': str(other)}
+
+
+def _interaction_pvalue(df, time_col, event_col, treatment_col, var, ref, other):
+    """Likelihood-ratio test for treatment x subgroup interaction."""
+    d = df[[time_col, event_col, treatment_col, var]].dropna()
+    if d[event_col].sum() < 10 or d[var].nunique() < 2:
+        return np.nan
+    d = d.assign(_tx=(d[treatment_col] == other).astype(float))
+    dummies = pd.get_dummies(d[var], prefix='sg', drop_first=True, dtype=float)
+    base = pd.concat([d[[time_col, event_col, '_tx']], dummies], axis=1)
+    inter = base.copy()
+    for c in dummies.columns:
+        inter[f'{c}_x_tx'] = inter[c] * inter['_tx']
+    import warnings as _w
+    from scipy.stats import chi2
+    with _w.catch_warnings():
+        _w.simplefilter("ignore")
+        try:
+            m_red = CoxPHFitter(); m_red.fit(base, duration_col=time_col, event_col=event_col)
+            m_full = CoxPHFitter(); m_full.fit(inter, duration_col=time_col, event_col=event_col)
+            ll_red = m_red.log_likelihood_
+            ll_full = m_full.log_likelihood_
+            dof = len([c for c in inter.columns if c.endswith('_x_tx')])
+            stat = 2 * (ll_full - ll_red)
+            if stat < 0 or dof < 1:
+                return np.nan
+            return float(1 - chi2.cdf(stat, dof))
+        except Exception:
+            return np.nan
+
+
 def bootstrap_optimism_c_index(df, time_col, event_col, covariates, n_boot=200, seed=42):
     """Optimism-corrected Harrell's C-index via Harrell's enhanced bootstrap.
 

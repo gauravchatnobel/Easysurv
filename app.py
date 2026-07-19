@@ -2906,6 +2906,74 @@ if df is not None:
             else:
                 st.info("Select at least one covariate variable (e.g., Age, Gender, Mutations) to begin.")
 
+            # ============================================================
+            # SUBGROUP ANALYSIS (FOREST PLOT WITH INTERACTION TESTS)
+            # ============================================================
+            st.divider()
+            st.subheader("🌲 Subgroup Analysis (Forest Plot)")
+            st.write("Estimate a binary treatment/exposure effect **within** subgroups, with an interaction test per subgroup — the standard trial/retrospective forest plot.")
+
+            _sg_opts = [c for c in columns if c not in [time_col, event_col]]
+            _sg_c1, _sg_c2 = st.columns(2)
+            with _sg_c1:
+                _sg_tx = st.selectbox("Treatment / exposure (binary)", _sg_opts, key="sg_tx",
+                                      help="Must have exactly two levels (e.g., MRD+/MRD-, treated/untreated).")
+            with _sg_c2:
+                _sg_ref_opts = sorted(df_clean[_sg_tx].dropna().unique()) if _sg_tx else []
+                _sg_ref = st.selectbox("Reference level", [str(v) for v in _sg_ref_opts], key="sg_ref") if _sg_ref_opts else None
+            _sg_vars = st.multiselect("Subgroup variables (categorical)",
+                                      [c for c in _sg_opts if c != _sg_tx], key="sg_vars")
+
+            if st.button("Build Subgroup Forest", key="run_subgroup"):
+                if not _sg_vars:
+                    st.error("Select at least one subgroup variable.")
+                else:
+                    _sg_ref_val = None
+                    for v in _sg_ref_opts:
+                        if str(v) == _sg_ref:
+                            _sg_ref_val = v
+                    _sg_tbl, _sg_meta = statistics.subgroup_hazard_ratios(
+                        df_clean, time_col, event_col, _sg_tx, _sg_vars, treatment_ref=_sg_ref_val)
+                    if _sg_tbl is None:
+                        st.error(f"Subgroup analysis failed: {_sg_meta}")
+                    else:
+                        st.caption(f"Hazard ratio: **{_sg_meta['comparison']}** vs **{_sg_meta['reference']}** "
+                                   "(HR < 1 favours the comparison group). Interaction P tests whether the "
+                                   "effect differs across a subgroup's levels; a small value warns against "
+                                   "over-interpreting individual subgroups.")
+                        # Forest plot
+                        _sg_plot = _sg_tbl.dropna(subset=['HR']).reset_index(drop=True)
+                        if len(_sg_plot):
+                            _fig_sg, _ax_sg = plt.subplots(figsize=(7, 0.5 * len(_sg_plot) + 1.5))
+                            _ylabels, _yi = [], []
+                            for i, r in _sg_plot.iterrows():
+                                y = len(_sg_plot) - i
+                                _yi.append(y)
+                                lbl = "Overall" if r['Subgroup'] == 'Overall' else f"  {r['Subgroup']}={r['Level']}"
+                                _ylabels.append(lbl)
+                                _ax_sg.plot([r['Lower'], r['Upper']], [y, y], color='#0072B5', lw=1.5)
+                                _ax_sg.plot(r['HR'], y, 's', color='#0072B5', ms=6)
+                            _ax_sg.axvline(1.0, color='grey', ls='--', lw=1)
+                            _ax_sg.set_yticks(_yi); _ax_sg.set_yticklabels(_ylabels)
+                            _ax_sg.set_xscale('log')
+                            _ax_sg.set_xlabel("Hazard Ratio (log scale)")
+                            _ax_sg.set_title(f"{_sg_meta['comparison']} vs {_sg_meta['reference']}")
+                            st.pyplot(_fig_sg)
+                            plt.close(_fig_sg)
+                        # Table
+                        _sg_disp = _sg_tbl.copy()
+                        for _c in ('HR', 'Lower', 'Upper'):
+                            _sg_disp[_c] = _sg_disp[_c].apply(lambda v: f"{v:.2f}" if pd.notna(v) else "")
+                        for _c in ('p-value', 'Interaction P'):
+                            _sg_disp[_c] = _sg_disp[_c].apply(
+                                lambda v: format_p_value(v, narrator_style_name, context="table") if pd.notna(v) else "")
+                        for _c in ('n', 'Events'):
+                            _sg_disp[_c] = _sg_disp[_c].apply(lambda v: str(int(v)) if pd.notna(v) else "")
+                        st.dataframe(_sg_disp, hide_index=True, use_container_width=True)
+                        st.download_button("💾 Download Subgroup Table (CSV)",
+                                           _sg_tbl.to_csv(index=False).encode('utf-8'),
+                                           "subgroup_forest.csv", "text/csv", key="dl_subgroup")
+
         if tab_risk is not None:
           with tab_risk:
             st.subheader("Risk System Based on HR")
