@@ -2731,9 +2731,26 @@ if df is not None:
                                         mv_data_encoded[_col] = pd.to_numeric(mv_data_encoded[_col], errors='coerce')
                                 
                                 if _n_split == 0:
-                                    st.warning(f"⚠️ No patients were split. Check that '{_td_time_col}' contains "
-                                              f"**numeric time values** in the same unit as '{time_col}'.")
-                                
+                                    st.error(
+                                        f"🛑 **The time-dependent covariate '{_td_var_name}' could not be placed on the "
+                                        f"survival timeline — 0 patients were split, so the covariate is constant (all 0) "
+                                        f"and the Cox model cannot converge (this is the cause of the 'delta contains nan' error).**"
+                                    )
+                                    st.markdown(
+                                        f"The **Time of Event Column** must hold the event time as a **number on the same scale "
+                                        f"as `{time_col}`** — i.e. *months from the same time-zero as the survival clock* "
+                                        f"(typically months from diagnosis/registration to the event). You selected "
+                                        f"**`{_td_time_col}`**, which contains **calendar dates**, not months-from-baseline, "
+                                        f"so they can't be lined up against `{time_col}`.\n\n"
+                                        f"**How to fix:** add a numeric column such as `Months_to_transplant` = "
+                                        f"(transplant date − diagnosis/registration date) in months, and select **that** as the "
+                                        f"Time of Event Column. Patients who never had the event are left blank — they are simply "
+                                        f"never split and keep the covariate at 0, which is correct.\n\n"
+                                        f"_Note: missing dates for non-transplanted patients are expected and not the problem; "
+                                        f"the issue is that even transplanted patients have no numeric event time to split on._"
+                                    )
+                                    st.stop()
+
                                 st.success(f"✅ Data expanded: {len(mv_data_encoded)} rows "
                                            f"(from {len(mv_df)} patients, {_n_split} split). "
                                            f"Time-dependent covariate: **{_td_var_safe}**")
