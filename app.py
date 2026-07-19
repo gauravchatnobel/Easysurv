@@ -1,4 +1,4 @@
-APP_VERSION = "2.1.3"  # V2.1.3 — exact Gray's test, p-value & reproducibility fixes, pinned deps
+APP_VERSION = "2.2.0"  # V2.2.0 — Table 1, calibration/optimism validation, narrator upgrades, methodology
 
 import streamlit as st
 import pandas as pd
@@ -5829,23 +5829,31 @@ if df is not None:
              *   **Kaplan-Meier Estimator**: Kaplan, E. L., & Meier, P. (1958). Nonparametric estimation from incomplete observations. *Journal of the American statistical association*, 53(282), 457-481.
              *   **Cox Proportional Hazards**: Cox, D. R. (1972). Regression models and life-tables. *Journal of the Royal Statistical Society: Series B (Methodological)*, 34(2), 187-220.
              *   **Log-Rank Test**: Mantel, N. (1966). Evaluation of survival data and two new rank order statistics arising in its consideration. *Cancer Chemotherapy Reports*, 50(3), 163-170.
-             
+             *   **Median Follow-up (reverse KM)**: Schemper, M., & Smith, T. L. (1996). A note on quantifying follow-up in studies of failure time. *Controlled Clinical Trials*, 17(4), 343-346.
+
              #### Competing Risks
              *   **Aalen-Johansen Estimator**: Aalen, O. O., & Johansen, S. (1978). An empirical transition matrix for non-homogeneous Markov chains based on censored observations. *Scandinavian Journal of Statistics*, 141-150.
              *   **Gray's K-sample Test**: Gray, R. J. (1988). A class of K-sample tests for comparing the cumulative incidence of a competing risk. *Annals of Statistics*, 16(3), 1141-1154.
              *   **Fine-Gray Regression**: Fine, J. P., & Gray, R. J. (1999). A proportional hazards model for the subdistribution of a competing risk. *Journal of the American Statistical Association*, 94(446), 496-509.
-                          #### Advanced Methods
+
+             #### Advanced Methods
               *   **Landmark Analysis**: Anderson, J. R., Cain, K. C., & Gelber, R. D. (1983). Analysis of survival by tumor response. *Journal of Clinical Oncology*, 1(11), 710-719.
               *   **RMST**: Uno, H., Claggett, B., Tian, L., Inoue, E., Gallo, P., Miyata, T., ... & Wei, L. J. (2014). Moving beyond the hazard ratio in quantifying the between-group difference in survival analysis. *Journal of Clinical Oncology*, 32(22), 2380-2385.
               *   **survRM2**: Uno, H., Tian, L., Cronin, A., Battioui, C., & Horiguchi, M. (2020). survRM2: Comparing Restricted Mean Survival Time. R package.
               *   **RMTL (Competing Risks)**: Andersen, P. K. (2013). Decomposition of number of life years lost according to causes of death. *Statistics in Medicine*, 32(30), 5278-5285.
               *   **RMTL Inference**: Zhao, L., et al. (2016). Utilizing the integrated difference of two survival functions. *Clinical Trials*, 9(5), 570-577.
               
-              #### Diagnostic Accuracy
+              #### Diagnostic Accuracy & Prognostic Model Validation
               *   **Wilson Score Interval**: Wilson, E. B. (1927). *JASA*, 22(158), 209-212.
               *   **Harrell's C-Index**: Harrell Jr, F. E., et al. (1996). *Statistics in Medicine*, 15(4), 361-387.
               *   **C-Index for Competing Risks**: Wolbers, M., et al. (2014). Concordance for prognostic models with competing risks. *Biostatistics*, 15(3), 526-539.
-              
+              *   **Optimism correction (bootstrap)**: Harrell, F. E. (2015). *Regression Modeling Strategies*, 2nd ed. Springer. Steyerberg, E. W. (2009). *Clinical Prediction Models*. Springer.
+              *   **Reporting standard (TRIPOD)**: Collins, G. S., et al. (2015). Transparent reporting of a multivariable prediction model (TRIPOD). *Annals of Internal Medicine*, 162(1), 55-63.
+
+              #### Descriptive Statistics & Multiplicity
+              *   **Baseline table conventions**: Cohort summary as median [IQR] / n (%) with Mann-Whitney/Kruskal-Wallis and χ²/Fisher tests (cf. R `tableone`).
+              *   **False Discovery Rate**: Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate. *JRSS: Series B*, 57(1), 289-300.
+
               ---
               
               ### 🔬 Methodology Notes
@@ -5888,6 +5896,28 @@ if df is not None:
               
               **Gray's K-sample test** (Gray, 1988) is used for group comparisons. **Fine-Gray SHRs** (Fine & Gray, 1999) are estimated via IPCW-weighted Cox in counting-process format.
               
+              #### Baseline Characteristics (Table 1)
+              Continuous variables are summarised as **median [Q1–Q3]** (robust to the skewed distributions typical of clinical data) or optionally mean (SD); categorical variables as **n (%)**. Between-group tests are **Mann-Whitney U** (2 groups) / **Kruskal-Wallis** (>2) for continuous, and **Pearson χ²** — with **Fisher's exact** for small 2×2 tables — for categorical. P-values are unadjusted and intended as descriptive flags, not confirmatory tests.
+
+              #### Median Follow-up
+              Reported using the **reverse Kaplan-Meier** estimator (Schemper & Smith, 1996), in which censoring is treated as the event. This is the standard, unbiased way to summarise follow-up duration and is preferred over the naive median of observed times.
+
+              #### Multiple-comparison Adjustment
+              For pairwise comparisons (log-rank, Fine-Gray, RMST, RMTL) an optional **Benjamini-Hochberg (FDR)** or **Bonferroni** adjustment is offered; the implementation matches R's `p.adjust()`. Where no adjustment is applied the output is explicitly labelled *unadjusted*.
+
+              #### Internal Validation & Calibration (Prognostic Models)
+              Model discrimination on the training data (**apparent** C-index) is optimistically biased. EasySurv reports an **optimism-corrected C-index** using **Harrell's enhanced bootstrap**: for each of *B* bootstrap resamples the model is refit and the drop in C between the bootstrap sample and the original data estimates the optimism, which is subtracted from the apparent value. A **calibration plot** at a user-chosen horizon compares model-predicted survival against the Kaplan-Meier–observed survival across risk strata. Reporting **both** discrimination and calibration is required by TRIPOD; the corrected C-index is the honest estimate of out-of-sample performance.
+
+              ---
+
+              ### ⚠️ Assumptions, Caveats & Good Practice
+              *   **Proportional hazards**: Cox HRs assume the hazard ratio is constant over time. Assess with scaled Schoenfeld residuals (a global test is provided); if violated, prefer RMST or time-stratified/period-specific estimates. *EasySurv deliberately leaves the PH judgement to the analyst.*
+              *   **Data-driven cut-points**: optimal biomarker thresholds (Cutoff Finder, ROC/Youden) are selected from the same data used to test them, which **inflates significance**. Treat these as exploratory and validate on an independent cohort — the app flags this wherever it occurs.
+              *   **Multiplicity**: with many groups or many candidate variables, some "significant" findings are expected by chance. Use the adjustment options and disclose them.
+              *   **Missing data**: analyses are **complete-case** (rows with missing values in the selected variables are dropped, with the count shown). This can bias estimates if data are not missing completely at random; multiple imputation is preferable when missingness is substantial.
+              *   **Sample size / EPV**: aim for ≥10 events per variable in multivariable models. The Statistical Guardrails panel flags low EPV, collinearity (VIF), and separation.
+              *   **Reproducibility**: all stochastic procedures (Aalen-Johansen tie-handling, bootstraps) use a fixed seed, and the dependency stack is version-pinned, so results are reproducible across runs. Report the software versions listed above.
+
               #### Implementation Equivalence with R
               | EasySurv Component | R Equivalent | Variance Method |
               |---|---|---|
@@ -5895,15 +5925,27 @@ if df is not None:
               | **RMTL (CIF)** | **`cmprsk::cuminc()` + trapezoidal** | **Bootstrap (n=500, seed=42)** |
               | **Cause-Specific C-Index** | **`concordance(coxph(...))`** | **Bootstrap (n=50)** |
               | Aalen-Johansen CIF | `cmprsk::cuminc()` | — |
-              | Gray's test | `cmprsk::cuminc()$Tests` | Analytical |
-              | Fine-Gray SHR | `cmprsk::crr()` | Model-based (Hessian) |
-              | Multivariable Fine-Gray | `cmprsk::crr()` with design matrix | Model-based |
+              | **Gray's test** | **`cmprsk::cuminc()$Tests`** | **Exact port of cmprsk `crst.f` — matches to numerical precision** |
+              | Fine-Gray SHR | `cmprsk::crr()` | Cluster-robust sandwich (clustered on subject id) |
+              | Multivariable Fine-Gray | `cmprsk::crr()` with design matrix | Cluster-robust sandwich |
               | Cause-Specific Cox | `survival::coxph()` | Model-based |
               | TD Covariate | `survival::tmerge()` + `coxph()` | Model-based |
+              | Baseline table (Table 1) | `tableone::CreateTableOne()` | Mann-Whitney/Kruskal, χ²/Fisher |
+              | Optimism-corrected C | `rms::validate(..., B=)` | Harrell enhanced bootstrap |
+
+              > **Gray's test note**: EasySurv's Gray test is a direct translation of Robert Gray's
+              > Fortran `crst` routine from the `cmprsk` package, validated to agree with
+              > `cmprsk::cuminc()$Tests` to 6–7 decimal places across 2–4 groups and both event
+              > types. Earlier versions used an IPCW-weighted approximation; this is now exact.
+
+              > **Fine-Gray variance note**: subdistribution-hazard SEs use the **cluster-robust
+              > (sandwich) estimator clustered on subject id**, which is the correct variance for
+              > the IPCW-expanded (counting-process) dataset. The naive model-based Hessian would be
+              > anticonservative because it treats each subject's pseudo-observations as independent.
               
               ### 📝 How to Cite EasySurv
               If you use this tool for your research, please cite it as:
-              > **EasySurv: An Interactive Platform for Survival Analysis (v2.1.3)**. Powered by Lifelines & Streamlit. Available at: [https://easysurv.streamlit.app](https://easysurv.streamlit.app)
+              > **EasySurv: An Interactive Platform for Survival Analysis (v2.2.0)**. Powered by Lifelines & Streamlit. Available at: [https://easysurv.streamlit.app](https://easysurv.streamlit.app)
               """)
 
 else:
