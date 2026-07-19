@@ -16,11 +16,11 @@ except ImportError:
 
 # --- MODULE IMPORTS ---
 try:
-    from survival_analysis.modules import utils, statistics, plotting, narrator, tableone
+    from survival_analysis.modules import utils, statistics, plotting, narrator, tableone, session_bank
     from survival_analysis.modules.validation import validate_dataset, format_validation_report
     from survival_analysis.modules.session_manager import save_session, load_session, get_session_filename, SIDEBAR_CONFIG_KEYS
 except ImportError:
-    from modules import utils, statistics, plotting, narrator, tableone
+    from modules import utils, statistics, plotting, narrator, tableone, session_bank
     from modules.validation import validate_dataset, format_validation_report
     from modules.session_manager import save_session, load_session, get_session_filename, SIDEBAR_CONFIG_KEYS
 
@@ -49,6 +49,30 @@ def _detect_categorical(df, covariates, max_unique=10):
             df[c] = df[c].apply(lambda v: str(int(v)) if pd.notna(v) and isinstance(v, float) and v == int(v) else str(v) if pd.notna(v) else v)
             cat_cols.append(c)
     return cat_cols
+
+
+def _pin_analysis(entry_type, label, fig=None, title="", tables=None, narrative=None, meta=None):
+    """Append a fully-serializable analysis to the session bank.
+
+    Stores a base64 PNG of the figure, base64-gzipped tables, the narrator text
+    and metadata — never live objects — so the bank survives reruns, saved
+    sessions, and sharing. Returns the display label actually used (deduplicated).
+    """
+    import datetime as _dt
+    if 'analysis_bank' not in st.session_state:
+        st.session_state.analysis_bank = []
+    _existing = {e.get('label') for e in st.session_state.analysis_bank}
+    _label = label
+    _i = 2
+    while _label in _existing:
+        _label = f"{label} ({_i})"
+        _i += 1
+    _meta = dict(meta or {})
+    _meta.setdefault('pinned_at', _dt.datetime.now().strftime("%Y-%m-%d %H:%M"))
+    entry = session_bank.make_entry(entry_type, _label, fig=fig, title=title,
+                                    tables=tables, narrative=narrative, meta=_meta)
+    st.session_state.analysis_bank.append(entry)
+    return _label
 
 
 st.set_page_config(page_title="EasySurv", layout="wide")
@@ -1093,23 +1117,24 @@ if df is not None:
             mv_df_report = st.session_state['mv_summary_df']
             mv_table_html = "<h3>Multivariable Cox Results</h3>" + mv_df_report.to_html(float_format="%.3f")
 
-        # 4b. Banked (pinned) analyses
+        # 4b. Banked (pinned) analyses — read from the serialized session bank
         banked_html = ""
         _bank = st.session_state.get('analysis_bank', [])
         if _bank:
-            banked_html = '<div class="section"><h2>📌 Pinned Analyses</h2>'
+            banked_html = '<div class="section"><h2>📌 Session Analyses</h2>'
             for i, entry in enumerate(_bank):
                 banked_html += f'<h3>{i+1}. {entry["label"]}</h3>'
-                banked_html += f'<p>Endpoint: {entry.get("endpoint", "N/A")} | Group: {entry.get("group_col", "N/A")} | n={entry.get("n_patients", "N/A")}</p>'
-                try:
-                    banked_html += f'<img src="data:image/png;base64,{fig_to_base64(entry["fig"])}" style="width:100%">'
-                except Exception:
-                    banked_html += '<p><em>Figure could not be rendered.</em></p>'
-                # Include Cox/FG table if available
-                if entry.get('cox_summary') is not None:
-                    banked_html += '<h4>Cox Results</h4>' + entry['cox_summary'].to_html(float_format="%.3f")
-                if entry.get('fg_summary') is not None:
-                    banked_html += '<h4>Fine-Gray Results</h4>' + entry['fg_summary'].to_html(float_format="%.3f")
+                _m = entry.get('meta', {})
+                _meta_bits = [f'{k.replace("_", " ").title()}: {_m[k]}'
+                              for k in ('endpoint', 'group_col', 'n_patients') if _m.get(k) not in (None, '')]
+                if _meta_bits:
+                    banked_html += f'<p>{" | ".join(str(b) for b in _meta_bits)}</p>'
+                if entry.get('png'):
+                    banked_html += f'<img src="data:image/png;base64,{entry["png"]}" style="width:100%">'
+                for _tname, _tdf in session_bank.entry_tables(entry):
+                    banked_html += f'<h4>{_tname}</h4>' + _tdf.to_html(float_format="%.3f")
+                if entry.get('narrative'):
+                    banked_html += f'<h4>AI Narrative</h4><pre style="white-space:pre-wrap">{entry["narrative"]}</pre>'
             banked_html += '</div>'
 
         # 5. Software versions
@@ -1305,7 +1330,7 @@ if df is not None:
                 "Kaplan-Meier",
                 "Cox Regression",
                 "Competing Risks",
-                "Composite Figure",
+                "Session & Composite",
                 "Methodology",
             ])
             # Create dummy variables for hidden tabs so code doesn't break
@@ -1320,7 +1345,7 @@ if df is not None:
                 "Cox Regression",
                 "Risk Scoring",
                 "Competing Risks",
-                "Composite Figure",
+                "Session & Composite",
                 "Biomarker Threshold",
                 "Variable Builder",
                 "Correlations",
@@ -1526,19 +1551,18 @@ if df is not None:
                     _pin_label = f"KM: {main_title}"
                     if st.button("📌 Pin to Session", key="pin_km_grouped", help="Save this analysis to the session bank. You can then switch endpoints and pin more analyses."):
                         _cox_df = st.session_state.get('uv_cox_summary', None)
-                        st.session_state.analysis_bank.append({
-                            'type': 'KM',
-                            'label': _pin_label,
-                            'title': main_title,
-                            'fig': fig,
-                            'cox_summary': _cox_df.copy() if _cox_df is not None else None,
-                            'endpoint': narrator_event_name,
-                            'group_col': group_col,
-                            'time_col': time_col,
-                            'event_col': event_col,
-                            'n_patients': len(df_clean),
-                        })
-                        st.success(f"📌 Pinned: **{_pin_label}**")
+                        _km_tables = {'Cox (univariable)': _cox_df}
+                        if 'km_median_data' in st.session_state:
+                            _km_tables['Median survival'] = pd.DataFrame(st.session_state['km_median_data'])
+                        _used = _pin_analysis(
+                            'KM', _pin_label, fig=fig, title=main_title,
+                            tables=_km_tables,
+                            narrative=st.session_state.get('last_km_narrative'),
+                            meta={'endpoint': narrator_event_name, 'group_col': group_col,
+                                  'time_col': time_col, 'event_col': event_col,
+                                  'n_patients': len(df_clean)},
+                        )
+                        st.success(f"📌 Pinned: **{_used}**")
 
 
                 # At-Risk Counts Table (downloadable)
@@ -1790,6 +1814,7 @@ if df is not None:
                     })
                 
                 median_df = pd.DataFrame(median_data)
+                st.session_state['km_median_data'] = median_data
                 st.table(median_df.style.format())
                 
                 # Download Median Table
@@ -2104,6 +2129,7 @@ if df is not None:
                         median_followup=statistics.median_followup(df_clean[time_col], df_clean[event_col]),
                     )
                     st.success("Summary Generated (click the copy icon to copy):")
+                    st.session_state['last_km_narrative'] = summary
                     st.code(summary, language=None)
 
             else:
@@ -2216,19 +2242,14 @@ if df is not None:
                 with col4:
                     _pin_label = f"KM: {main_title}"
                     if st.button("📌 Pin to Session", key="pin_km_single", help="Save this analysis to the session bank."):
-                        st.session_state.analysis_bank.append({
-                            'type': 'KM',
-                            'label': _pin_label,
-                            'title': main_title,
-                            'fig': fig,
-                            'cox_summary': None,
-                            'endpoint': narrator_event_name,
-                            'group_col': 'All Patients',
-                            'time_col': time_col,
-                            'event_col': event_col,
-                            'n_patients': len(df_clean),
-                        })
-                        st.success(f"📌 Pinned: **{_pin_label}**")
+                        _used = _pin_analysis(
+                            'KM', _pin_label, fig=fig, title=main_title,
+                            narrative=st.session_state.get('last_km_narrative'),
+                            meta={'endpoint': narrator_event_name, 'group_col': 'All Patients',
+                                  'time_col': time_col, 'event_col': event_col,
+                                  'n_patients': len(df_clean)},
+                        )
+                        st.success(f"📌 Pinned: **{_used}**")
 
 
         with tab2:
@@ -3707,19 +3728,16 @@ if df is not None:
                 with col4:
                     _pin_cif_label = f"CIF: {cif_title}"
                     if st.button("📌 Pin to Session", key="pin_cif", help="Save this CIF analysis to the session bank."):
-                        st.session_state.analysis_bank.append({
-                            'type': 'CIF',
-                            'label': _pin_cif_label,
-                            'title': cif_title,
-                            'fig': fig_cif,
-                            'fg_summary': fg_summary.copy() if fg_summary is not None else None,
-                            'endpoint': narrator_event_name,
-                            'group_col': group_col if group_col != 'None' else 'All',
-                            'time_col': time_col,
-                            'event_col': event_col,
-                            'n_patients': len(cif_df),
-                        })
-                        st.success(f"📌 Pinned: **{_pin_cif_label}**")
+                        _used = _pin_analysis(
+                            'CIF', _pin_cif_label, fig=fig_cif, title=cif_title,
+                            tables={'Fine-Gray (SHR)': fg_summary},
+                            narrative=st.session_state.get('last_cif_narrative'),
+                            meta={'endpoint': narrator_event_name,
+                                  'group_col': group_col if group_col != 'None' else 'All',
+                                  'time_col': time_col, 'event_col': event_col,
+                                  'n_patients': len(cif_df)},
+                        )
+                        st.success(f"📌 Pinned: **{_used}**")
                 
                 # Display Fine-Gray Table
                 if fg_summary is not None:
@@ -4764,48 +4782,108 @@ if df is not None:
                              if cif_df is not None else None),
                      )
                      st.success("Summary Generated (click the copy icon to copy):")
+                     st.session_state['last_cif_narrative'] = cif_narrative
                      st.code(cif_narrative, language=None)
 
     # --- COMPOSITE FIGURE TAB ---
     if 'tab_composite' in locals():
         with tab_composite:
-            st.header("Composite Figure")
-            st.write("Combine 2-3 plots from your analysis into a single publication-ready panel figure (e.g. Figure 1A, 1B, 1C).")
+            st.header("Session & Composite")
+            st.write("Your **session gallery** — every analysis you pin accumulates here (KM, CIF, Cox, Fine-Gray, RMTL, Table 1), "
+                     "survives saving/sharing, and can be arranged into a **publication-ready composite panel figure** (Figure 1A, 1B, 1C).")
 
             # Collect available plots from BOTH current session AND analysis bank
+            # Values are tagged ('png', base64) for banked entries or ('fig', figure)
+            # for the live current-session plots; _build_composite handles both.
             _available_plots = {}
-            
-            # 1. Pinned analyses from the bank (accumulated across endpoint changes)
+
+            # 1. Pinned analyses from the bank (accumulated across endpoint changes).
+            #    Only entries that actually carry a figure can be composited.
             for i, entry in enumerate(st.session_state.get('analysis_bank', [])):
+                if not entry.get('png'):
+                    continue
                 _key = f"📌 {entry['label']}"
-                # Deduplicate keys if same title pinned multiple times
                 if _key in _available_plots:
                     _key = f"{_key} ({i+1})"
-                _available_plots[_key] = entry['fig']
-            
+                _available_plots[_key] = ('png', entry['png'])
+
             # 2. Current (unpinned) plots from the active analysis
             if 'report_fig_km' in st.session_state:
                 _km_title = st.session_state.get('composite_km_title', 'Kaplan-Meier')
-                _available_plots[f"KM (current): {_km_title}"] = st.session_state['report_fig_km']
+                _available_plots[f"KM (current): {_km_title}"] = ('fig', st.session_state['report_fig_km'])
             if 'report_fig_cif' in st.session_state:
                 _cif_title = st.session_state.get('composite_cif_title', 'Cumulative Incidence')
-                _available_plots[f"CIF (current): {_cif_title}"] = st.session_state['report_fig_cif']
+                _available_plots[f"CIF (current): {_cif_title}"] = ('fig', st.session_state['report_fig_cif'])
             if 'report_fig_forest' in st.session_state:
-                _available_plots["Forest Plot (current)"] = st.session_state['report_fig_forest']
+                _available_plots["Forest Plot (current)"] = ('fig', st.session_state['report_fig_forest'])
 
-            # Show pinned analyses summary
+            # ============================================================
+            # SESSION GALLERY — every pinned analysis, in order
+            # ============================================================
             _bank = st.session_state.get('analysis_bank', [])
-            if _bank:
-                with st.expander(f"📌 Pinned Analyses ({len(_bank)} saved)", expanded=False):
-                    for i, entry in enumerate(_bank):
-                        c1, c2 = st.columns([4, 1])
-                        with c1:
-                            st.write(f"**{i+1}.** {entry['label']} — {entry.get('endpoint', '?')} | n={entry.get('n_patients', '?')}")
-                        with c2:
-                            if st.button("🗑️", key=f"del_bank_{i}", help="Remove this analysis"):
-                                st.session_state.analysis_bank.pop(i)
-                                st.rerun()
-            
+            st.subheader(f"📚 Session Analyses ({len(_bank)})")
+            if not _bank:
+                st.info("No analyses pinned yet. Use **📌 Pin to Session** in the Kaplan-Meier, "
+                        "Competing Risks, Cox Regression, or Correlations (Table 1) tabs to build a "
+                        "session you can **save, resume, and share** — pinned analyses travel with the "
+                        "saved-session file.")
+            else:
+                st.caption("Reorder, rename, review, or remove analyses below. Everything here is stored "
+                           "in the saved session and is visible to anyone you share the file with.")
+                for i, entry in enumerate(_bank):
+                    with st.container(border=True):
+                        _gc1, _gc2 = st.columns([1, 3])
+                        with _gc1:
+                            if entry.get('png'):
+                                st.image(session_bank.png_b64_to_bytes(entry['png']), width=210)
+                            else:
+                                st.markdown(f"#### 📄 {entry.get('type', 'Analysis')}")
+                        with _gc2:
+                            st.markdown(f"**{i+1}. {entry['label']}** · _{entry.get('type', '')}_")
+                            _m = entry.get('meta', {})
+                            _bits = [f"{k} = {_m[k]}" for k in ('endpoint', 'group_col', 'n_patients')
+                                     if _m.get(k) not in (None, '')]
+                            if _m.get('pinned_at'):
+                                _bits.append(_m['pinned_at'])
+                            if _bits:
+                                st.caption(" | ".join(str(b) for b in _bits))
+
+                            _b1, _b2, _b3 = st.columns([1, 1, 1])
+                            with _b1:
+                                if st.button("⬆ Up", key=f"bank_up_{i}", disabled=(i == 0), use_container_width=True):
+                                    _bank[i - 1], _bank[i] = _bank[i], _bank[i - 1]
+                                    st.rerun()
+                            with _b2:
+                                if st.button("⬇ Down", key=f"bank_down_{i}", disabled=(i == len(_bank) - 1), use_container_width=True):
+                                    _bank[i + 1], _bank[i] = _bank[i], _bank[i + 1]
+                                    st.rerun()
+                            with _b3:
+                                if st.button("🗑 Remove", key=f"del_bank_{i}", use_container_width=True):
+                                    st.session_state.analysis_bank.pop(i)
+                                    st.rerun()
+
+                            _new_label = st.text_input("Rename", value=entry['label'],
+                                                       key=f"bank_rename_{i}", label_visibility="collapsed")
+                            if _new_label and _new_label != entry['label']:
+                                entry['label'] = _new_label
+
+                            _etables = list(session_bank.entry_tables(entry))
+                            if _etables or entry.get('narrative'):
+                                with st.expander("Tables & AI narrative"):
+                                    for _tname, _tdf in _etables:
+                                        st.markdown(f"**{_tname}**")
+                                        st.dataframe(_tdf, use_container_width=True)
+                                    if entry.get('narrative'):
+                                        st.markdown("**AI narrative**")
+                                        st.code(entry['narrative'], language=None)
+
+                if st.button("🗑️ Clear all pinned analyses", key="clear_bank"):
+                    st.session_state.analysis_bank = []
+                    st.rerun()
+
+            st.divider()
+            st.subheader("🖼️ Composite Panel Figure")
+
             if len(_available_plots) < 2:
                 st.info("📌 **Pin at least 2 analyses** to create a composite figure. Use the 📌 Pin to Session button in the KM or CIF tabs after generating each analysis. Currently available: " + (", ".join(_available_plots.keys()) if _available_plots else "none"))
             else:
@@ -4845,15 +4923,19 @@ if df is not None:
                     if st.button("Generate Composite Figure", type="primary"):
 
                         def _build_composite(source_dpi):
-                            """Build composite figure from source figures rendered at given DPI."""
+                            """Build composite figure from source panels (live figures or stored PNGs)."""
                             _panel_imgs = []
                             for key in selected_panels:
-                                src_fig = _available_plots[key]
-                                _buf = io.BytesIO()
-                                src_fig.savefig(_buf, format='png', dpi=source_dpi, bbox_inches='tight',
-                                                facecolor=src_fig.get_facecolor(), edgecolor='none')
-                                _buf.seek(0)
-                                _panel_imgs.append(plt.imread(_buf))
+                                _kind, _val = _available_plots[key]
+                                if _kind == 'png':
+                                    # Banked panel: decode the stored PNG bytes directly.
+                                    _panel_imgs.append(plt.imread(io.BytesIO(session_bank.png_b64_to_bytes(_val))))
+                                else:
+                                    _buf = io.BytesIO()
+                                    _val.savefig(_buf, format='png', dpi=source_dpi, bbox_inches='tight',
+                                                 facecolor=_val.get_facecolor(), edgecolor='none')
+                                    _buf.seek(0)
+                                    _panel_imgs.append(plt.imread(_buf))
 
                             is_t = (n == 3 and "T-shape" in layout)
 
