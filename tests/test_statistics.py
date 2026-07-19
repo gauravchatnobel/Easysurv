@@ -31,7 +31,54 @@ from modules.statistics import (
     sanitize_columns,
     encode_with_reference,
     median_followup,
+    bootstrap_optimism_c_index,
+    compute_calibration,
 )
+
+
+class TestOptimismCorrectedCIndex:
+    def _data(self, n=250, signal=True):
+        rng = np.random.RandomState(1)
+        x = rng.normal(0, 1, n)
+        risk = x if signal else rng.normal(0, 1, n)
+        time = np.clip(20 * np.exp(-0.6 * risk) + rng.normal(0, 1, n), 0.1, None)
+        event = rng.binomial(1, 0.7, n)
+        return pd.DataFrame({"T": time, "E": event, "X": x})
+
+    def test_corrected_below_apparent(self):
+        r = bootstrap_optimism_c_index(self._data(), "T", "E", ["X"], n_boot=50)
+        assert r is not None
+        assert r["optimism"] >= -0.02          # optimism is (near) non-negative
+        assert r["corrected"] <= r["apparent"] + 1e-9
+        assert 0.5 < r["apparent"] <= 1.0
+
+    def test_signal_beats_noise(self):
+        sig = bootstrap_optimism_c_index(self._data(signal=True), "T", "E", ["X"], n_boot=50)
+        assert sig["corrected"] > 0.55
+
+    def test_too_small_returns_none(self):
+        tiny = self._data(n=10)
+        assert bootstrap_optimism_c_index(tiny, "T", "E", ["X"], n_boot=20) is None
+
+
+class TestCalibration:
+    def test_wellspecified_calibrates(self):
+        rng = np.random.RandomState(2)
+        n = 400
+        x = rng.normal(0, 1, n)
+        time = np.clip(30 * np.exp(-0.5 * x) + rng.normal(0, 2, n), 0.1, None)
+        event = rng.binomial(1, 0.8, n)
+        df = pd.DataFrame({"T": time, "E": event, "X": x})
+        cal, meta = compute_calibration(df, "T", "E", ["X"], horizon=15, n_bins=4)
+        assert cal is not None and len(cal) == 4
+        # predicted and observed should be broadly monotonic & close on average
+        diffs = (cal["Mean Predicted"] - cal["Observed (KM)"]).abs()
+        assert diffs.mean() < 0.15
+
+    def test_insufficient_data(self):
+        df = pd.DataFrame({"T": [1, 2, 3], "E": [1, 0, 1], "X": [0.1, 0.2, 0.3]})
+        cal, reason = compute_calibration(df, "T", "E", ["X"], horizon=2, n_bins=5)
+        assert cal is None
 
 
 class TestMedianFollowup:

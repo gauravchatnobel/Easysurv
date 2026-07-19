@@ -5726,6 +5726,65 @@ if df is not None:
                             st.success("Report Generated (click the copy icon to copy):")
                             st.code(narrative, language=None)
 
+                 # ------------------------------------------------------------
+                 # Internal validation & calibration (single Cox model)
+                 # ------------------------------------------------------------
+                 st.divider()
+                 st.markdown("#### 🎯 Internal Validation & Calibration")
+                 st.caption("Optimism-corrected discrimination (Harrell's enhanced bootstrap) plus a calibration "
+                            "plot at a chosen horizon — the discrimination-and-calibration pair reviewers expect (TRIPOD). "
+                            "Apparent performance on the training data is optimistic; the corrected value is the honest estimate.")
+                 _val_vars = st.multiselect(
+                     "Model covariates", [c for c in columns if c not in [time_col, event_col]], key="val_vars")
+                 _vc1, _vc2 = st.columns(2)
+                 with _vc1:
+                     _val_nboot = st.slider("Bootstrap resamples (optimism)", 50, 500, 200, 50, key="val_nboot")
+                 with _vc2:
+                     _tmax = float(pd.to_numeric(df_clean[time_col], errors='coerce').max())
+                     _val_horizon = st.slider("Calibration horizon (time)", 0.0, round(_tmax, 1),
+                                              round(min(_tmax * 0.5, _tmax), 1), key="val_horizon")
+                 if st.button("Run Internal Validation", key="run_val"):
+                     if not _val_vars:
+                         st.error("Select at least one covariate.")
+                     else:
+                         with st.spinner(f"Bootstrapping optimism ({_val_nboot} resamples)..."):
+                             _opt = statistics.bootstrap_optimism_c_index(
+                                 df_clean, time_col, event_col, _val_vars, n_boot=_val_nboot)
+                         if _opt is None:
+                             st.error("Could not compute the optimism-corrected C-index (too few events, or a covariate with no variation).")
+                         else:
+                             _vm1, _vm2, _vm3 = st.columns(3)
+                             _vm1.metric("Apparent C-index", f"{_opt['apparent']:.3f}")
+                             _vm2.metric("Optimism", f"{_opt['optimism']:.3f}")
+                             _vm3.metric("Optimism-corrected C-index", f"{_opt['corrected']:.3f}")
+                             st.caption(f"Harrell's enhanced bootstrap, {_opt['n_boot_used']} resamples. "
+                                        "Report the optimism-corrected C-index as the model's expected out-of-sample discrimination.")
+
+                         _cal, _cal_meta = statistics.compute_calibration(
+                             df_clean, time_col, event_col, _val_vars, _val_horizon)
+                         if _cal is None:
+                             st.warning(f"Calibration plot not available: {_cal_meta}")
+                         else:
+                             _figcal, _axcal = plt.subplots(figsize=(5, 5))
+                             _axcal.plot([0, 1], [0, 1], '--', color='grey', label='Perfect calibration')
+                             _yl = (_cal['Observed (KM)'] - _cal['Obs Lower']).clip(lower=0)
+                             _yu = (_cal['Obs Upper'] - _cal['Observed (KM)']).clip(lower=0)
+                             _axcal.errorbar(_cal['Mean Predicted'], _cal['Observed (KM)'],
+                                             yerr=[_yl, _yu], fmt='o-', capsize=3, color='#0072B5', label='Model')
+                             _axcal.set_xlabel(f"Predicted survival at t = {_val_horizon:.0f}")
+                             _axcal.set_ylabel("Observed survival (Kaplan-Meier)")
+                             _axcal.set_xlim(0, 1); _axcal.set_ylim(0, 1)
+                             _axcal.set_title("Calibration at fixed horizon")
+                             _axcal.legend(loc='lower right', fontsize=8)
+                             st.pyplot(_figcal)
+                             plt.close(_figcal)
+                             st.dataframe(
+                                 _cal.style.format({'Mean Predicted': '{:.3f}', 'Observed (KM)': '{:.3f}',
+                                                    'Obs Lower': '{:.3f}', 'Obs Upper': '{:.3f}'}),
+                                 hide_index=True, use_container_width=True)
+                             st.caption("Points on the diagonal indicate good calibration; systematic deviation "
+                                        "indicates over- or under-prediction of survival at this horizon.")
+
          with tab8:
              st.subheader("📚 Reproducibility & Citations")
              

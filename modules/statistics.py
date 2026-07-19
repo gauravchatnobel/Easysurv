@@ -64,6 +64,138 @@ def encode_with_reference(df, cat_cols, refs, dtype=float):
     return out, dummy_cols
 
 
+def bootstrap_optimism_c_index(df, time_col, event_col, covariates, n_boot=200, seed=42):
+    """Optimism-corrected Harrell's C-index via Harrell's enhanced bootstrap.
+
+    apparent  = C of the model fit on the full data, evaluated on the full data.
+    optimism  = mean over bootstrap samples of (C on the bootstrap sample
+                − C of the same bootstrap model on the original data).
+    corrected = apparent − optimism.
+
+    Returns dict: {'apparent', 'optimism', 'corrected', 'n_boot_used'} or None.
+    Ref: Harrell FE. Regression Modeling Strategies (2015); Steyerberg (2009).
+    """
+    from lifelines.utils import concordance_index
+
+    d = df[[time_col, event_col] + covariates].dropna()
+    d_enc = pd.get_dummies(d, drop_first=True, dtype=float)
+    d_enc.columns = [sanitize_name(c) for c in d_enc.columns]
+    t_col = sanitize_name(time_col)
+    e_col = sanitize_name(event_col)
+    feat = [c for c in d_enc.columns if c not in (t_col, e_col)]
+    if len(d_enc) < 20 or not feat:
+        return None
+
+    def _c_on(model, data):
+        # Higher predicted survival should rank with longer times -> negate partial hazard
+        risk = model.predict_partial_hazard(data)
+        return concordance_index(data[t_col], -risk, data[e_col])
+
+    import warnings as _w
+    with _w.catch_warnings():
+        _w.simplefilter("ignore")
+        try:
+            cph = CoxPHFitter()
+            cph.fit(d_enc, duration_col=t_col, event_col=e_col)
+            apparent = _c_on(cph, d_enc)
+        except Exception:
+            return None
+
+        rng = np.random.RandomState(seed)
+        optimisms = []
+        n = len(d_enc)
+        for _ in range(n_boot):
+            idx = rng.randint(0, n, n)
+            boot = d_enc.iloc[idx]
+            try:
+                cph_b = CoxPHFitter()
+                cph_b.fit(boot, duration_col=t_col, event_col=e_col)
+                c_boot = _c_on(cph_b, boot)
+                c_orig = _c_on(cph_b, d_enc)
+                optimisms.append(c_boot - c_orig)
+            except Exception:
+                continue
+
+    if len(optimisms) < max(10, n_boot // 4):
+        return None
+    optimism = float(np.mean(optimisms))
+    return {
+        'apparent': float(apparent),
+        'optimism': optimism,
+        'corrected': float(apparent - optimism),
+        'n_boot_used': len(optimisms),
+    }
+
+
+def compute_calibration(df, time_col, event_col, covariates, horizon, n_bins=5, seed=42):
+    """Calibration of a Cox model at a fixed time horizon.
+
+    Patients are grouped by predicted survival at `horizon` into `n_bins`
+    quantile bins. For each bin the mean predicted survival is compared with
+    the Kaplan-Meier observed survival at `horizon` (with a 95% CI).
+
+    Returns (calibration_df, meta) or (None, reason).
+    calibration_df columns: Bin, n, Mean Predicted, Observed (KM), Obs Lower, Obs Upper.
+    """
+    d = df[[time_col, event_col] + covariates].dropna()
+    d_enc = pd.get_dummies(d, drop_first=True, dtype=float)
+    d_enc.columns = [sanitize_name(c) for c in d_enc.columns]
+    t_col = sanitize_name(time_col)
+    e_col = sanitize_name(event_col)
+    feat = [c for c in d_enc.columns if c not in (t_col, e_col)]
+    if len(d_enc) < 4 * n_bins or not feat:
+        return None, "Not enough data for the requested number of bins."
+
+    import warnings as _w
+    with _w.catch_warnings():
+        _w.simplefilter("ignore")
+        try:
+            cph = CoxPHFitter()
+            cph.fit(d_enc, duration_col=t_col, event_col=e_col)
+            surv = cph.predict_survival_function(d_enc, times=[horizon])
+            pred = np.asarray(surv.iloc[0].values, dtype=float)  # S(horizon) per patient
+        except Exception as e:
+            return None, str(e)
+
+    work = d_enc[[t_col, e_col]].copy()
+    work['pred'] = pred
+    # Quantile bins on predicted survival (unique edges to avoid empty bins)
+    try:
+        work['bin'] = pd.qcut(work['pred'].rank(method='first'), n_bins, labels=False)
+    except Exception:
+        return None, "Could not form calibration bins (too few distinct predictions)."
+
+    rows = []
+    for b in sorted(work['bin'].dropna().unique()):
+        grp = work[work['bin'] == b]
+        if len(grp) < 2:
+            continue
+        kmf = KaplanMeierFitter()
+        kmf.fit(grp[t_col], grp[e_col])
+        try:
+            obs = float(kmf.predict(horizon))
+            ci = kmf.confidence_interval_survival_function_
+            # nearest index <= horizon
+            idx = ci.index[ci.index <= horizon]
+            if len(idx):
+                lo = float(ci.loc[idx[-1]].iloc[0]); hi = float(ci.loc[idx[-1]].iloc[1])
+            else:
+                lo = hi = obs
+        except Exception:
+            obs = float('nan'); lo = hi = float('nan')
+        rows.append({
+            'Bin': int(b) + 1,
+            'n': len(grp),
+            'Mean Predicted': float(grp['pred'].mean()),
+            'Observed (KM)': obs,
+            'Obs Lower': lo,
+            'Obs Upper': hi,
+        })
+    if not rows:
+        return None, "No usable calibration bins."
+    return pd.DataFrame(rows), {'horizon': horizon, 'n_bins': len(rows)}
+
+
 def median_followup(times, events):
     """Median follow-up via the reverse Kaplan-Meier estimator (Schemper & Smith, 1996).
 
