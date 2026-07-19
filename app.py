@@ -1,4 +1,4 @@
-APP_VERSION = "2.1.1"  # V2.1.1 — code quality fixes & cleanup
+APP_VERSION = "2.1.2"  # V2.1.2 — fix categorical detection for multivariable regression
 
 import streamlit as st
 import pandas as pd
@@ -35,7 +35,20 @@ add_survival_annotations = plotting.add_survival_annotations
 add_estimate_labels = plotting.add_estimate_labels
 format_p_value = narrator.format_p_value
 
-
+def _detect_categorical(df, covariates, max_unique=10):
+    """Detect categorical columns including numeric/boolean columns with few unique values.
+    Converts detected quasi-categorical numeric columns to string dtype in-place."""
+    cat_cols = []
+    for c in covariates:
+        if pd.api.types.is_object_dtype(df[c]) or isinstance(df[c].dtype, pd.CategoricalDtype):
+            cat_cols.append(c)
+        elif pd.api.types.is_bool_dtype(df[c]):
+            df[c] = df[c].map({True: 'Yes', False: 'No'})
+            cat_cols.append(c)
+        elif pd.api.types.is_numeric_dtype(df[c]) and df[c].nunique() <= max_unique:
+            df[c] = df[c].apply(lambda v: str(int(v)) if pd.notna(v) and isinstance(v, float) and v == int(v) else str(v) if pd.notna(v) else v)
+            cat_cols.append(c)
+    return cat_cols
 
 
 st.set_page_config(page_title="EasySurv", layout="wide")
@@ -2297,9 +2310,9 @@ if df is not None:
                 else:
                     # --- Reference Group Selection for Categorical Variables ---
                     categorical_refs = {}
-                    
-                    # 1. Identify Categorical Columns
-                    cat_cols = [c for c in covariates if pd.api.types.is_object_dtype(mv_df[c]) or isinstance(mv_df[c].dtype, pd.CategoricalDtype)]
+
+                    # 1. Identify Categorical Columns (including numeric with few unique values)
+                    cat_cols = _detect_categorical(mv_df, covariates)
                     
                     if cat_cols:
                         st.markdown("##### Reference Group Selection")
@@ -3912,8 +3925,8 @@ if df is not None:
                         if len(_fg_mv_df) < 10:
                             st.error("Not enough data points for multivariable analysis.")
                         else:
-                            # --- Identify categorical columns ---
-                            _fg_cat_cols = [c for c in fg_mv_covariates if pd.api.types.is_object_dtype(_fg_mv_df[c]) or isinstance(_fg_mv_df[c].dtype, pd.CategoricalDtype)]
+                            # --- Identify categorical columns (including numeric with few unique values) ---
+                            _fg_cat_cols = _detect_categorical(_fg_mv_df, fg_mv_covariates)
                             
                             # --- Reference Group Selection ---
                             _fg_cat_refs = {}
@@ -4218,7 +4231,7 @@ if df is not None:
                     
                     if _cs_covariates or _cs_td_enabled:
                         # Reference groups for categorical covariates
-                        _cs_cat_cols = [c for c in _cs_covariates if pd.api.types.is_object_dtype(_cs_df[c]) or isinstance(_cs_df[c].dtype, pd.CategoricalDtype)]
+                        _cs_cat_cols = _detect_categorical(_cs_df, _cs_covariates)
                         _cs_refs = {}
                         if _cs_cat_cols:
                             st.markdown("##### Reference Group Selection")
