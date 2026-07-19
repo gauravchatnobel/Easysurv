@@ -473,7 +473,7 @@ def get_c_index_bootstrap(df, time_col, event_col, covariates, label="", n_boot=
     try:
         cph.fit(d_enc, duration_col=time_col, event_col=event_col)
         c_est = cph.concordance_index_
-    except:
+    except Exception:
         return None
 
     # Bootstrap (Normal Approximation Method)
@@ -485,7 +485,7 @@ def get_c_index_bootstrap(df, time_col, event_col, covariates, label="", n_boot=
             cph_b = CoxPHFitter(penalizer=penalizer, l1_ratio=l1_ratio)
             cph_b.fit(d_boot, duration_col=time_col, event_col=event_col)
             boot_cs.append(cph_b.concordance_index_)
-        except:
+        except Exception:
             pass 
     
     if len(boot_cs) > 5:
@@ -531,7 +531,7 @@ def check_epv(df, event_col, covariates):
                 min_events = df.groupby(col)[event_col].sum().min()
                 if min_events < 5:
                     sparse_warnings.append(f"⚠️ Categories in **{col}** have very few events (min={min_events}). Consider enabling **Penalized Cox** in Advanced Options.")
-            except:
+            except Exception:
                 pass
             
     epv = n_events / n_params if n_params > 0 else 0
@@ -589,7 +589,7 @@ def calculate_vif(df, covariates):
             "Feature": corr_matrix.columns,
             "VIF": vif_values
         }).sort_values(by="VIF", ascending=False)
-    except:
+    except Exception:
         return None
 
 def check_collinearity(df, covariates, threshold=0.7):
@@ -852,7 +852,7 @@ def compute_rmtl(df, time_col, event_col, group_col, event_of_interest, tau, n_b
         gdf = df[df[group_col] == grp].copy()
         try:
             rmtl_est = _rmtl_from_aj(gdf, time_col, event_col, event_of_interest, tau)
-        except:
+        except Exception:
             rmtl_est = 0
         
         # Bootstrap with explicit RNG (deterministic across reruns)
@@ -861,7 +861,7 @@ def compute_rmtl(df, time_col, event_col, group_col, event_of_interest, tau, n_b
             boot_df = gdf.sample(n=len(gdf), replace=True, random_state=_rng)
             try:
                 boot_vals.append(_rmtl_from_aj(boot_df, time_col, event_col, event_of_interest, tau))
-            except:
+            except Exception:
                 pass
         
         se = np.std(boot_vals) if len(boot_vals) > 5 else 0

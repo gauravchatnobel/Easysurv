@@ -1092,7 +1092,7 @@ if df is not None:
                 banked_html += f'<p>Endpoint: {entry.get("endpoint", "N/A")} | Group: {entry.get("group_col", "N/A")} | n={entry.get("n_patients", "N/A")}</p>'
                 try:
                     banked_html += f'<img src="data:image/png;base64,{fig_to_base64(entry["fig"])}" style="width:100%">'
-                except:
+                except Exception:
                     banked_html += '<p><em>Figure could not be rendered.</em></p>'
                 # Include Cox/FG table if available
                 if entry.get('cox_summary') is not None:
@@ -2542,7 +2542,7 @@ if df is not None:
                                                  # Higher (closer to 0) is better.
                                                  ll_score = cph_tune.score(val_data, scoring_method="log_likelihood")
                                                  fold_scores.append(ll_score)
-                                             except:
+                                             except Exception:
                                                  pass # Skip failed folds
                                          
                                          # Logic: Only accept if at least 3/5 folds succeeded
@@ -2851,7 +2851,7 @@ if df is not None:
                                     se = cph_mv.standard_errors_[row.name]
                                     if abs(coef) > 10 or se > 5:
                                         return ['background-color: rgba(255, 0, 0, 0.1)'] * len(row)
-                                except:
+                                except Exception:
                                     pass
                                 orig_p = summary_mv.loc[row.name, 'p-value'] if row.name in summary_mv.index else 1.0
                                 if orig_p < 0.05:
@@ -2913,8 +2913,8 @@ if df is not None:
                             mv_df_for_narrator = st.session_state.get('mv_summary_df', summary_mv)
 
                             if st.button("Generate Summary Text (Multivariable)"):
-                                n_patients = len(mv_df) if 'mv_df' in dir() else None
-                                n_events = int(mv_df[event_col].sum()) if 'mv_df' in dir() else None
+                                n_patients = len(mv_df) if 'mv_df' in globals() else None
+                                n_events = int(mv_df[event_col].sum()) if 'mv_df' in globals() else None
 
                                 mv_narrative = narrator.generate_multivariable_narrative(
                                     summary_df=mv_df_for_narrator,
@@ -3481,7 +3481,7 @@ if df is not None:
                                   if show_p_val_plot_cif:
                                     _cs_p_fmt = format_p_value(res_cif.p_value, narrator_style_name, context="plot")
                                     fg_p_value_text = f"CS-LogRank {_cs_p_fmt}"
-                             except:
+                             except Exception:
                                  pass
                 
                 # Display P-value on Plot
@@ -3719,7 +3719,7 @@ if df is not None:
                             p_raw = _raw_fg_p.loc[row.name]
                             if p_raw < 0.05:
                                 return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
-                        except:
+                        except Exception:
                             pass
                         return [''] * len(row)
                     
@@ -3736,7 +3736,7 @@ if df is not None:
                         st.write("Each pair compared in a **separate** Fine-Gray model (1 d.f. per test → higher power for small groups).")
                         
                         # Use same reference as the global model (fg_ref_group already selected above)
-                        _pw_ref = fg_ref_group if 'fg_ref_group' in dir() else None
+                        _pw_ref = fg_ref_group if 'fg_ref_group' in globals() else None
                         
                         with st.spinner("Computing pairwise Fine-Gray comparisons..."):
                             pw_fg = pairwise_fine_gray(
@@ -3940,10 +3940,13 @@ if df is not None:
                     # Select covariates (exclude time, event, and structural columns)
                     _fg_mv_exclude = {cif_time_col, cif_event_col}
                     if cif_mode != "Single 'Status' Column (with multiple codes)":
-                        # Also exclude the raw columns used to construct composite
+                        # Also exclude the raw columns used to construct the composite endpoint.
+                        # These may or may not be defined depending on the CIF mode, so look
+                        # them up by name without eval/dir.
                         for _excl_var in ['rfs_time_col', 'rfs_stat_col', 'os_time_col', 'os_stat_col']:
-                            if _excl_var in dir():
-                                _fg_mv_exclude.add(eval(_excl_var))
+                            _excl_val = globals().get(_excl_var)
+                            if _excl_val is not None:
+                                _fg_mv_exclude.add(_excl_val)
                         _fg_mv_exclude.update({'Composite_Time', 'Composite_Status', 'start', 'stop', 'status', 'weight', 'cens_event'})
                     
                     _fg_mv_options = [c for c in cif_df.columns if c not in _fg_mv_exclude and c != 'id']
@@ -4154,7 +4157,7 @@ if df is not None:
                                                 return ['background-color: rgba(0, 255, 0, 0.08)'] * len(row)
                                             elif p_raw < 0.1:
                                                 return ['background-color: rgba(255, 255, 0, 0.08)'] * len(row)
-                                        except:
+                                        except Exception:
                                             pass
                                         return [''] * len(row)
                                     
@@ -4247,8 +4250,9 @@ if df is not None:
                                    'start', 'stop', 'status', 'weight', 'cens_event', 'id'}
                     if cif_mode != "Single 'Status' Column (with multiple codes)":
                         for _ev in ['rfs_time_col', 'rfs_stat_col', 'os_time_col', 'os_stat_col']:
-                            if _ev in dir():
-                                _cs_exclude.add(eval(_ev))
+                            _ev_val = globals().get(_ev)
+                            if _ev_val is not None:
+                                _cs_exclude.add(_ev_val)
                     
                     _cs_cov_options = [c for c in _cs_df.columns if c not in _cs_exclude]
                     
@@ -4751,10 +4755,10 @@ if df is not None:
                      _cif_n_competing = int((cif_df[cif_event_col] == 2).sum()) if cif_df is not None else None
 
                      cif_narrative = narrator.generate_cif_narrative(
-                         cif_median_data=cif_median_data if 'cif_median_data' in dir() else None,
-                         cif_est_data=cif_est_data if 'cif_est_data' in dir() else None,
-                         cif_target_time=cif_target_time if 'cif_target_time' in dir() else None,
-                         fg_summary=fg_summary if 'fg_summary' in dir() else None,
+                         cif_median_data=cif_median_data if 'cif_median_data' in globals() else None,
+                         cif_est_data=cif_est_data if 'cif_est_data' in globals() else None,
+                         cif_target_time=cif_target_time if 'cif_target_time' in globals() else None,
+                         fg_summary=fg_summary if 'fg_summary' in globals() else None,
                          fg_mv_summary=st.session_state.get('fg_mv_summary', None),
                          style_name=narrator_style_name,
                          detail_level=narrator_detail_level,
@@ -5518,7 +5522,7 @@ if df is not None:
                              from matplotlib.colors import LinearSegmentedColormap
                              base_color = all_themes[selected_theme][0]
                              cmap = LinearSegmentedColormap.from_list("custom", ["#f0f2f6", base_color])
-                         except:
+                         except Exception:
                              pass
 
                      if sns is not None:
@@ -5775,7 +5779,7 @@ if df is not None:
              def get_version(pkg):
                  try:
                      return importlib.metadata.version(pkg)
-                 except:
+                 except Exception:
                      return "Not Found"
              
              lib_info = [

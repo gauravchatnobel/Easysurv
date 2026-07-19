@@ -92,7 +92,7 @@ def add_at_risk_counts(fitters, ax=None, y_shift=-0.25, colors=None, labels=None
             if isinstance(at_risk, (pd.Series, np.ndarray, list)):
                 try:
                     at_risk = at_risk.item()
-                except:
+                except Exception:
                     pass
             at_risk = int(at_risk)
 
