@@ -1328,20 +1328,8 @@ if df is not None:
                     st.dataframe(missing_stats[missing_stats > 0])
             
             # Calculate P-value for Plot if requested
-            hr_text = ""
             p_value_text = None # Initialize to avoid NameError
             if show_p_val_plot and group_col != "None" and len(df_clean[group_col].unique()) >= 2:
-                # Attempt Cox for plot? (Optional, maybe for future HR on plot)
-                try:
-                    cox_df = df_clean[[time_col, event_col, group_col]].dropna()
-                    cox_data_encoded = pd.get_dummies(cox_df, columns=[group_col], drop_first=True, dtype=float)
-                    cox_data_encoded.columns = [statistics.sanitize_name(c) for c in cox_data_encoded.columns]
-                    # This might fail on separation, but we don't strictly need it for the p-value text anymore
-                    cph_plot = CoxPHFitter()
-                    cph_plot.fit(cox_data_encoded, duration_col=time_col, event_col=event_col)
-                except Exception:
-                    pass  # Cox fit may fail on separation; p-value comes from log-rank below
-
                 # Calculate Log-Rank P-value (Robust)
                 try:
                     res = multivariate_logrank_test(df_clean[time_col], df_clean[group_col], df_clean[event_col])
@@ -1389,8 +1377,7 @@ if df is not None:
                     groups = groups_ordered
                 else:
                     groups = sorted(df_clean[group_col].unique())
-                results = []
-            
+
                 # Determine Color Palette
                 palette = None
                 if selected_theme in all_themes:
@@ -2436,6 +2423,7 @@ if df is not None:
                                  sns.heatmap(corr_mat, annot=True, fmt=".2f", cmap="coolwarm", center=0, ax=ax_corr, cbar=True)
                                  ax_corr.set_title("Correlation Matrix (Dummy Vars)")
                                  st.pyplot(fig_corr)
+                                 plt.close(fig_corr)
                              else:
                                  st.info("Not enough variation to plot correlations.")
                         
@@ -2986,56 +2974,10 @@ if df is not None:
                     # This is the hard part if variables are categorical dummies.
                     # Heuristic: Check if column exists. if not, try standardized name.
                     
-                    # Progress Bar
-                    # Pre-calculate masks
-                    mask_high = pd.Series([False]*len(score_df), index=score_df.index)
-                    mask_low = pd.Series([False]*len(score_df), index=score_df.index)
-                    
-                    # Helper to find column
-                    def get_col_data(v_name, dframe):
-                        # 1. Direct match
-                        if v_name in dframe.columns: return dframe[v_name] == 1 # Assume binary/numeric
-                        # 2. Try reversing sanitization (unlikely to work perfectly but trying common patterns)
-                        # The app sanitizes: replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
-                        # Users usually have binary 0/1 columns for mutations.
-                        # If simple match fails, we might skip.
-                        return None
-
                     cols_found = 0
                     cols_missing = []
 
-                    for v in high_risk_vars:
-                         # We need to find this variable in the dataset
-                         # Check strict match first (Tab 2 sanitized names)
-                         # We probably need to re-run the exact same encoding logic as Tab 2 to be safe.
-                         # RE-RUN ENCODING (Safe)
-                         pass
-                    
-                    # RE-RUN ENCODING LOGIC (Copied from Tab 2 for consistency)
-                    # This ensures we have the exact same columns as the model
-                    strat_encoded = df_clean.copy()
-                    
-                    # Identify categorical cols used in Tab 2
-                    # We need 'cat_cols' from Tab 2 context. It's usually inferred from numeric checks.
-                    # We will re-infer or use global 'columns'.
-                    # For robustness, we'll try to match strictly against the indices in mv_res.
-                    
-                    # Quick encode ALL categorical columns to safe_names to match potential model vars
-                    # This is slightly expensive but necessary to match "ICC_BCR::ABL1" etc.
-                    # Actually, Tab 2 logic was specific. Let's try a simpler approach:
-                    # Just check if the Model Variable matches a Column in the current DF. 
-                    # If not, assume it was a dummy and try to find it.
-                    
-                    for v in high_risk_vars + low_risk_vars:
-                         if v not in score_df.columns:
-                             # It might be a dummy. e.g. "Gender_Male".
-                             # We won't support complex auto-matching here to avoid errors.
-                             # We'll rely on the user having prepared data OR simple binary cols.
-                             # If "ICC_BCR::ABL1" is in the index (sanitized), but "ICC BCR::ABL1" is in df.
-                             # Try sanitizing df columns map.
-                             pass
-                    
-                    # Better Strategy: Sanitize ALL DF columns temporarily to match Model
+                    # Sanitize all df columns to match the (sanitized) model variable names
                     clean_col_map = {c: statistics.sanitize_name(c) for c in score_df.columns}
                     score_df_renamed = score_df.rename(columns=clean_col_map)
                     
@@ -3151,6 +3093,7 @@ if df is not None:
                         ax_risk.set_xlabel(time_col)
                         ax_risk.set_ylabel("Survival Probability")
                         st.pyplot(fig_risk)
+                        plt.close(fig_risk)
                         
                     with km_col2:
                         st.write("**Evaluation Metrics**")
@@ -3924,14 +3867,7 @@ if df is not None:
                         _fg_mv_exclude.update({'Composite_Time', 'Composite_Status', 'start', 'stop', 'status', 'weight', 'cens_event'})
                     
                     _fg_mv_options = [c for c in cif_df.columns if c not in _fg_mv_exclude and c != 'id']
-                    
-                    # Initialize multiselect properly (same pattern as Cox tab fix)
-                    if "_fg_mv_covariates_initialized" not in st.session_state:
-                        st.session_state["_fg_mv_covariates_initialized"] = True
-                        _fg_mv_defaults = None
-                    else:
-                        _fg_mv_defaults = None
-                    
+
                     fg_mv_covariates = st.multiselect(
                         "Select Covariates for Multivariable Fine-Gray",
                         _fg_mv_options,
@@ -5081,6 +5017,7 @@ if df is not None:
                                  ax_roc.set_title(f'ROC Curve at t={roc_time}')
                                  ax_roc.legend(loc="lower right")
                                  st.pyplot(fig_roc)
+                                 plt.close(fig_roc)
                                  
                                  # Store for Action
                                  st.session_state.optimal_cut = {
@@ -5163,6 +5100,7 @@ if df is not None:
                              ax_p.legend()
                              ax_p.set_title("Cutoff Optimization Landscape")
                              st.pyplot(fig_p)
+                             plt.close(fig_p)
                              
                  # 3. Action Section
                  st.divider()
@@ -5344,6 +5282,7 @@ if df is not None:
                  if sns is not None:
                      sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm", center=0, ax=ax_corr, square=True)
                      st.pyplot(fig_corr)
+                     plt.close(fig_corr)
                  else:
                      st.error("Error: The 'seaborn' library could not be loaded.")
                      st.warning("The system attempted to auto-install it but failed. Please try restarting the app or installing 'seaborn' manually in your environment.")
@@ -5488,6 +5427,7 @@ if df is not None:
                          ax_cm.set_xlabel(f"Test: {res['test_var']}")
                          ax_cm.set_ylabel(f"Reference: {res['ref_var']}")
                          st.pyplot(fig_cm)
+                         plt.close(fig_cm)
                          
                      # 4. Narrator
                      st.divider()
@@ -5714,7 +5654,8 @@ if df is not None:
                       buf_p = io.BytesIO()
                       fig_p.savefig(buf_p, format="pdf", bbox_inches='tight')
                       st.download_button("📄 Download Forest Plot (PDF)", buf_p, "c_index_forest.pdf", "application/pdf")
-                      
+                      plt.close(fig_p)
+
                       # 4. Narrator
                       st.divider()
                       st.subheader("🤖 AI Prognostic Narrator")
