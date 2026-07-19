@@ -3,6 +3,9 @@ import json
 import pytest
 import pandas as pd
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
 from modules.session_manager import (
     save_session,
@@ -12,6 +15,46 @@ from modules.session_manager import (
     _decompress_dataframe,
     SESSION_FORMAT_VERSION,
 )
+from modules import session_bank as sb
+
+
+def test_analysis_bank_round_trips_through_save_load():
+    """A pinned analysis (figure + tables + narrative) must survive save/load —
+    this is what makes a multi-analysis session resumable and shareable."""
+    f, ax = plt.subplots()
+    ax.plot([0, 1], [1, 0])
+    entry = sb.make_entry(
+        "KM", "OS by LSC", fig=f,
+        tables={"Cox": pd.DataFrame({"HR": [1.4]}, index=["LSC+"])},
+        narrative="LSC+ had shorter survival.",
+        meta={"endpoint": "OS", "group_col": "LSC", "n_patients": 153}, dpi=80,
+    )
+    session_state = {"analysis_bank": [entry], "demo_loaded": True}
+    df = pd.DataFrame({"Time": [1, 2, 3], "Event": [1, 0, 1]})
+    js = save_session(df, {"time_col": "Time", "event_col": "Event"}, session_state)
+
+    restored = load_session(js)
+    bank = restored["analysis_bank"]
+    assert len(bank) == 1
+    e = bank[0]
+    assert e["label"] == "OS by LSC" and e["png"]
+    assert e["narrative"] == "LSC+ had shorter survival."
+    assert e["meta"]["n_patients"] == 153
+    tables = dict(sb.entry_tables(e))
+    assert tables["Cox"].iloc[0, 0] == 1.4
+
+
+def test_bank_absent_gives_empty_list():
+    df = pd.DataFrame({"Time": [1, 2], "Event": [1, 0]})
+    js = save_session(df, {}, {"demo_loaded": True})
+    assert load_session(js)["analysis_bank"] == []
+
+
+def test_live_figure_entry_is_dropped_on_save():
+    f, ax = plt.subplots()
+    bad = {"type": "KM", "label": "x", "png": f, "tables": []}  # live fig, not serializable
+    js = save_session(pd.DataFrame({"T": [1]}), {}, {"analysis_bank": [bad]})
+    assert load_session(js)["analysis_bank"] == []
 
 
 # ============================================================

@@ -212,6 +212,8 @@ with st.sidebar.expander("Save / Load Session", expanded=False):
             # Restore DataFrames in session state
             for key, df_val in restored["state_dataframes"].items():
                 st.session_state[key] = df_val
+            # Restore the accumulated analysis bank (pinned analyses)
+            st.session_state["analysis_bank"] = restored.get("analysis_bank", [])
             # Store sidebar config for widgets to pick up
             st.session_state["_restored_sidebar"] = restored["sidebar"]
             st.session_state["_session_loaded"] = True

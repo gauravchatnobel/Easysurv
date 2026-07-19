@@ -246,6 +246,16 @@ def save_session(df, sidebar_config, session_state, notes=""):
             except Exception:
                 pass  # Skip non-serialisable entries
 
+    # 4b. Analysis bank — already fully JSON-serializable (base64 PNGs + gzipped
+    #     tables + narrative text + metadata). This is what makes a multi-analysis
+    #     session resumable and shareable.
+    try:
+        from . import session_bank as _sb
+    except ImportError:
+        import session_bank as _sb
+    _bank = session_state.get("analysis_bank", [])
+    session["analysis_bank"] = [e for e in _bank if _sb.is_serializable_entry(e)]
+
     # 5. Filter state (dynamic keys)
     session["filters"] = {}
     if "filter_cols" in sidebar_config:
@@ -306,6 +316,9 @@ def load_session(json_str):
             result["state_dataframes"][key] = _decompress_dataframe(b64)
         except Exception:
             pass
+
+    # 4b. Analysis bank (list of serializable entries; empty if none saved)
+    result["analysis_bank"] = session.get("analysis_bank", [])
 
     # 5. Filters
     result["filters"] = session.get("filters", {})
