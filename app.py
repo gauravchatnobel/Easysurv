@@ -106,54 +106,115 @@ section[data-testid="stSidebar"] .stSubheader {
     vertical-align: middle;
     margin-left: 0.5rem;
 }
-/* Landing page hero — theme-aware */
+/* Landing page hero — theme-aware, refined */
 .hero-container {
-    background: var(--secondary-background-color, rgba(128,128,128,0.1));
-    border-radius: 16px;
-    padding: 3rem 2rem 2.5rem 2rem;
+    position: relative;
+    background: linear-gradient(180deg, rgba(120,140,190,0.10) 0%, rgba(120,140,190,0.02) 100%);
+    border-radius: 20px;
+    padding: 3.5rem 2rem 3rem 2rem;
     text-align: center;
-    margin-bottom: 2rem;
-    border: 1px solid rgba(128,128,128,0.15);
+    margin-bottom: 2.25rem;
+    border: 1px solid rgba(128,128,128,0.16);
+    overflow: hidden;
+}
+.hero-container::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #4f8cff 0%, #6dd5c0 50%, #b07bff 100%);
+    opacity: 0.9;
 }
 .hero-container h2 {
-    margin-bottom: 0.3rem;
+    font-size: 2.4rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 0.35rem;
 }
-.hero-container h4 {
-    opacity: 0.7;
-    font-weight: 400;
-    margin-bottom: 1rem;
+.hero-container .subtitle {
+    font-size: 1.1rem;
+    opacity: 0.75;
+    font-weight: 500;
+    margin-bottom: 0.9rem;
+    letter-spacing: 0.01em;
 }
 .hero-container p {
-    opacity: 0.55;
+    opacity: 0.6;
     font-size: 1rem;
-    max-width: 600px;
+    max-width: 620px;
     margin: 0 auto;
+    line-height: 1.55;
 }
 /* Feature cards — theme-aware */
 .feature-card {
-    background: var(--secondary-background-color, rgba(128,128,128,0.1));
-    border: 1px solid rgba(128,128,128,0.15);
-    border-radius: 12px;
-    padding: 1.5rem;
+    background: var(--secondary-background-color, rgba(128,128,128,0.08));
+    border: 1px solid rgba(128,128,128,0.14);
+    border-radius: 14px;
+    padding: 1.75rem 1.4rem;
     text-align: center;
     height: 100%;
-    transition: box-shadow 0.2s;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
 .feature-card:hover {
-    box-shadow: 0 4px 12px rgba(128,128,128,0.15);
+    transform: translateY(-3px);
+    box-shadow: 0 8px 24px rgba(70,90,140,0.14);
+    border-color: rgba(120,140,200,0.35);
 }
 .feature-card .icon {
-    font-size: 2rem;
-    margin-bottom: 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 3rem;
+    height: 3rem;
+    font-size: 1.5rem;
+    border-radius: 12px;
+    background: rgba(120,140,200,0.12);
+    margin-bottom: 0.8rem;
 }
 .feature-card h4 {
-    margin: 0.5rem 0 0.3rem 0;
-    font-size: 0.95rem;
+    margin: 0.4rem 0 0.4rem 0;
+    font-size: 1rem;
+    font-weight: 600;
 }
 .feature-card p {
-    opacity: 0.6;
-    font-size: 0.85rem;
+    opacity: 0.62;
+    font-size: 0.86rem;
     margin: 0;
+    line-height: 1.5;
+}
+/* Getting-started strip — quiet onboarding cue on the landing page */
+.getting-started {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem 1rem;
+    margin: 1.75rem auto 0.5rem auto;
+    padding: 1rem 1.25rem;
+    max-width: 920px;
+    border-radius: 12px;
+    background: rgba(128,128,128,0.06);
+    border: 1px solid rgba(128,128,128,0.12);
+}
+.getting-started .gs-step {
+    font-size: 0.9rem;
+    opacity: 0.78;
+}
+.getting-started .gs-step b {
+    display: inline-block;
+    width: 1.4rem;
+    height: 1.4rem;
+    line-height: 1.4rem;
+    text-align: center;
+    border-radius: 50%;
+    background: rgba(120,140,200,0.22);
+    margin-right: 0.4rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+.getting-started .gs-arrow {
+    opacity: 0.35;
+    font-weight: 700;
 }
 /* Sidebar footer branding */
 .sidebar-footer {
@@ -261,8 +322,8 @@ else:
     st.markdown("""
     <div class="hero-container">
         <h2>Welcome to EasySurv</h2>
-        <h4>Survival analysis for everyone</h4>
-        <p>Publication-quality Kaplan-Meier, Cox Regression, and Competing Risks analysis — without writing a single line of code.</p>
+        <div class="subtitle">Survival analysis for everyone</div>
+        <p>Publication-quality Kaplan&ndash;Meier, Cox regression, and competing-risks analysis &mdash; without writing a single line of code.</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -6224,10 +6285,18 @@ if df is not None:
               """)
 
 else:
-    st.info("Please upload a CSV or Excel file to begin analysis.")
-    st.write("Demonstration with Dummy Data:")
-    st.write("You can download the demo dataset `dummy_clinical_data.csv` from the repository:")
-    st.markdown("[📂 View Repository & Download Data](https://github.com/gauravchatnobel/Easysurv)")
-    st.caption("Right-click the link and open in a new tab to find the CSV file.")
+    st.markdown("""
+    <div class="getting-started">
+        <span class="gs-step"><b>1</b>Upload your data &mdash; or load the demo</span>
+        <span class="gs-arrow">&rarr;</span>
+        <span class="gs-step"><b>2</b>Choose your time &amp; event columns</span>
+        <span class="gs-arrow">&rarr;</span>
+        <span class="gs-step"><b>3</b>Generate plots, models &amp; a session report</span>
+    </div>
+    """, unsafe_allow_html=True)
+    st.caption(
+        "New here? Click **🚀 Load Demo Data** above to explore with a sample cohort — "
+        "or [download the demo dataset](https://github.com/gauravchatnobel/Easysurv) to see the expected format."
+    )
 
 
