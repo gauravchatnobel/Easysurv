@@ -3837,12 +3837,17 @@ if df is not None:
                     ))
                     st.caption(f"Reference Group: **{fg_ref_group}** | Cluster-robust (sandwich) SE clustered on subject id (approximates R's cmprsk::crr)")
 
-                # Pairwise Fine-Gray Comparisons (Gray's Test)
+                # Pairwise Fine-Gray comparisons (+ nonparametric Gray's p per pair)
                 if group_col != "None" and group_col in cif_df.columns:
                     unique_grps = sorted(cif_df[group_col].dropna().unique())
                     if len(unique_grps) >= 2:
-                        st.write("### Pairwise Subdistribution HRs (Gray's Test)")
-                        st.write("Each pair compared in a **separate** Fine-Gray model (1 d.f. per test → higher power for small groups).")
+                        st.write("### Pairwise Subdistribution HRs (Fine-Gray)")
+                        st.write(
+                            "Each pair is compared with a **separate** Fine-Gray model — the "
+                            "subdistribution HR and its Wald *p* (1 d.f. per test → higher power "
+                            "for small groups). The **Gray's *p*** column is the nonparametric "
+                            "Gray's test for the same pair, and matches the value shown on the CIF plot."
+                        )
                         
                         # Use same reference as the global model (fg_ref_group already selected above)
                         _pw_ref = fg_ref_group if 'fg_ref_group' in globals() else None
@@ -3872,8 +3877,8 @@ if df is not None:
                             # Keep raw p for highlighting before formatting
                             _raw_p = _display_pw['p-value'].copy() if 'p-value' in _display_pw.columns else None
 
-                            # Format p-value columns
-                            for _pc in ('p-value', 'p (adjusted)'):
+                            # Format p-value columns (Fine-Gray Wald, adjusted, and Gray's)
+                            for _pc in ('p-value', 'p (adjusted)', "Gray's p"):
                                 if _pc in _display_pw.columns:
                                     _display_pw[_pc] = _display_pw[_pc].apply(
                                         lambda p: format_p_value(p, narrator_style_name, context="table") if not pd.isna(p) else "—"
@@ -3894,7 +3899,7 @@ if df is not None:
                                     return ['background-color: rgba(0, 180, 0, 0.1)'] * len(row)
                                 return [''] * len(row)
 
-                            num_cols = [c for c in _display_pw.columns if c not in ('Reference', 'Comparison', 'p-value', 'p (adjusted)', 'Note')]
+                            num_cols = [c for c in _display_pw.columns if c not in ('Reference', 'Comparison', 'p-value', 'p (adjusted)', "Gray's p", 'Note')]
                             st.dataframe(
                                 _display_pw.style.format(
                                     {c: "{:.3f}" for c in num_cols}

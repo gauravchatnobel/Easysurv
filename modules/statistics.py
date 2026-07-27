@@ -700,8 +700,13 @@ def pairwise_fine_gray(df, time_col, event_col, group_col, event_of_interest=1, 
         If None, all pairwise combinations are shown with alphabetical ordering.
     
     Returns a DataFrame with columns:
-      Reference, Comparison, Subdist HR, Lower 95%, Upper 95%, p-value
-    
+      Reference, Comparison, Subdist HR, Lower 95%, Upper 95%, p-value, Gray's p
+
+    'p-value' is the Fine-Gray subdistribution-hazard Wald test; "Gray's p" is
+    the nonparametric Gray's K-sample test on the same pair (matches the value
+    reported on the CIF plot). They are distinct methods and need not agree to
+    the last digit.
+
     Ref: Fine JP, Gray RJ. JASA 1999;94(446):496-509.
     """
     from itertools import combinations
@@ -733,6 +738,7 @@ def pairwise_fine_gray(df, time_col, event_col, group_col, event_of_interest=1, 
                     'Reference': str(ref), 'Comparison': str(comp),
                     'Subdist HR': np.nan, 'Lower 95%': np.nan,
                     'Upper 95%': np.nan, 'p-value': np.nan,
+                    "Gray's p": np.nan,
                     'Note': 'Insufficient data'
                 })
                 continue
@@ -767,7 +773,17 @@ def pairwise_fine_gray(df, time_col, event_col, group_col, event_of_interest=1, 
             lo = np.exp(_beta - 1.96 * _se)
             hi = np.exp(_beta + 1.96 * _se)
             p = 2 * (1 - _norm.cdf(abs(_beta / _se)))
-            
+
+            # Nonparametric Gray's test on the SAME pair. This reconciles the
+            # table with the CIF plot (which reports Gray's test): the Fine-Gray
+            # Wald p above and Gray's p below test the same hypothesis by two
+            # distinct methods and need not be numerically identical.
+            try:
+                grays_p = grays_test(pair_df, time_col, event_col, group_col,
+                                     event_of_interest=event_of_interest)['p_value']
+            except Exception:
+                grays_p = np.nan
+
             results.append({
                 'Reference': str(ref),
                 'Comparison': str(comp),
@@ -775,13 +791,15 @@ def pairwise_fine_gray(df, time_col, event_col, group_col, event_of_interest=1, 
                 'Lower 95%': lo,
                 'Upper 95%': hi,
                 'p-value': p,
+                "Gray's p": grays_p,
             })
-            
+
         except Exception as e:
             results.append({
                 'Reference': str(ref), 'Comparison': str(comp),
                 'Subdist HR': np.nan, 'Lower 95%': np.nan,
                 'Upper 95%': np.nan, 'p-value': np.nan,
+                "Gray's p": np.nan,
                 'Note': str(e)
             })
     

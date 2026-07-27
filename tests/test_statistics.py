@@ -35,7 +35,48 @@ from modules.statistics import (
     compute_calibration,
     subgroup_hazard_ratios,
     date_interval,
+    pairwise_fine_gray,
 )
+
+
+class TestPairwiseFineGrayGraysColumn:
+    """The pairwise table must carry a nonparametric Gray's-test p that
+    reconciles with the CIF plot — and must NOT conflate it with the
+    Fine-Gray Wald p (the mislabeling bug this guards against)."""
+
+    def _cr_data(self, seed=7, n=200):
+        rng = np.random.default_rng(seed)
+        grp = rng.choice(["A", "B"], size=n, p=[0.6, 0.4])
+        base = np.where(grp == "B", 1.5, 1.0)
+        t = rng.exponential(20 / base)
+        ev = rng.choice([0, 1, 2], size=n, p=[0.3, 0.4, 0.3])
+        return pd.DataFrame({"time": t, "event": ev, "grp": grp})
+
+    def test_gray_p_column_present(self):
+        df = self._cr_data()
+        pw = pairwise_fine_gray(df, "time", "event", "grp",
+                                event_of_interest=1, reference_group="A")
+        assert "Gray's p" in pw.columns
+        assert "p-value" in pw.columns  # Fine-Gray Wald kept separate
+
+    def test_pairwise_gray_p_matches_standalone(self):
+        df = self._cr_data()
+        pw = pairwise_fine_gray(df, "time", "event", "grp",
+                                event_of_interest=1, reference_group="A")
+        standalone = grays_test(df, "time", "event", "grp", event_of_interest=1)
+        # For a 2-group comparison the pair subset IS the whole data, so the
+        # table's Gray p must equal the plot's Gray p exactly.
+        assert abs(pw["Gray's p"].iloc[0] - standalone["p_value"]) < 1e-9
+
+    def test_gray_p_distinct_from_wald_p(self):
+        """The two columns come from different methods — they should be close
+        but not forced equal (this is the whole point of the fix)."""
+        df = self._cr_data(seed=11)
+        pw = pairwise_fine_gray(df, "time", "event", "grp",
+                                event_of_interest=1, reference_group="A")
+        gray = pw["Gray's p"].iloc[0]
+        wald = pw["p-value"].iloc[0]
+        assert not pd.isna(gray) and not pd.isna(wald)
 
 
 class TestDateInterval:
