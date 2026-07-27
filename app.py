@@ -1,3 +1,5 @@
+APP_VERSION = "2.2.0"  # V2.2.0 — Table 1, calibration/optimism validation, narrator upgrades, methodology
+
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -13,37 +15,289 @@ except ImportError:
     sns = None
 
 # --- MODULE IMPORTS ---
-# --- MODULE IMPORTS ---
 try:
-    # Try absolute import first (if running from root)
-    from survival_analysis.modules import utils, statistics, plotting, narrator
+    from survival_analysis.modules import utils, statistics, plotting, narrator, tableone, session_bank
+    from survival_analysis.modules.validation import validate_dataset, format_validation_report
+    from survival_analysis.modules.session_manager import save_session, load_session, get_session_filename, SIDEBAR_CONFIG_KEYS
 except ImportError:
-    # Fallback to relative import (if running from inside survival_analysis/)
-    from modules import utils, statistics, plotting, narrator
+    from modules import utils, statistics, plotting, narrator, tableone, session_bank
+    from modules.validation import validate_dataset, format_validation_report
+    from modules.session_manager import save_session, load_session, get_session_filename, SIDEBAR_CONFIG_KEYS
 
-# Force reload to pick up hot-patches (guardrails)
-import importlib
-try:
-    importlib.reload(statistics)
-except:
-    pass
+# Module aliases (maintain backward compatibility)
 
 # Wrappers to maintain compatibility if functions were called directly
 compute_fine_gray_weights = statistics.compute_fine_gray_weights
+pairwise_fine_gray = statistics.pairwise_fine_gray
+grays_test = statistics.grays_test
 add_at_risk_counts = plotting.add_at_risk_counts
+add_survival_annotations = plotting.add_survival_annotations
+add_estimate_labels = plotting.add_estimate_labels
+format_p_value = narrator.format_p_value
+
+def _detect_categorical(df, covariates, max_unique=10):
+    """Detect categorical columns including numeric/boolean columns with few unique values.
+    Converts detected quasi-categorical numeric columns to string dtype in-place."""
+    cat_cols = []
+    for c in covariates:
+        if pd.api.types.is_object_dtype(df[c]) or isinstance(df[c].dtype, pd.CategoricalDtype):
+            cat_cols.append(c)
+        elif pd.api.types.is_bool_dtype(df[c]):
+            df[c] = df[c].map({True: 'Yes', False: 'No'})
+            cat_cols.append(c)
+        elif pd.api.types.is_numeric_dtype(df[c]) and df[c].nunique() <= max_unique:
+            df[c] = df[c].apply(lambda v: str(int(v)) if pd.notna(v) and isinstance(v, float) and v == int(v) else str(v) if pd.notna(v) else v)
+            cat_cols.append(c)
+    return cat_cols
 
 
+def _pin_analysis(entry_type, label, fig=None, title="", tables=None, narrative=None, meta=None):
+    """Append a fully-serializable analysis to the session bank.
+
+    Stores a base64 PNG of the figure, base64-gzipped tables, the narrator text
+    and metadata — never live objects — so the bank survives reruns, saved
+    sessions, and sharing. Returns the display label actually used (deduplicated).
+    """
+    import datetime as _dt
+    if 'analysis_bank' not in st.session_state:
+        st.session_state.analysis_bank = []
+    _existing = {e.get('label') for e in st.session_state.analysis_bank}
+    _label = label
+    _i = 2
+    while _label in _existing:
+        _label = f"{label} ({_i})"
+        _i += 1
+    _meta = dict(meta or {})
+    _meta.setdefault('pinned_at', _dt.datetime.now().strftime("%Y-%m-%d %H:%M"))
+    entry = session_bank.make_entry(entry_type, _label, fig=fig, title=title,
+                                    tables=tables, narrative=narrative, meta=_meta)
+    st.session_state.analysis_bank.append(entry)
+    return _label
 
 
-st.set_page_config(page_title="Survival Analysis Tool", layout="wide")
+st.set_page_config(page_title="EasySurv", layout="wide")
 
-st.title("EASYSURV: Interactive Survival Analysis Tool")
+# --- GLOBAL STYLES ---
+st.markdown("""
+<style>
+/* Sidebar refinement */
+section[data-testid="stSidebar"] [data-testid="stSidebarHeader"] {
+    padding-bottom: 0.5rem;
+}
+section[data-testid="stSidebar"] .stSubheader {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    opacity: 0.7;
+    border-bottom: 1px solid var(--secondary-background-color, rgba(128,128,128,0.2));
+    padding-bottom: 0.3rem;
+    margin-top: 1.2rem;
+}
+/* Version badge */
+.version-badge {
+    display: inline-block;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 0.15rem 0.6rem;
+    border-radius: 12px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
+    margin-left: 0.5rem;
+}
+/* Landing page hero — theme-aware, refined */
+.hero-container {
+    position: relative;
+    background: linear-gradient(180deg, rgba(120,140,190,0.10) 0%, rgba(120,140,190,0.02) 100%);
+    border-radius: 20px;
+    padding: 3.5rem 2rem 3rem 2rem;
+    text-align: center;
+    margin-bottom: 2.25rem;
+    border: 1px solid rgba(128,128,128,0.16);
+    overflow: hidden;
+}
+.hero-container::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #4f8cff 0%, #6dd5c0 50%, #b07bff 100%);
+    opacity: 0.9;
+}
+.hero-container h2 {
+    font-size: 2.4rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 0.35rem;
+}
+.hero-container .subtitle {
+    font-size: 1.1rem;
+    opacity: 0.75;
+    font-weight: 500;
+    margin-bottom: 0.9rem;
+    letter-spacing: 0.01em;
+}
+.hero-container p {
+    opacity: 0.6;
+    font-size: 1rem;
+    max-width: 620px;
+    margin: 0 auto;
+    line-height: 1.55;
+}
+/* Feature cards — theme-aware */
+.feature-card {
+    background: var(--secondary-background-color, rgba(128,128,128,0.08));
+    border: 1px solid rgba(128,128,128,0.14);
+    border-radius: 14px;
+    padding: 1.75rem 1.4rem;
+    text-align: center;
+    height: 100%;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+.feature-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 24px rgba(70,90,140,0.14);
+    border-color: rgba(120,140,200,0.35);
+}
+.feature-card .icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 3rem;
+    height: 3rem;
+    font-size: 1.5rem;
+    border-radius: 12px;
+    background: rgba(120,140,200,0.12);
+    margin-bottom: 0.8rem;
+}
+.feature-card h4 {
+    margin: 0.4rem 0 0.4rem 0;
+    font-size: 1rem;
+    font-weight: 600;
+}
+.feature-card p {
+    opacity: 0.62;
+    font-size: 0.86rem;
+    margin: 0;
+    line-height: 1.5;
+}
+/* Getting-started strip — quiet onboarding cue on the landing page */
+.getting-started {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem 1rem;
+    margin: 1.75rem auto 0.5rem auto;
+    padding: 1rem 1.25rem;
+    max-width: 920px;
+    border-radius: 12px;
+    background: rgba(128,128,128,0.06);
+    border: 1px solid rgba(128,128,128,0.12);
+}
+.getting-started .gs-step {
+    font-size: 0.9rem;
+    opacity: 0.78;
+}
+.getting-started .gs-step b {
+    display: inline-block;
+    width: 1.4rem;
+    height: 1.4rem;
+    line-height: 1.4rem;
+    text-align: center;
+    border-radius: 50%;
+    background: rgba(120,140,200,0.22);
+    margin-right: 0.4rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+.getting-started .gs-arrow {
+    opacity: 0.35;
+    font-weight: 700;
+}
+/* Sidebar footer branding */
+.sidebar-footer {
+    text-align: center;
+    padding: 1rem 0 0.5rem 0;
+    opacity: 0.45;
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+}
+/* Security note — more subtle */
+.security-note {
+    font-size: 0.75rem;
+    opacity: 0.45;
+    padding: 0.4rem 0;
+    text-align: center;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# --- HEADER ---
+st.markdown(
+    f'# EasySurv <span class="version-badge">v{APP_VERSION}</span>',
+    unsafe_allow_html=True
+)
+st.caption("Publication-quality survival analysis without code")
 
 # Sidebar - Configuration
-st.sidebar.header("Data Upload & Configuration")
+st.sidebar.header("EasySurv")
 
-st.sidebar.warning("⚠️ **Security Note**: Do not upload identifiable patient data / PHI. This tool runs locally/in-memory, but standard data privacy hygiene applies.")
+st.sidebar.markdown(
+    '<p class="security-note">Your data stays local. Do not upload identifiable PHI.</p>',
+    unsafe_allow_html=True
+)
 uploaded_file = st.sidebar.file_uploader("Upload Clinical Data (CSV/Excel)", type=["csv", "xlsx"])
+
+# --- SESSION MANAGEMENT ---
+with st.sidebar.expander("Save / Load Session", expanded=False):
+    # Load session
+    session_file = st.file_uploader(
+        "Load a saved session",
+        type=["easysurv"],
+        key="_session_file_upload",
+        help="Upload a previously saved .easysurv session file to restore your analysis."
+    )
+    if session_file is not None and not st.session_state.get("_session_loaded"):
+        try:
+            raw = session_file.read().decode("utf-8")
+            restored = load_session(raw)
+            st.session_state["_restored_session"] = restored
+            # Restore the dataset
+            if restored["df"] is not None:
+                st.session_state["_restored_df"] = restored["df"]
+            # Restore session state values
+            for key, val in restored["state"].items():
+                st.session_state[key] = val
+            # Restore DataFrames in session state
+            for key, df_val in restored["state_dataframes"].items():
+                st.session_state[key] = df_val
+            # Restore the accumulated analysis bank (pinned analyses)
+            st.session_state["analysis_bank"] = restored.get("analysis_bank", [])
+            # Store sidebar config for widgets to pick up
+            st.session_state["_restored_sidebar"] = restored["sidebar"]
+            st.session_state["_session_loaded"] = True
+            saved_at = restored.get("saved_at", "unknown")
+            notes = restored.get("notes", "")
+            st.success(f"Session restored (saved {saved_at})")
+            if notes:
+                st.info(f"Notes: {notes}")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Failed to load session: {e}")
+
+    # Save session placeholder — the actual button is rendered later once df and config are available
+    if st.session_state.get("_session_save_data"):
+        session_json = st.session_state["_session_save_data"]
+        filename = st.session_state.get("_session_save_filename", "session.easysurv")
+        st.download_button(
+            label="Download Session File",
+            data=session_json,
+            file_name=filename,
+            mime="application/json",
+            key="_session_download",
+        )
 
 
 
@@ -66,30 +320,32 @@ if uploaded_file:
 else:
     # --- LANDING PAGE ---
     st.markdown("""
-    <style>
-    .hero-box {
-        padding: 2rem;
-        background-color: #f0f2f6; 
-        border-radius: 10px;
-        margin-bottom: 2rem;
-        text-align: center;
-    }
-    </style>
+    <div class="hero-container">
+        <h2>Welcome to EasySurv</h2>
+        <div class="subtitle">Survival analysis for everyone</div>
+        <p>Publication-quality Kaplan&ndash;Meier, Cox regression, and competing-risks analysis &mdash; without writing a single line of code.</p>
+    </div>
     """, unsafe_allow_html=True)
-    
-    st.markdown('<div class="hero-box">', unsafe_allow_html=True)
-    st.markdown("## 👋 Welcome to EasySurv")
-    st.markdown("### Survival Analysis for everyone")
-    st.markdown("Perform publication-quality Kaplan-Meier, Cox Regression, and Competing Risks analysis in seconds without writing a single line of code.")
-    st.markdown('</div>', unsafe_allow_html=True)
-    
+
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.info("**📊 Interactive Plots**\n\nCreate publication-quality curves with aligned risk tables and custom themes.")
+        st.markdown("""<div class="feature-card">
+            <div class="icon">📊</div>
+            <h4>Interactive Plots</h4>
+            <p>Publication-quality curves with aligned risk tables, estimate labels, and custom themes.</p>
+        </div>""", unsafe_allow_html=True)
     with col2:
-        st.success("**🤖 AI Narrator**\n\nGet instant natural language summaries of your P-values and Hazard Ratios.")
+        st.markdown("""<div class="feature-card">
+            <div class="icon">🤖</div>
+            <h4>AI Narrator</h4>
+            <p>Instant natural language summaries of P-values and Hazard Ratios in your journal's style.</p>
+        </div>""", unsafe_allow_html=True)
     with col3:
-        st.warning("**🧬 Biomarker Optimum Threshold**\n\nAutomatically find optimal cutoffs and visualize correlations.")
+        st.markdown("""<div class="feature-card">
+            <div class="icon">🧬</div>
+            <h4>Biomarker Thresholds</h4>
+            <p>Automatically find optimal cutoffs and visualize correlations with survival.</p>
+        </div>""", unsafe_allow_html=True)
 
     st.divider()
     
@@ -128,8 +384,18 @@ else:
                  if os.path.exists(p):
                      df = pd.read_csv(p) # Direct read
                      break
-        except:
+        except Exception:
              pass
+
+# Check for session-restored dataframe
+if df is None and "_restored_df" in st.session_state:
+    df = st.session_state["_restored_df"]
+
+# Helper to get restored sidebar config defaults
+def _restored_default(key, fallback):
+    """Return restored value if a session was just loaded, otherwise return fallback."""
+    restored = st.session_state.get("_restored_sidebar", {})
+    return restored.get(key, fallback)
 
 if df is not None:
 
@@ -140,6 +406,10 @@ if df is not None:
     # --- SESSION STATE & CUSTOM VARIABLES ---
     if 'custom_cutoffs' not in st.session_state:
         st.session_state.custom_cutoffs = []
+    
+    # Analysis Bank: accumulate analyses across endpoint changes
+    if 'analysis_bank' not in st.session_state:
+        st.session_state.analysis_bank = []
         
     # Apply valid custom cutoffs to df
     if st.session_state.custom_cutoffs:
@@ -222,7 +492,7 @@ if df is not None:
                     mask_low = pd.Series([False]*len(df), index=df.index)
                     
                     # Sanitize for matching
-                    clean_col_map = {c: c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in df.columns}
+                    clean_col_map = {c: statistics.sanitize_name(c) for c in df.columns}
                     df_renamed = df.rename(columns=clean_col_map)
                     
                     def find_var_persist(v_name, d, d_renamed):
@@ -231,12 +501,12 @@ if df is not None:
                             return (c > 0) if pd.api.types.is_numeric_dtype(c) else c.astype(bool)
                         # Prefix match
                         for col in d.columns:
-                            c_clean = col.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                            c_clean = statistics.sanitize_name(col)
                             if v_name.startswith(c_clean + "_"):
                                 val_part = v_name[len(c_clean)+1:]
                                 # Loose match against values
                                 for val in d[col].dropna().unique():
-                                     v_san = str(val).replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                     v_san = statistics.sanitize_name(str(val))
                                      if v_name == c_clean + "_" + v_san:
                                          return (d[col] == val)
                         return None
@@ -258,10 +528,21 @@ if df is not None:
                         df[r_name] = np.select(conds, choic, default="Intermediate Risk")
                      
                     st.toast(f"✅ Risk Variable '{r_name}' loaded successfully!", icon="🧬")
-                        
+
                 except Exception as e:
                     st.error(f"Failed to rebuild Risk System {combo_def['name']}: {e}")
-    
+
+            elif combo_def['type'] == 'date_interval':
+                try:
+                    if combo_def['start'] in df.columns and combo_def['end'] in df.columns:
+                        _vals, _ = statistics.date_interval(
+                            df[combo_def['start']], df[combo_def['end']],
+                            unit=combo_def.get('unit', 'months'),
+                            dayfirst=combo_def.get('dayfirst', True))
+                        df[combo_def['name']] = _vals
+                except Exception as e:
+                    st.error(f"Failed to compute date interval {combo_def['name']}: {e}")
+
     # --- DATA FILTRATION ---
     # --- DATA FILTRATION ---
     with st.expander("🔍 Step 1: Filter Data (Optional)", expanded=True):
@@ -301,175 +582,486 @@ if df is not None:
             df = df_filtered
 
     st.subheader("Data Preview")
-    st.dataframe(df.head())
+    st.dataframe(df.head(), use_container_width=True)
+
+    # --- DATA VALIDATION ---
+    with st.expander("Data Validation", expanded=False):
+        validation_issues = validate_dataset(df)
+        if not validation_issues:
+            st.success("No issues detected in the dataset.")
+        else:
+            errors, warnings, infos = format_validation_report(validation_issues)
+            if errors:
+                for e in errors:
+                    st.error(e)
+            if warnings:
+                for w in warnings:
+                    st.warning(w)
+            if infos:
+                for i in infos:
+                    st.info(i)
 
     # Column Selection
     columns = df.columns.tolist()
-    
-    st.sidebar.subheader("Variable Selection")
-    
+
+    st.sidebar.subheader("Variables")
+
     # Time and Event columns
-    # Time and Event columns
-    # Smart Defaults for Demo
+    # Smart Defaults: session restore > demo defaults > intelligent column matching
     default_time_idx = 0
     default_event_idx = 0
     default_group_idx = 0
-    
-    if st.session_state.get('demo_loaded', False):
+
+    # Check for session-restored column selections first
+    _r_time = _restored_default("time_col", None)
+    _r_event = _restored_default("event_col", None)
+    _r_group = _restored_default("group_col", None)
+
+    if _r_time and _r_time in columns:
+        default_time_idx = columns.index(_r_time)
+    elif st.session_state.get('demo_loaded', False):
         if "OS_Months" in columns:
             default_time_idx = columns.index("OS_Months")
         if "Event_Occurred" in columns:
             default_event_idx = columns.index("Event_Occurred")
         if "Treatment_Arm" in columns:
-            # +1 because "None" is at index 0
             default_group_idx = columns.index("Treatment_Arm") + 1
     else:
-        # Standard intelligent defaults
         if "OS_Days" in columns: default_time_idx = columns.index("OS_Days")
         elif "Time" in columns: default_time_idx = columns.index("Time")
-        
         if "OS_Status" in columns: default_event_idx = columns.index("OS_Status")
         elif "Status" in columns: default_event_idx = columns.index("Status")
-        
         if "MRD_Status" in columns: default_group_idx = columns.index("MRD_Status") + 1
-        
-    # User requested revert: "just make it blank with no error message by default"
-    # We keep default_group_idx as is (likely 0/"None" unless auto-detected above)
-    # ----------------------------------------------------------------------------------------
 
-    time_col = st.sidebar.selectbox("Time Column (Duration)", columns, index=default_time_idx)
-    event_col = st.sidebar.selectbox("Event Column (Status: 1=Event, 0=Censored)", columns, index=default_event_idx)
-    
+    if _r_event and _r_event in columns:
+        default_event_idx = columns.index(_r_event)
+    if _r_group and _r_group in (["None"] + columns):
+        default_group_idx = (["None"] + columns).index(_r_group)
+
+    time_col = st.sidebar.selectbox(
+        "Time Column (Duration)", columns, index=default_time_idx,
+        help="Select the column containing survival/follow-up time (e.g., OS_Months, PFS_Days). Must be numeric and >= 0."
+    )
+    event_col = st.sidebar.selectbox(
+        "Event Column (Status: 1=Event, 0=Censored)", columns, index=default_event_idx,
+        help="Select the column indicating whether the event occurred (1) or the patient was censored (0). For competing risks, use 0=censored, 1=event of interest, 2=competing event."
+    )
+
     # Grouping Variable
-    group_col = st.sidebar.selectbox("Grouping Variable (e.g., MRD Status)", ["None"] + columns, index=default_group_idx)
+    group_col = st.sidebar.selectbox(
+        "Grouping Variable (e.g., MRD Status)", ["None"] + columns, index=default_group_idx,
+        help="Select a categorical variable to compare groups (e.g., Treatment Arm, Risk Group). Leave as 'None' for overall analysis."
+    )
+
+    # --- MODE TOGGLE ---
+    st.sidebar.divider()
+    _app_mode = st.sidebar.radio(
+        "Mode",
+        ["⚡ Express", "🔧 Pro"],
+        index=1,
+        horizontal=True,
+        help="Express: publication-ready plots with smart defaults. Pro: full customization of every element."
+    )
+    is_express = (_app_mode == "⚡ Express")
 
     # --- SIDEBAR CONFIGURATION ---
     st.sidebar.header("Configuration")
-    
-    # 1. Global Aesthetics
-    st.sidebar.subheader("Global Theme & Typography")
-    font_options = ["sans-serif", "serif", "monospace", "Arial", "Helvetica", "Times New Roman", "Courier New", "Verdana", "Comic Sans MS"]
-    selected_font = st.sidebar.selectbox("Font Family", font_options, index=0)
-    plt.rcParams['font.family'] = selected_font
-    
-    # Title customizations (Shared)
-    title_fontsize = st.sidebar.slider("Title Font Size", 10, 30, 20)
-    title_bold = st.sidebar.checkbox("Bold Title", value=True)
-    title_fontweight = 'bold' if title_bold else 'normal'
 
-    p_val_fontsize = 12 # Default
-
-    axes_fontsize = st.sidebar.number_input("Axes/Tick Font Size", min_value=6, value=12)
-    legend_fontsize = st.sidebar.number_input("Legend Font Size", min_value=6, value=10)
-    line_width = st.sidebar.slider("Line Width", 0.5, 5.0, 1.5)
+    # ==========================================
+    # ALWAYS VISIBLE: Narrator + Theme + CI
+    # ==========================================
     
-    # Global Plot Configuration (Elements affecting all plots)
-    st.sidebar.subheader("Global Plot Configuration")
-    show_risk_table = st.sidebar.checkbox("Show At-Risk Table", value=True)
-    table_height = st.sidebar.slider("Table Offset", -0.5, -0.1, -0.25, 0.05) if show_risk_table else -0.25
-    show_censored = st.sidebar.checkbox("Show Censored Ticks", value=True)
-    show_ci = st.sidebar.checkbox("Show 95% CI", value=True)
-    
-    # 2. Main Plot Settings (Kaplan-Meier)
-    with st.sidebar.expander("Main Plot Settings (KM)", expanded=False):
-        st.markdown("### Layout & Axes")
-        main_title = st.text_input("Main Plot Title", value="Survival")
-        x_label = st.text_input("X-Axis Label", value="Time (Months)")
-        y_label = st.text_input("Y-Axis Label", value="Survival Probability")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            tick_interval = st.number_input("X-Tick Step", value=12.0)
-            y_min = st.number_input("Y Min", value=0.0, step=0.1)
-        with col2:
-            y_tick_interval = st.number_input("Y-Tick Step", value=0.1)
-            y_max = st.number_input("Y Max", value=1.0, step=0.1)
-            
-        plot_height = st.slider("Plot Height", 4, 12, 6)
-        plot_width = st.slider("Plot Width", 6, 15, 10)
-        
-        # Elements (Moved to Global)
-        
-        st.markdown("### Legend")
-        show_legend_main = st.checkbox("Show Legend (Main)", value=True)
-        show_legend_box_main = st.checkbox("Box Legend (Main)", value=True)
-        leg_x_main = st.slider("Legend X (Main)", 0.0, 1.0, 0.8)
-        leg_y_main = st.slider("Legend Y (Main)", 0.0, 1.0, 0.9)
-        
-        st.markdown("### P-value")
-        show_p_val_plot = st.checkbox("Show P-value (Main)", value=False)
-        show_p_val_box_main = st.checkbox("Box P-value (Main)", value=True)
-        pval_x_main = st.slider("P-val X (Main)", 0.0, 1.0, 0.95)
-        pval_y_main = st.slider("P-val Y (Main)", 0.0, 1.0, 0.05)
+    # Narrator Journal Style (USP — always visible)
+    st.sidebar.subheader("AI Narrator")
+    try:
+        narrator_style_labels = narrator.get_style_labels()
+        _style_keys = list(narrator_style_labels.keys())
+        _r_style = _restored_default("narrator_style_name", "Standard")
+        _style_idx = _style_keys.index(_r_style) if _r_style in _style_keys else 0
+        narrator_style_name = st.sidebar.selectbox(
+            "Narrator Journal Style",
+            _style_keys,
+            index=_style_idx,
+            format_func=lambda x: narrator_style_labels[x],
+            help="Choose how the AI Narrator formats p-values and confidence intervals."
+        )
+    except Exception:
+        narrator_style_name = "Standard"
 
-        st.markdown("### Free Text Annotations")
-        main_annotations = []
-        for i in range(1, 6):
-            with st.expander(f"Annotation {i}", expanded=(i==1)):
-                m_txt = st.text_area(f"Text ({i})", value="", placeholder="e.g. HR=0.45", key=f"main_txt_{i}", height=70)
-                m_x = st.slider(f"X ({i})", 0.0, 1.0, 0.5, key=f"main_x_{i}")
-                m_y = st.slider(f"Y ({i})", 0.0, 1.0, 0.5, key=f"main_y_{i}")
-                m_sz = st.number_input(f"Size ({i})", min_value=6, value=12, key=f"main_sz_{i}")
-                m_box = st.checkbox(f"Box ({i})", value=False, key=f"main_bx_{i}")
-                
-                if m_txt:
-                    main_annotations.append({'text': m_txt, 'x': m_x, 'y': m_y, 'size': m_sz, 'box': m_box})
+    narrator_detail_level = st.sidebar.radio(
+        "Narrator Detail",
+        ["Concise", "Detailed"],
+        index=1,
+        horizontal=True,
+        help="Concise: compact summary for posters/abstracts. Detailed: full prose for manuscripts."
+    )
+    narrator_event_name = st.sidebar.text_input(
+        "Endpoint Name",
+        value=_restored_default("narrator_event_name", "OS"),
+        help="e.g. OS, RFS, EFS, DFS, PFS. Used by the narrator to generate natural language."
+    )
 
-    # 3. CIF Plot Settings
-    with st.sidebar.expander("CIF Plot Settings (Competing Risks)", expanded=False):
-        st.markdown("### Layout & Axes")
-        cif_title = st.text_input("CIF Plot Title", value="Cumulative Incidence")
-        cif_y_label = st.text_input("CIF Y-Label", value="Cumulative Incidence Probability")
-        
-        col3, col4 = st.columns(2)
-        with col3:
-            cif_y_min = st.number_input("CIF Y Min", value=0.0, step=0.1)
-            cif_y_tick_interval = st.number_input("CIF Y-Tick Step", value=0.1)
-        with col4:
-            cif_y_max = st.number_input("CIF Y Max", value=1.05, step=0.1)
-        
-        st.markdown("### Legend")
-        show_legend_cif = st.checkbox("Show Legend (CIF)", value=True)
-        show_legend_box_cif = st.checkbox("Box Legend (CIF)", value=True)
-        leg_x_cif = st.slider("Legend X (CIF)", 0.0, 1.0, 0.8)
-        leg_y_cif = st.slider("Legend Y (CIF)", 0.0, 1.0, 0.8)
-        
-        st.markdown("### P-value")
-        show_p_val_plot_cif = st.checkbox("Show P-value (CIF)", value=False)
-        show_p_val_box_cif = st.checkbox("Box P-value (CIF)", value=True)
-        pval_x_cif = st.slider("P-val X (CIF)", 0.0, 1.0, 0.95)
-        pval_y_cif = st.slider("P-val Y (CIF)", 0.0, 1.0, 0.2)
-        
-        st.markdown("### Free Text Annotations")
-        cif_annotations = []
-        for i in range(1, 6):
-             with st.expander(f"Annotation {i} (CIF)", expanded=(i==1)):
-                c_txt = st.text_area(f"Text ({i})", value="", placeholder="e.g. p=0.003", key=f"cif_txt_{i}", height=70)
-                c_x = st.slider(f"X ({i})", 0.0, 1.0, 0.5, key=f"cif_x_{i}")
-                c_y = st.slider(f"Y ({i})", 0.0, 1.0, 0.5, key=f"cif_y_{i}")
-                c_sz = st.number_input(f"Size ({i})", min_value=6, value=12, key=f"cif_sz_{i}")
-                c_box = st.checkbox(f"Box ({i})", value=False, key=f"cif_bx_{i}")
-                
-                if c_txt:
-                    cif_annotations.append({'text': c_txt, 'x': c_x, 'y': c_y, 'size': c_sz, 'box': c_box})
-        
-    # Theme Selection (moved to bottom or keep global)
-    st.sidebar.subheader("Color Theme")
-
-    # Theme Selection
-    st.sidebar.subheader("Aesthetics & Themes")
-    
-    # Use themes from utils
+    # Color Theme Selection (USP — always visible)
+    st.sidebar.subheader("Color Palette")
     all_themes = utils.all_themes
     theme_names = ["Default"] + list(utils.journal_themes.keys()) + list(utils.fun_themes.keys()) + ["Custom"]
-    
-    selected_theme = st.sidebar.selectbox("Choose Theme", theme_names)
-    
+    _r_theme = _restored_default("selected_theme", "Default")
+    _theme_idx = theme_names.index(_r_theme) if _r_theme in theme_names else 0
+    selected_theme = st.sidebar.selectbox("Choose Theme", theme_names, index=_theme_idx)
+
+    # CI toggle (always visible per user request)
+    show_ci = st.sidebar.checkbox("Show 95% CI Shading", value=_restored_default("show_ci", True))
+
+    # ==========================================
+    # EXPRESS: Minimal titles + smart defaults
+    # ==========================================
+    if is_express:
+        # Quick title inputs
+        st.sidebar.subheader("Titles")
+        main_title = st.sidebar.text_input("KM Plot Title", value="Survival")
+        cif_title = st.sidebar.text_input("CIF Plot Title", value="Cumulative Incidence")
+        
+        # Show P-value on plot
+        show_p_val_plot = st.sidebar.checkbox("Show P-value on KM Plot", value=True)
+        show_p_val_plot_cif = st.sidebar.checkbox("Show P-value on CIF Plot", value=True)
+
+        # Smart defaults for everything else
+        selected_font = "sans-serif"
+        plt.rcParams['font.family'] = selected_font
+        title_fontsize = 20
+        title_fontweight = 'bold'
+        axes_fontsize = 12
+        legend_fontsize = 10
+        line_width = 1.5
+        p_val_fontsize_main = 12
+        p_val_fontsize_cif = 12
+        show_censored = True
+        show_risk_table = True
+        show_censored_in_table = False
+        risk_table_format = "At-risk only"
+        table_height = -0.25
+        risk_table_label_pad = -0.10
+        risk_table_title = False
+        risk_table_fontsize = 10
+        risk_table_bold = True
+        
+        # KM plot defaults
+        x_label = "Time (Months)"
+        y_label = "Survival Probability"
+        tick_interval = 12.0
+        y_min = 0.0
+        y_max = 1.0
+        y_tick_interval = 0.1
+        plot_height = 6
+        plot_width = 10
+        show_legend_main = True
+        legend_style_main = "Standard"
+        show_legend_box_main = True
+        leg_x_main = 0.65
+        leg_y_main = 0.85
+        topbar_y_main = 1.04
+        show_p_val_box_main = True
+        pval_x_main = 0.95
+        pval_y_main = 0.05
+        show_median_main = False
+        show_x_year_main = False
+        x_year_time_main = None
+        est_label_mode_main = "Off"
+        est_label_param_main = "OS"
+        est_label_time_main = 36.0
+        est_label_placement_main = "on_curve"
+        est_label_fontsize_main = 9
+        est_label_textcolor_main = "theme"
+        est_label_bold_main = True
+        est_label_gap_main = 0.12
+        main_annotations = []
+        
+        # CIF plot defaults
+        cif_y_label = "Cumulative Incidence Probability"
+        cif_y_min = 0.0
+        cif_y_max = 1.05
+        cif_y_tick_interval = 0.1
+        show_legend_cif = True
+        legend_style_cif = "Standard"
+        show_legend_box_cif = True
+        leg_x_cif = 0.65
+        leg_y_cif = 0.75
+        topbar_y_cif = 1.04
+        show_p_val_box_cif = True
+        pval_x_cif = 0.95
+        pval_y_cif = 0.2
+        show_median_cif = False
+        show_x_year_cif = False
+        x_year_time_cif = None
+        est_label_mode_cif = "Off"
+        est_label_param_cif = "CIR"
+        est_label_time_cif = 36.0
+        est_label_placement_cif = "on_curve"
+        est_label_fontsize_cif = 9
+        est_label_textcolor_cif = "theme"
+        est_label_bold_cif = True
+        est_label_gap_cif = 0.12
+        cif_annotations = []
+
+    # ==========================================
+    # PRO: Full customization (existing sidebar)
+    # ==========================================
+    else:
+        # 1. Typography & Style
+        st.sidebar.subheader("Typography & Style")
+
+        font_options = ["sans-serif", "serif", "monospace", "Arial", "Helvetica", "Times New Roman", "Courier New", "Verdana", "Comic Sans MS"]
+        _r_font = _restored_default("selected_font", "sans-serif")
+        _font_idx = font_options.index(_r_font) if _r_font in font_options else 0
+        selected_font = st.sidebar.selectbox("Font Family", font_options, index=_font_idx)
+        plt.rcParams['font.family'] = selected_font
+
+        with st.sidebar.expander("Font Sizes & Line Width", expanded=False):
+            title_fontsize = st.slider("Title Font Size", 10, 30, int(_restored_default("title_fontsize", 20)))
+            title_bold = st.checkbox("Bold Title", value=_restored_default("title_bold", True))
+            axes_fontsize = st.number_input("Axes/Tick Font Size", min_value=6, value=int(_restored_default("axes_fontsize", 12)))
+            legend_fontsize = st.number_input("Legend Font Size", min_value=6, value=int(_restored_default("legend_fontsize", 10)))
+            line_width = st.slider("Line Width", 0.5, 5.0, float(_restored_default("line_width", 1.5)))
+        title_fontweight = 'bold' if title_bold else 'normal'
+
+        p_val_fontsize_main = 12
+        p_val_fontsize_cif = 12
+
+        # Plot Elements
+        st.sidebar.subheader("Plot Elements")
+        show_censored = st.sidebar.checkbox("Show Censored Ticks", value=_restored_default("show_censored", True))
+        show_risk_table = st.sidebar.checkbox("Show At-Risk Table", value=_restored_default("show_risk_table", True))
+        if show_risk_table:
+            with st.sidebar.expander("At-Risk Table Options", expanded=False):
+                _risk_table_options = ["At-risk only", "At-risk with censored (n censored)"]
+                _r_risk_fmt = _restored_default("risk_table_format", "At-risk only")
+                _risk_fmt_idx = _risk_table_options.index(_r_risk_fmt) if _r_risk_fmt in _risk_table_options else 0
+                risk_table_format = st.radio(
+                    "Format",
+                    _risk_table_options,
+                    index=_risk_fmt_idx,
+                    help="'At-risk with censored' shows cumulative censored count in brackets, e.g. 85 (3). Common in JCO/NEJM publications."
+                )
+                show_censored_in_table = (risk_table_format == _risk_table_options[1])
+                table_height = st.slider("Table Offset (Y)", -0.5, -0.1, float(_restored_default("table_height", -0.25)), 0.05)
+                risk_table_label_pad = st.slider("Label Gap", -0.25, -0.02, float(_restored_default("risk_table_label_pad", -0.10)), 0.01,
+                                                  help="Horizontal gap between group labels and the first data column. More negative = wider gap.")
+                risk_table_title = st.checkbox("Show Table Title", value=_restored_default("risk_table_title", False),
+                                                help="Adds a title row (e.g. 'No. at risk') above the table.")
+                risk_table_fontsize = st.number_input("Font Size", min_value=6, max_value=20,
+                                                       value=int(_restored_default("risk_table_fontsize", 10)), step=1)
+                risk_table_bold = st.checkbox("Bold Text", value=_restored_default("risk_table_bold", True))
+        else:
+            show_censored_in_table = False
+            risk_table_format = "At-risk only"
+            table_height = -0.25
+            risk_table_label_pad = -0.10
+            risk_table_title = False
+            risk_table_fontsize = 10
+            risk_table_bold = True
+        
+        # 2. Main Plot Settings (Kaplan-Meier)
+        with st.sidebar.expander("Main Plot Settings (KM)", expanded=False):
+            st.markdown("### Layout & Axes")
+            main_title = st.text_input("Main Plot Title", value="Survival")
+            x_label = st.text_input("X-Axis Label", value="Time (Months)")
+            y_label = st.text_input("Y-Axis Label", value="Survival Probability")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                tick_interval = st.number_input("X-Tick Step", value=12.0)
+                y_min = st.number_input("Y Min", value=0.0, step=0.1)
+            with col2:
+                y_tick_interval = st.number_input("Y-Tick Step", value=0.1)
+                y_max = st.number_input("Y Max", value=1.0, step=0.1)
+                
+            plot_height = st.slider("Plot Height", 4, 12, 6)
+            plot_width = st.slider("Plot Width", 6, 15, 10)
+            
+            st.markdown("### Legend")
+            show_legend_main = st.checkbox("Show Legend (Main)", value=True)
+            legend_style_main = st.radio("Legend Style (Main)", ["Standard", "Top bar"],
+                                          index=0, horizontal=True, key="legend_style_main",
+                                          help="Standard: inside plot. Top bar: horizontal bar above the plot area (journal style).")
+            topbar_y_main = 1.04
+            if legend_style_main == "Standard":
+                show_legend_box_main = st.checkbox("Box Legend (Main)", value=True)
+                leg_x_main = st.slider("Legend X (Main)", 0.0, 1.0, 0.8)
+                leg_y_main = st.slider("Legend Y (Main)", 0.0, 1.0, 0.9)
+            else:
+                show_legend_box_main = False
+                leg_x_main = 0.8
+                leg_y_main = 0.9
+                topbar_y_main = st.slider("Top Bar Position (Main)", 0.98, 1.12, 1.04, 0.01,
+                                           key="topbar_y_main",
+                                           help="Adjust vertical position of the top bar legend. Higher = more space above plot.")
+            
+            st.markdown("### P-value")
+            show_p_val_plot = st.checkbox("Show P-value (Main)", value=False)
+            show_p_val_box_main = st.checkbox("Box P-value (Main)", value=True)
+            pval_x_main = st.slider("P-val X (Main)", 0.0, 1.0, 0.95)
+            pval_y_main = st.slider("P-val Y (Main)", 0.0, 1.0, 0.05)
+            p_val_fontsize_main = st.number_input("P-value font size", min_value=6, max_value=24, value=12,
+                                                    key="p_val_fontsize_main")
+
+            st.markdown("### Auto Annotations")
+            show_median_main = st.checkbox("Show Median Survival Lines", value=False, key="show_median_main",
+                                            help="Draw dashed drop-lines at median survival for each group")
+            show_x_year_main = st.checkbox("Show Timepoint Survival Lines", value=False, key="show_x_year_main",
+                                            help="Draw dashed lines at a specific timepoint showing survival %")
+            x_year_time_main = None
+            if show_x_year_main:
+                x_year_time_main = st.number_input("Timepoint", min_value=0.0, value=36.0, step=6.0,
+                                                    key="x_year_time_main",
+                                                    help="e.g. 24 for 2-year, 36 for 3-year, 60 for 5-year survival")
+
+            st.markdown("### Estimate Labels")
+            _est_mode_options_main = ["Off", "Timepoint estimate", "Median survival"]
+            est_label_mode_main = st.radio("Show Estimate Labels", _est_mode_options_main,
+                                            index=0, key="est_label_mode_main",
+                                            help="Auto-compute and display survival estimates with 95% CI on the plot")
+            est_label_param_main = "OS"
+            est_label_time_main = 36.0
+            est_label_placement_main = "on_curve"
+            est_label_fontsize_main = 9
+            est_label_textcolor_main = "theme"
+            est_label_bold_main = True
+            est_label_gap_main = 0.12
+            if est_label_mode_main != "Off":
+                est_label_param_main = st.text_input("Parameter name", value="OS", key="est_label_param_main",
+                                                      help="e.g. OS, RFS, EFS, DFS, PFS")
+                if est_label_mode_main == "Timepoint estimate":
+                    est_label_time_main = st.number_input("Timepoint (months)", min_value=0.0, value=36.0, step=6.0,
+                                                           key="est_label_time_main")
+                _placement_options = ["On curve", "Top of plot", "Bottom of plot"]
+                est_label_placement_main = st.radio("Placement", _placement_options,
+                                                     index=0, key="est_label_placement_main", horizontal=True)
+                est_label_placement_main = {"On curve": "on_curve", "Top of plot": "top", "Bottom of plot": "bottom"}[est_label_placement_main]
+                est_label_fontsize_main = st.number_input("Label font size", min_value=6, max_value=20, value=9,
+                                                           key="est_label_fontsize_main")
+                _tc_options = ["Theme color", "Black"]
+                est_label_textcolor_main = st.radio("Estimate text color", _tc_options,
+                                                     index=0, key="est_label_textcolor_main", horizontal=True,
+                                                     help="Black makes estimates more readable; group names stay in theme color.")
+                est_label_textcolor_main = "black" if est_label_textcolor_main == "Black" else "theme"
+                est_label_bold_main = st.checkbox("Bold labels", value=True, key="est_label_bold_main")
+                if est_label_placement_main in ("top", "bottom"):
+                    est_label_gap_main = st.slider("Label gap", 0.05, 0.35, 0.12, 0.01,
+                                                    key="est_label_gap_main",
+                                                    help="Horizontal gap between group name and estimate text. Increase for long group names.")
+
+            st.markdown("### Free Text Annotations")
+            main_annotations = []
+            for i in range(1, 6):
+                with st.expander(f"Annotation {i}", expanded=(i==1)):
+                    m_txt = st.text_area(f"Text ({i})", value="", placeholder="e.g. HR=0.45", key=f"main_txt_{i}", height=70)
+                    m_x = st.slider(f"X ({i})", 0.0, 1.0, 0.5, key=f"main_x_{i}")
+                    m_y = st.slider(f"Y ({i})", 0.0, 1.0, 0.5, key=f"main_y_{i}")
+                    m_sz = st.number_input(f"Size ({i})", min_value=6, value=12, key=f"main_sz_{i}")
+                    m_box = st.checkbox(f"Box ({i})", value=False, key=f"main_bx_{i}")
+
+                    if m_txt:
+                        main_annotations.append({'text': m_txt, 'x': m_x, 'y': m_y, 'size': m_sz, 'box': m_box})
+
+        # 3. CIF Plot Settings
+        with st.sidebar.expander("CIF Plot Settings (Competing Risks)", expanded=False):
+            st.markdown("### Layout & Axes")
+            cif_title = st.text_input("CIF Plot Title", value="Cumulative Incidence")
+            cif_y_label = st.text_input("CIF Y-Label", value="Cumulative Incidence Probability")
+            
+            col3, col4 = st.columns(2)
+            with col3:
+                cif_y_min = st.number_input("CIF Y Min", value=0.0, step=0.1)
+                cif_y_tick_interval = st.number_input("CIF Y-Tick Step", value=0.1)
+            with col4:
+                cif_y_max = st.number_input("CIF Y Max", value=1.05, step=0.1)
+            
+            st.markdown("### Legend")
+            show_legend_cif = st.checkbox("Show Legend (CIF)", value=True)
+            legend_style_cif = st.radio("Legend Style (CIF)", ["Standard", "Top bar"],
+                                         index=0, horizontal=True, key="legend_style_cif",
+                                         help="Standard: inside plot. Top bar: horizontal bar above the plot area (journal style).")
+            topbar_y_cif = 1.04
+            if legend_style_cif == "Standard":
+                show_legend_box_cif = st.checkbox("Box Legend (CIF)", value=True)
+                leg_x_cif = st.slider("Legend X (CIF)", 0.0, 1.0, 0.8)
+                leg_y_cif = st.slider("Legend Y (CIF)", 0.0, 1.0, 0.8)
+            else:
+                show_legend_box_cif = False
+                leg_x_cif = 0.8
+                leg_y_cif = 0.8
+                topbar_y_cif = st.slider("Top Bar Position (CIF)", 0.98, 1.12, 1.04, 0.01,
+                                          key="topbar_y_cif",
+                                          help="Adjust vertical position of the top bar legend. Higher = more space above plot.")
+            
+            st.markdown("### P-value")
+            show_p_val_plot_cif = st.checkbox("Show P-value (CIF)", value=False)
+            show_p_val_box_cif = st.checkbox("Box P-value (CIF)", value=True)
+            pval_x_cif = st.slider("P-val X (CIF)", 0.0, 1.0, 0.95)
+            pval_y_cif = st.slider("P-val Y (CIF)", 0.0, 1.0, 0.2)
+            p_val_fontsize_cif = st.number_input("P-value font size (CIF)", min_value=6, max_value=24, value=12,
+                                                   key="p_val_fontsize_cif")
+            
+            st.markdown("### Auto Annotations")
+            show_median_cif = st.checkbox("Show Median CIF Lines", value=False, key="show_median_cif",
+                                           help="Draw dashed drop-lines where cumulative incidence reaches 50%")
+            show_x_year_cif = st.checkbox("Show Timepoint CIF Lines", value=False, key="show_x_year_cif",
+                                           help="Draw dashed lines at a specific timepoint showing cumulative incidence %")
+            x_year_time_cif = None
+            if show_x_year_cif:
+                x_year_time_cif = st.number_input("Timepoint (CIF)", min_value=0.0, value=36.0, step=6.0,
+                                                   key="x_year_time_cif")
+
+            st.markdown("### Estimate Labels")
+            _est_mode_options_cif = ["Off", "Timepoint estimate", "Median CIF time"]
+            est_label_mode_cif = st.radio("Show Estimate Labels (CIF)", _est_mode_options_cif,
+                                           index=0, key="est_label_mode_cif",
+                                           help="Auto-compute and display CIF estimates with 95% CI on the plot")
+            est_label_param_cif = "CIR"
+            est_label_time_cif = 36.0
+            est_label_placement_cif = "on_curve"
+            est_label_fontsize_cif = 9
+            est_label_textcolor_cif = "theme"
+            est_label_bold_cif = True
+            est_label_gap_cif = 0.12
+            if est_label_mode_cif != "Off":
+                est_label_param_cif = st.text_input("Parameter name (CIF)", value="CIR", key="est_label_param_cif",
+                                                     help="e.g. CIR, CI of relapse, CI of NRM")
+                if est_label_mode_cif == "Timepoint estimate":
+                    est_label_time_cif = st.number_input("Timepoint (months, CIF)", min_value=0.0, value=36.0, step=6.0,
+                                                          key="est_label_time_cif")
+                _placement_options_cif = ["On curve", "Top of plot", "Bottom of plot"]
+                est_label_placement_cif = st.radio("Placement (CIF)", _placement_options_cif,
+                                                    index=0, key="est_label_placement_cif", horizontal=True)
+                est_label_placement_cif = {"On curve": "on_curve", "Top of plot": "top", "Bottom of plot": "bottom"}[est_label_placement_cif]
+                est_label_fontsize_cif = st.number_input("Label font size (CIF)", min_value=6, max_value=20, value=9,
+                                                          key="est_label_fontsize_cif")
+                _tc_options_cif = ["Theme color", "Black"]
+                est_label_textcolor_cif = st.radio("Estimate text color (CIF)", _tc_options_cif,
+                                                    index=0, key="est_label_textcolor_cif", horizontal=True,
+                                                    help="Black makes estimates more readable; group names stay in theme color.")
+                est_label_textcolor_cif = "black" if est_label_textcolor_cif == "Black" else "theme"
+                est_label_bold_cif = st.checkbox("Bold labels (CIF)", value=True, key="est_label_bold_cif")
+                if est_label_placement_cif in ("top", "bottom"):
+                    est_label_gap_cif = st.slider("Label gap (CIF)", 0.05, 0.35, 0.12, 0.01,
+                                                   key="est_label_gap_cif",
+                                                   help="Horizontal gap between group name and estimate text.")
+
+            st.markdown("### Free Text Annotations")
+            cif_annotations = []
+            for i in range(1, 6):
+                 with st.expander(f"Annotation {i} (CIF)", expanded=(i==1)):
+                    c_txt = st.text_area(f"Text ({i})", value="", placeholder="e.g. p=0.003", key=f"cif_txt_{i}", height=70)
+                    c_x = st.slider(f"X ({i})", 0.0, 1.0, 0.5, key=f"cif_x_{i}")
+                    c_y = st.slider(f"Y ({i})", 0.0, 1.0, 0.5, key=f"cif_y_{i}")
+                    c_sz = st.number_input(f"Size ({i})", min_value=6, value=12, key=f"cif_sz_{i}")
+                    c_box = st.checkbox(f"Box ({i})", value=False, key=f"cif_bx_{i}")
+
+                    if c_txt:
+                        cif_annotations.append({'text': c_txt, 'x': c_x, 'y': c_y, 'size': c_sz, 'box': c_box})
+
     # --- DOWNLOAD MODIFIED DATA (At bottom of sidebar) ---
     st.sidebar.divider()
-    # Use df (which has new vars added at the top) or df_clean (which filters NaNs). 
-    # Usually users want the full dataset with new variables, so 'df' is better, 
-    # but 'df_filtered' if they want the filtered view. Let's give them the full 'df' with enhancements.
     if df is not None:
         csv_buffer = df.to_csv(index=False).encode('utf-8')
         st.sidebar.download_button(
@@ -480,12 +1072,69 @@ if df is not None:
             help="Download the dataset including all new variables created in this session."
         )
     
+    # --- SAVE SESSION ---
+    st.sidebar.divider()
+    st.sidebar.subheader("Session")
+    session_notes = st.sidebar.text_input(
+        "Session Notes (optional)",
+        value="",
+        placeholder="e.g., OS analysis with MRD stratification",
+        help="Add a note to help you remember what this session contains."
+    )
+    if st.sidebar.button("Save Current Session", type="secondary"):
+        # Collect current sidebar config
+        current_sidebar = {
+            "time_col": time_col,
+            "event_col": event_col,
+            "group_col": group_col,
+            "narrator_style_name": narrator_style_name,
+            "narrator_event_name": narrator_event_name,
+            "selected_font": selected_font,
+            "title_fontsize": title_fontsize,
+            "title_bold": title_bold,
+            "axes_fontsize": axes_fontsize,
+            "legend_fontsize": legend_fontsize,
+            "line_width": line_width,
+            "show_risk_table": show_risk_table,
+            "risk_table_format": risk_table_format,
+            "table_height": table_height,
+            "risk_table_label_pad": risk_table_label_pad,
+            "risk_table_title": risk_table_title,
+            "risk_table_fontsize": risk_table_fontsize,
+            "risk_table_bold": risk_table_bold,
+            "show_censored": show_censored,
+            "show_ci": show_ci,
+            "selected_theme": selected_theme,
+            "plot_bgcolor": _restored_default("plot_bgcolor", "#FFFFFF"),
+        }
+        session_json = save_session(
+            df=df,
+            sidebar_config=current_sidebar,
+            session_state=st.session_state,
+            notes=session_notes,
+        )
+        filename = get_session_filename(session_notes)
+        st.session_state["_session_save_data"] = session_json
+        st.session_state["_session_save_filename"] = filename
+        st.rerun()
+
+    if st.session_state.get("_session_save_data"):
+        st.sidebar.download_button(
+            label="Download .easysurv File",
+            data=st.session_state["_session_save_data"],
+            file_name=st.session_state.get("_session_save_filename", "session.easysurv"),
+            mime="application/json",
+            key="_sidebar_session_download",
+        )
+        st.sidebar.caption("Click above to download your session file.")
+
     # --- REPORT GENERATOR ---
     st.sidebar.divider()
-    st.sidebar.subheader("📄 Report Generator")
+    st.sidebar.subheader("Export")
     if st.sidebar.button("Generate HTML Report"):
         import base64
-        
+        from datetime import datetime
+
         def fig_to_base64(fig):
             buf = io.BytesIO()
             fig.savefig(buf, format='png', bbox_inches='tight', dpi=150)
@@ -495,71 +1144,149 @@ if df is not None:
         # 1. Dataset stats
         n_rows, n_cols = df.shape if df is not None else (0,0)
         cols_list = ", ".join(df.columns) if df is not None else "None"
-        
-        # 2. Plots
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # 2. Analysis parameters
+        params_html = f"""
+        <table>
+            <tr><td><strong>Time Column</strong></td><td>{time_col}</td></tr>
+            <tr><td><strong>Event Column</strong></td><td>{event_col}</td></tr>
+            <tr><td><strong>Grouping Variable</strong></td><td>{group_col}</td></tr>
+            <tr><td><strong>Theme</strong></td><td>{selected_theme}</td></tr>
+        </table>
+        """
+
+        # 3. Plots
         img_km = ""
         if 'report_fig_km' in st.session_state:
              img_km = f'<img src="data:image/png;base64,{fig_to_base64(st.session_state["report_fig_km"])}" style="width:100%">'
         else:
              img_km = "<p><em>No Univariable Plot generated yet.</em></p>"
-             
+
         img_forest = ""
         if 'report_fig_forest' in st.session_state:
              img_forest = f'<img src="data:image/png;base64,{fig_to_base64(st.session_state["report_fig_forest"])}" style="width:100%">'
         else:
              img_forest = "<p><em>No Multivariable Forest Plot generated yet.</em></p>"
 
-        # 3. HTML Template
+        # 4. Cox results table
+        cox_table_html = ""
+        if 'uv_cox_summary' in st.session_state:
+            cox_df = st.session_state['uv_cox_summary']
+            cox_table_html = "<h3>Univariable Cox Results</h3>" + cox_df.to_html(float_format="%.3f")
+
+        mv_table_html = ""
+        if 'mv_summary_df' in st.session_state:
+            mv_df_report = st.session_state['mv_summary_df']
+            mv_table_html = "<h3>Multivariable Cox Results</h3>" + mv_df_report.to_html(float_format="%.3f")
+
+        # 4b. Banked (pinned) analyses — read from the serialized session bank
+        banked_html = ""
+        _bank = st.session_state.get('analysis_bank', [])
+        if _bank:
+            banked_html = '<div class="section"><h2>📌 Session Analyses</h2>'
+            for i, entry in enumerate(_bank):
+                banked_html += f'<h3>{i+1}. {entry["label"]}</h3>'
+                _m = entry.get('meta', {})
+                _meta_bits = [f'{k.replace("_", " ").title()}: {_m[k]}'
+                              for k in ('endpoint', 'group_col', 'n_patients') if _m.get(k) not in (None, '')]
+                if _meta_bits:
+                    banked_html += f'<p>{" | ".join(str(b) for b in _meta_bits)}</p>'
+                if entry.get('png'):
+                    banked_html += f'<img src="data:image/png;base64,{entry["png"]}" style="width:100%">'
+                for _tname, _tdf in session_bank.entry_tables(entry):
+                    banked_html += f'<h4>{_tname}</h4>' + _tdf.to_html(float_format="%.3f")
+                if entry.get('narrative'):
+                    banked_html += f'<h4>AI Narrative</h4><pre style="white-space:pre-wrap">{entry["narrative"]}</pre>'
+            banked_html += '</div>'
+
+        # 5. Software versions
+        import importlib.metadata
+        def get_version_safe(pkg):
+            try:
+                return importlib.metadata.version(pkg)
+            except Exception:
+                return "N/A"
+
+        versions_html = "<table>"
+        for lib in ["lifelines", "pandas", "numpy", "scipy", "matplotlib", "streamlit"]:
+            versions_html += f"<tr><td>{lib}</td><td>{get_version_safe(lib)}</td></tr>"
+        versions_html += "</table>"
+
+        # 6. HTML Template
         html_report = f"""
         <html>
         <head>
             <title>EasySurv Analysis Report</title>
             <style>
-                body {{ font-family: sans-serif; max_width: 800px; margin: auto; padding: 20px; }}
+                body {{ font-family: 'Segoe UI', sans-serif; max-width: 900px; margin: auto; padding: 20px; }}
                 h1 {{ color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }}
                 h2 {{ color: #2c3e50; margin-top: 30px; border-bottom: 1px solid #ddd; }}
+                h3 {{ color: #34495e; }}
                 .section {{ margin-bottom: 40px; }}
                 .meta {{ color: #666; font-size: 0.9em; }}
+                table {{ border-collapse: collapse; width: 100%; margin: 10px 0; }}
+                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+                th {{ background-color: #f2f2f6; }}
+                tr:nth-child(even) {{ background-color: #f9f9f9; }}
             </style>
         </head>
         <body>
-            <h1>Survival Analysis Report</h1>
-            <p class="meta">Generated by EasySurv</p>
-            
+            <h1>EasySurv Analysis Report</h1>
+            <p class="meta">Generated: {timestamp} | EasySurv v{APP_VERSION}</p>
+
             <div class="section">
-                <h2>Dataset Overview</h2>
+                <h2>1. Dataset Overview</h2>
                 <p><strong>Rows:</strong> {n_rows} | <strong>Columns:</strong> {n_cols}</p>
                 <p><strong>Variables:</strong> {cols_list}</p>
             </div>
-            
+
             <div class="section">
-                <h2>1. Univariable Analysis</h2>
+                <h2>2. Analysis Parameters</h2>
+                {params_html}
+            </div>
+
+            <div class="section">
+                <h2>3. Current Univariable Analysis (Kaplan-Meier)</h2>
                 {img_km}
+                {cox_table_html}
             </div>
-            
+
             <div class="section">
-                <h2>2. Multivariable Analysis</h2>
+                <h2>4. Current Multivariable Analysis (Cox Regression)</h2>
                 {img_forest}
+                {mv_table_html}
             </div>
-            
+
+            {banked_html}
+
+            <div class="section">
+                <h2>{"6" if _bank else "5"}. Reproducibility</h2>
+                <h3>Software Versions</h3>
+                {versions_html}
+                <p><em>Report these versions in your manuscript for reproducibility.</em></p>
+            </div>
+
             <div class="section">
                 <h2>Notes</h2>
-                <p>This report contains snapshots of the latest plots generated in your session.</p>
+                <p>This report contains snapshots of analyses from your session ({len(_bank)} pinned analyses included). Re-run the analysis with the same data and parameters to reproduce results.</p>
             </div>
         </body>
         </html>
         """
-        
-        # Download Button via a trick or standard st.download_button
-        # But we are inside a button... Nested buttons don't work well in Streamlit.
-        # However, saving it to session state and creating a download button *outside* is better.
-        # But st.download_button works if we just render it now.
-        
+
         b64_html = base64.b64encode(html_report.encode()).decode()
-        href = f'<a href="data:text/html;base64,{b64_html}" download="easysurv_report.html" target="_blank" style="text-decoration:none; color:white; background-color:#ff4b4b; padding:8px 16px; border-radius:5px;">⬇️ Download Report (HTML)</a>'
+        href = f'<a href="data:text/html;base64,{b64_html}" download="easysurv_report.html" target="_blank" style="text-decoration:none; color:white; background-color:#ff4b4b; padding:8px 16px; border-radius:5px;">Download Report (HTML)</a>'
         st.sidebar.markdown(href, unsafe_allow_html=True)
         st.sidebar.success("Report Ready! Click above.")
-    
+
+    # --- SIDEBAR FOOTER ---
+    st.sidebar.divider()
+    st.sidebar.markdown(
+        f'<div class="sidebar-footer">EasySurv v{APP_VERSION}<br>Built for clinicians, by clinicians</div>',
+        unsafe_allow_html=True
+    )
+
     custom_colors = {}
     # Data Cleaning for NaNs
     df_clean = None
@@ -585,20 +1312,35 @@ if df is not None:
             st.stop()
             
     
-    # Plot Background Color
-    plot_bgcolor = st.sidebar.color_picker("Plot Background Color", "#FFFFFF")
+    # Column-specific validation (runs after columns are selected)
+    col_validation_issues = validate_dataset(df_clean, time_col=time_col, event_col=event_col, group_col=group_col)
+    col_errors = [i for i in col_validation_issues if i["level"] == "error"]
+    if col_errors:
+        for err in col_errors:
+            st.error(err["message"])
 
-    # --- GLOBAL LANDMARK & ZOOM ---
-    st.sidebar.divider()
-    with st.sidebar.expander("🔍 Landmark & Zoom Analysis (Global)"):
-        st.info("Applies to ALL tabs (Univariable, Multivariable, CIF, etc.)")
-        landmark_time = st.number_input("Landmark Time", min_value=0.0, value=0.0, step=1.0, help="Exclude patients who died/censored before this time. Time 0 becomes this landmark.")
-        
-        # Determine max time for slider default (based on original data)
-        max_time_default = float(df[time_col].max()) if df is not None and pd.api.types.is_numeric_dtype(df[time_col]) else 100.0
-        
-        enable_zoom = st.checkbox("Enable Custom X-Axis Limit")
-        zoom_max = st.number_input("Max X-Axis Time", min_value=1.0, value=max_time_default, disabled=not enable_zoom)
+    # Plot Background Color (Pro only)
+    if is_express:
+        plot_bgcolor = "#FFFFFF"
+    else:
+        plot_bgcolor = st.sidebar.color_picker("Plot Background Color", _restored_default("plot_bgcolor", "#FFFFFF"))
+
+    # --- GLOBAL LANDMARK & ZOOM (Pro only) ---
+    if is_express:
+        landmark_time = 0.0
+        enable_zoom = False
+        zoom_max = float(df[time_col].max()) if df is not None and pd.api.types.is_numeric_dtype(df[time_col]) else 100.0
+    else:
+        st.sidebar.divider()
+        with st.sidebar.expander("🔍 Landmark & Zoom Analysis (Global)"):
+            st.info("Applies to ALL tabs (Univariable, Multivariable, CIF, etc.)")
+            landmark_time = st.number_input("Landmark Time", min_value=0.0, value=0.0, step=1.0, help="Exclude patients who died/censored before this time. Time 0 becomes this landmark.")
+            
+            # Determine max time for slider default (based on original data)
+            max_time_default = float(df[time_col].max()) if df is not None and pd.api.types.is_numeric_dtype(df[time_col]) else 100.0
+            
+            enable_zoom = st.checkbox("Enable Custom X-Axis Limit")
+            zoom_max = st.number_input("Max X-Axis Time", min_value=1.0, value=max_time_default, disabled=not enable_zoom)
 
     # Apply Landmark Filtering GLOBALLY to df_clean
     landmark_info = ""
@@ -618,7 +1360,7 @@ if df is not None:
     if group_col != "None" and df_clean is not None:
         # Reordering Widget (Visible)
         st.sidebar.divider()
-        st.sidebar.subheader("Order & Legend")
+        st.sidebar.subheader("Groups & Legend")
         unique_raw = sorted(df_clean[group_col].dropna().unique())
         groups_ordered = st.sidebar.multiselect("Reorder Groups", unique_raw, default=unique_raw, help="Drag and drop to reorder groups in the Legend & Risk Table.")
         
@@ -640,12 +1382,39 @@ if df is not None:
     # Analysis
     if time_col and event_col and df_clean is not None:
         st.divider()
-        st.header("Survival Analysis")
+        st.header("Analysis")
         
         if landmark_info:
             st.info(landmark_info)
 
-        tab1, tab2, tab_risk, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["Univariable (KM)", "Multivariable (Cox)", "Risk System Based on HR", "Competing Risks (CIF)", "🧬 Biomarker Optimum Threshold", "🧪 Variable Generation", "🔥 Correlations", "🎯 Diagnostic & Concordance", "📚 Methodology"])
+        # Express Mode: fewer tabs; Pro Mode: all tabs
+        if is_express:
+            tab1, tab2, tab3, tab_composite, tab8 = st.tabs([
+                "Kaplan-Meier",
+                "Cox Regression",
+                "Competing Risks",
+                "Session & Composite",
+                "Methodology",
+            ])
+            # Create dummy variables for hidden tabs so code doesn't break
+            tab_risk = None
+            tab4 = None
+            tab5 = None
+            tab6 = None
+            tab7 = None
+        else:
+            tab1, tab2, tab_risk, tab3, tab_composite, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+                "Kaplan-Meier",
+                "Cox Regression",
+                "Risk Scoring",
+                "Competing Risks",
+                "Session & Composite",
+                "Biomarker Threshold",
+                "Variable Builder",
+                "Correlations",
+                "Diagnostics",
+                "Methodology",
+            ])
 
         with tab1:
         
@@ -658,28 +1427,13 @@ if df is not None:
                     st.dataframe(missing_stats[missing_stats > 0])
             
             # Calculate P-value for Plot if requested
-            hr_text = ""
             p_value_text = None # Initialize to avoid NameError
             if show_p_val_plot and group_col != "None" and len(df_clean[group_col].unique()) >= 2:
-                # Attempt Cox for plot? (Optional, maybe for future HR on plot)
-                try:
-                    cox_df = df_clean[[time_col, event_col, group_col]].dropna()
-                    cox_data_encoded = pd.get_dummies(cox_df, columns=[group_col], drop_first=True)
-                    cox_data_encoded.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in cox_data_encoded.columns]
-                    # This might fail on separation, but we don't strictly need it for the p-value text anymore
-                    cph_plot = CoxPHFitter()
-                    cph_plot.fit(cox_data_encoded, duration_col=time_col, event_col=event_col)
-                except:
-                    pass
-
                 # Calculate Log-Rank P-value (Robust)
                 try:
                     res = multivariate_logrank_test(df_clean[time_col], df_clean[group_col], df_clean[event_col])
-                    if res.p_value < 0.0001:
-                        p_value_text = "p < 0.0001"
-                    else:
-                        p_value_text = f"p = {res.p_value:.4f}"
-                except:
+                    p_value_text = format_p_value(res.p_value, narrator_style_name, context="plot")
+                except Exception:
                     p_value_text = None
 
         
@@ -722,8 +1476,7 @@ if df is not None:
                     groups = groups_ordered
                 else:
                     groups = sorted(df_clean[group_col].unique())
-                results = []
-            
+
                 # Determine Color Palette
                 palette = None
                 if selected_theme in all_themes:
@@ -761,15 +1514,33 @@ if df is not None:
                 # P-value and Legend if applicable (Single group usually no legend needed unless CI)
                 if show_p_val_plot and p_value_text:
                      bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box_main else None
-                     ax.text(pval_x_main, pval_y_main, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
+                     ax.text(pval_x_main, pval_y_main, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize_main)
 
                 # Risk Table logic (basic implementation using lifelines built-in if possible, or custom)
                 if show_risk_table:
                     # Custom add_at_risk_counts integration
                     # We need fitters for all to use add_at_risk_counts
                     # fitters list already populated above
-                    add_at_risk_counts(fitters, ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels)
-                
+                    add_at_risk_counts(fitters, ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels, show_censored_counts=show_censored_in_table, bold=risk_table_bold, show_title=risk_table_title, fontsize=risk_table_fontsize, label_pad=risk_table_label_pad)
+
+                # Auto-annotations (median / X-year survival)
+                if show_median_main or show_x_year_main:
+                    add_survival_annotations(fitters, ax=ax, colors=plot_colors, labels=plot_labels,
+                                             show_median=show_median_main, show_x_year=show_x_year_main,
+                                             x_year_time=x_year_time_main)
+
+                # Estimate labels
+                if est_label_mode_main != "Off":
+                    _est_mode = 'median' if 'Median' in est_label_mode_main else 'timepoint'
+                    add_estimate_labels(fitters, ax=ax, colors=plot_colors, labels=plot_labels,
+                                        mode=_est_mode, timepoint=est_label_time_main,
+                                        param_name=est_label_param_main,
+                                        placement=est_label_placement_main,
+                                        fontsize=est_label_fontsize_main,
+                                        text_color=est_label_textcolor_main,
+                                        bold=est_label_bold_main,
+                                        label_gap=est_label_gap_main)
+
                 # Apply Custom Label
                 ax.set_title(main_title, fontsize=title_fontsize, weight=title_fontweight)
                 ax.set_xlabel(x_label, fontsize=axes_fontsize)
@@ -779,11 +1550,23 @@ if df is not None:
                 
                 # Legend Customization
                 if show_legend_main:
-                     ax.legend(fontsize=legend_fontsize, loc=(leg_x_main, leg_y_main), frameon=show_legend_box_main)
+                    if legend_style_main == "Top bar":
+                        # Remove default legend, add horizontal bar above plot
+                        if ax.get_legend():
+                            ax.get_legend().remove()
+                        handles, labels = ax.get_legend_handles_labels()
+                        if handles:
+                            fig.subplots_adjust(top=0.88)
+                            fig.legend(handles, labels, loc='upper center',
+                                       bbox_to_anchor=(0.5, topbar_y_main), ncol=len(handles),
+                                       fontsize=legend_fontsize, frameon=False,
+                                       handlelength=2.0, columnspacing=1.5)
+                    else:
+                        ax.legend(fontsize=legend_fontsize, loc=(leg_x_main, leg_y_main), frameon=show_legend_box_main)
                 else:
                      if ax.get_legend():
                          ax.get_legend().remove()
-                
+
                 if main_annotations:
                     for ann in main_annotations:
                         bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if ann['box'] else None
@@ -791,14 +1574,15 @@ if df is not None:
                 
                 st.pyplot(fig)
                 
-                # Save to session_state for Report
+                # Save to session_state for Report & Composite
                 st.session_state['report_fig_km'] = fig
+                st.session_state['composite_km_title'] = main_title
 
                 # DOWNLOAD BUTTON
                 buf = io.BytesIO()
                 fig.savefig(buf, format="png", dpi=300, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
                 buf.seek(0)
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
                 with col1:
                     st.download_button(
                         label="💾 Download Plot (300 DPI)",
@@ -826,7 +1610,86 @@ if df is not None:
                         file_name="survival_plot.pdf",
                         mime="application/pdf"
                     )
+                with col4:
+                    _pin_label = f"KM: {main_title}"
+                    if st.button("📌 Pin to Session", key="pin_km_grouped", help="Save this analysis to the session bank. You can then switch endpoints and pin more analyses."):
+                        _cox_df = st.session_state.get('uv_cox_summary', None)
+                        _km_tables = {'Cox (univariable)': _cox_df}
+                        if 'km_median_data' in st.session_state:
+                            _km_tables['Median survival'] = pd.DataFrame(st.session_state['km_median_data'])
+                        _used = _pin_analysis(
+                            'KM', _pin_label, fig=fig, title=main_title,
+                            tables=_km_tables,
+                            narrative=st.session_state.get('last_km_narrative'),
+                            meta={'endpoint': narrator_event_name, 'group_col': group_col,
+                                  'time_col': time_col, 'event_col': event_col,
+                                  'n_patients': len(df_clean)},
+                        )
+                        st.success(f"📌 Pinned: **{_used}**")
 
+
+                # At-Risk Counts Table (downloadable)
+                if show_risk_table and fitters:
+                    with st.expander("At-Risk Counts Table (for manuscripts)", expanded=False):
+                        time_points = sorted(set(
+                            t for f in fitters
+                            for t in f.timeline
+                            if t >= 0
+                        ))
+                        # Sample at regular intervals based on tick_interval
+                        if tick_interval > 0:
+                            max_t = max(time_points) if time_points else 0
+                            sampled_times = [i * tick_interval for i in range(int(max_t / tick_interval) + 1)]
+                        else:
+                            sampled_times = time_points[:20]
+
+                        risk_rows = {}
+                        censored_rows = {}
+                        for f in fitters:
+                            counts = []
+                            cens_counts = []
+                            for t in sampled_times:
+                                idx = f.timeline[f.timeline <= t]
+                                if len(idx) > 0:
+                                    closest = idx.max()
+                                    n_at_risk = int(f.event_table.loc[:closest, 'at_risk'].iloc[-1]) if closest in f.event_table.index else 0
+                                else:
+                                    n_at_risk = int(f.event_table['at_risk'].iloc[0]) if len(f.event_table) > 0 else 0
+                                counts.append(n_at_risk)
+                                # Cumulative censored up to time t
+                                sliced = f.event_table.loc[:t]
+                                cum_cens = int(sliced['censored'].sum()) if (not sliced.empty and 'censored' in sliced.columns) else 0
+                                cens_counts.append(cum_cens)
+                            risk_rows[f._label] = counts
+                            censored_rows[f._label] = cens_counts
+
+                        risk_df = pd.DataFrame(risk_rows, index=[f"{t:.0f}" for t in sampled_times])
+                        risk_df.index.name = "Time"
+
+                        if show_censored_in_table:
+                            cens_df = pd.DataFrame(censored_rows, index=[f"{t:.0f}" for t in sampled_times])
+                            cens_df.index.name = "Time"
+                            # Display combined format
+                            combined = risk_df.astype(str) + " (" + cens_df.astype(str) + ")"
+                            st.caption("Format: n at risk (cumulative censored)")
+                            st.dataframe(combined.T)
+                            # For download, provide both tables
+                            full_download = pd.concat([
+                                risk_df.T.rename(lambda x: f"At-Risk t={x}", axis=1),
+                                cens_df.T.rename(lambda x: f"Censored t={x}", axis=1),
+                            ], axis=1)
+                            csv_risk = full_download.to_csv().encode('utf-8')
+                        else:
+                            st.dataframe(risk_df.T)
+                            csv_risk = risk_df.T.to_csv().encode('utf-8')
+
+                        st.download_button(
+                            label="💾 Download At-Risk Table (CSV)",
+                            data=csv_risk,
+                            file_name="at_risk_counts.csv",
+                            mime="text/csv",
+                            key="download_risk_table",
+                        )
 
                 # 2. Statistics (Cox PH / Logrank)
                 st.divider()
@@ -835,7 +1698,8 @@ if df is not None:
                 # Logrank Test
                 if len(groups) >= 2:
                     result = multivariate_logrank_test(df_clean[time_col], df_clean[group_col], df_clean[event_col])
-                    st.write(f"**Log-Rank Test p-value**: {result.p_value:.4f}")
+                    _lr_p_formatted = format_p_value(result.p_value, narrator_style_name, context="text")
+                    st.write(f"**Log-Rank Test**: {_lr_p_formatted}")
             
                 # Cox PH (Hazard Ratio)
                 st.subheader("Cox Proportional Hazards (Hazard Ratios)")
@@ -872,19 +1736,61 @@ if df is not None:
                     # Standard CoxPH without penalizer to get unbiased estimates
                     cph = CoxPHFitter() 
                     cph.fit(cox_data, duration_col=time_col, event_col=event_col)
-                
+
+                    # PH Assumption Test (Univariable)
+                    try:
+                        from lifelines.statistics import proportional_hazard_test
+                        ph_result = proportional_hazard_test(cph, cox_data, time_transform='rank')
+                        ph_summary = ph_result.summary
+                        any_violation = (ph_summary['p'] < 0.05).any()
+
+                        _ph_label = "⚠️ Proportional Hazards Assumption" if any_violation else "Proportional Hazards Assumption"
+                        with st.expander(_ph_label, expanded=any_violation):
+                            # Display per-variable table
+                            ph_display = ph_summary[['test_statistic', 'p']].copy()
+                            ph_display.columns = ['Chi-squared', 'p-value']
+                            ph_display['Result'] = ph_display['p-value'].apply(
+                                lambda p: "⚠️ Violated (p<0.05)" if p < 0.05 else "OK"
+                            )
+                            st.dataframe(ph_display.style.format({'Chi-squared': '{:.3f}', 'p-value': '{:.4f}'}))
+
+                            if any_violation:
+                                violated = ph_summary[ph_summary['p'] < 0.05].index.get_level_values(0).tolist()
+                                st.warning(
+                                    f"**PH assumption violated for: {', '.join(violated)}.** "
+                                    "The hazard ratio for these variables may not be constant over time. "
+                                    "Consider: landmark analysis, time-varying covariates, or restricted mean survival time (RMST)."
+                                )
+                            else:
+                                st.success("PH assumption satisfied for all covariates (Schoenfeld residuals test, p>0.05).")
+                            st.caption("Test: Schoenfeld residuals with rank time transform")
+                    except Exception:
+                        pass
+
                     # 3. Display Results
                     summary_df = cph.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']]
                     summary_df = summary_df.rename(columns={
-                        'exp(coef)': 'Hazard Ratio (HR)', 
-                        'exp(coef) lower 95%': 'Lower 95% CI', 
+                        'exp(coef)': 'Hazard Ratio (HR)',
+                        'exp(coef) lower 95%': 'Lower 95% CI',
                         'exp(coef) upper 95%': 'Upper 95% CI',
                         'p': 'p-value'
                     })
                 
-                    st.dataframe(summary_df.style.format("{:.3f}"))
-                    
-                    # Save for AI Narrator
+                    # Format p-value column per journal style for display
+                    _display_df = summary_df.copy()
+                    _display_df['p-value'] = _display_df['p-value'].apply(lambda p: format_p_value(p, narrator_style_name, context="table"))
+                    def _highlight_significant(row):
+                        # Check original numeric p for highlighting
+                        orig_p = summary_df.loc[row.name, 'p-value'] if row.name in summary_df.index else 1.0
+                        if orig_p < 0.05:
+                            return ['background-color: rgba(0, 180, 0, 0.1)'] * len(row)
+                        return [''] * len(row)
+                    st.dataframe(_display_df.style.format(
+                        {c: "{:.3f}" for c in _display_df.columns if c != 'p-value'}
+                    ).apply(_highlight_significant, axis=1))
+                    st.caption("🟩 Green: statistically significant (p<0.05)")
+
+                    # Save for AI Narrator (keep original numeric values)
                     st.session_state['uv_cox_summary'] = summary_df
                     st.session_state['uv_cox_method'] = "Standard Cox Proportional Hazards regression models"
                     
@@ -914,7 +1820,11 @@ if df is not None:
                             'p': 'p-value'
                         })
                     
-                        st.dataframe(summary_df.style.format("{:.3f}"))
+                        _display_df2 = summary_df.copy()
+                        _display_df2['p-value'] = _display_df2['p-value'].apply(lambda p: format_p_value(p, narrator_style_name, context="table"))
+                        st.dataframe(_display_df2.style.format(
+                            {c: "{:.3f}" for c in _display_df2.columns if c != 'p-value'}
+                        ))
                         st.session_state['uv_cox_summary'] = summary_df
                         st.session_state['uv_cox_method'] = "Penalized Cox Regression (Ridge, Lambda=0.1) due to convergence failure in standard Cox"
                         
@@ -953,7 +1863,7 @@ if df is not None:
                         lower = median_ci_df.iloc[0, 0]
                         upper = median_ci_df.iloc[0, 1]
                         ci_str = f"({lower:.1f} - {upper:.1f})"
-                    except:
+                    except Exception:
                         ci_str = "(NR - NR)"
                     
                     # Formatting text
@@ -967,6 +1877,7 @@ if df is not None:
                     })
                 
                 median_df = pd.DataFrame(median_data)
+                st.session_state['km_median_data'] = median_data
                 st.table(median_df.style.format())
                 
                 # Download Median Table
@@ -980,9 +1891,9 @@ if df is not None:
 
                 # Point-in-Time Survival Estimates
                 st.subheader("Point-in-Time Survival Estimates")
-                st.write("Calculate survival probability at a specific time (e.g., 2-year OS).")
+                st.write("Calculate survival probability at a specific time.")
             
-                target_time = st.number_input("Enter Time Point (e.g., 24 months)", min_value=0.0, value=24.0, step=6.0)
+                target_time = st.number_input("Enter Time Point", min_value=0.0, value=24.0, step=6.0)
             
                 est_data = []
                 for group in groups:
@@ -1007,7 +1918,7 @@ if df is not None:
                      try:
                         lower = ci_df_interp.loc[target_time].iloc[0]
                         upper = ci_df_interp.loc[target_time].iloc[1]
-                     except:
+                     except Exception:
                         lower = 0
                         upper = 0
                  
@@ -1036,17 +1947,38 @@ if df is not None:
                 
                 if len(groups) > 2:
                     st.write("Comparison between specific pairs of groups (p-values).")
-                    
+
+                    _pw_adjust = st.selectbox(
+                        "Multiple-comparison adjustment",
+                        ["Benjamini-Hochberg", "Bonferroni", "None"],
+                        key="pw_lr_adjust",
+                        help="With k groups there are k(k-1)/2 pairwise tests. Adjusting controls "
+                             "the inflated false-positive rate. Report the adjusted column, or state "
+                             "'unadjusted' if you choose None.",
+                    )
+
                     # Run Pairwise Test
                     results = pairwise_logrank_test(df_clean[time_col], df_clean[group_col], df_clean[event_col])
-                    
+
                     # The results summary is a rich dataframe, but we want a matrix or list
                     # summary_df contains p-values
-                    pairwise_df = results.summary
-                    
-                    # Formatting for display
-                    st.dataframe(pairwise_df.style.format({"p": "{:.4f}"}))
-                    
+                    pairwise_df = results.summary.copy()
+                    if 'p' in pairwise_df.columns:
+                        pairwise_df['p (adjusted)'] = statistics.adjust_pvalues(
+                            pairwise_df['p'].values, _pw_adjust)
+
+                    # Formatting for display — use journal style for p-value columns
+                    _display_pair = pairwise_df.copy()
+                    for _pc in ('p', 'p (adjusted)'):
+                        if _pc in _display_pair.columns:
+                            _display_pair[_pc] = _display_pair[_pc].apply(
+                                lambda p: format_p_value(p, narrator_style_name, context="table") if pd.notna(p) else "—")
+                    st.dataframe(_display_pair)
+                    if _pw_adjust == "None":
+                        st.caption("⚠️ P-values are **unadjusted** for multiple comparisons — disclose this when reporting.")
+                    else:
+                        st.caption(f"'p (adjusted)' uses the **{_pw_adjust}** method across {len(pairwise_df)} pairwise tests.")
+
                     # Download Pairwise Table
                     csv_pair = pairwise_df.to_csv().encode('utf-8')
                     st.download_button(
@@ -1058,43 +1990,210 @@ if df is not None:
                 elif len(groups) == 2:
                     st.info("Pairwise comparison is identical to the Global Log-Rank test for 2 groups.")
 
+                # --- RMST (Restricted Mean Survival Time) ---
+                st.divider()
+                st.subheader("📐 Restricted Mean Survival Time (RMST)")
+                st.caption(
+                    "RMST(τ) = area under the KM curve from 0 to τ. "
+                    "Interpretable as the **average survival time** within [0, τ]. "
+                    "The RMST difference gives an absolute measure of treatment effect "
+                    "without requiring the proportional hazards assumption. "
+                    "Equivalent to R's `survRM2::rmst2()`."
+                )
+                
+                # Smart default τ: minimum of max observed time across groups
+                _max_times = [df_clean[df_clean[group_col] == g][time_col].max() for g in groups]
+                _tau_max_safe = float(min(_max_times)) if _max_times else 60.0
+                _tau_default = round(_tau_max_safe * 0.8, 1)  # 80% of max safe τ
+                
+                _rmst_c1, _rmst_c2 = st.columns([1, 2])
+                with _rmst_c1:
+                    _rmst_tau = st.number_input(
+                        "Restriction Time (τ)",
+                        min_value=0.1,
+                        value=_tau_default,
+                        step=1.0,
+                        key="rmst_tau",
+                        help=f"Max safe τ = {_tau_max_safe:.1f} (min of max observed time per group). Set to match your data's time unit."
+                    )
+                
+                if st.button("Calculate RMST", key="calc_rmst"):
+                    with st.spinner("Computing RMST (analytical)..."):
+                        _rmst_result = statistics.compute_rmst(
+                            df_clean, time_col, event_col, group_col, _rmst_tau
+                        )
+                    st.session_state['rmst_result'] = _rmst_result
+                
+                if 'rmst_result' in st.session_state:
+                    _rmst_r = st.session_state['rmst_result']
+                    
+                    # Results table
+                    st.write(f"### RMST at τ = {_rmst_r['tau']:.1f}")
+                    _rmst_table = pd.DataFrame(_rmst_r['group_results'])
+                    _rmst_display = _rmst_table.copy()
+                    _rmst_display['RMST (95% CI)'] = _rmst_display.apply(
+                        lambda r: f"{r['rmst']:.2f} ({r['lower']:.2f}–{r['upper']:.2f})", axis=1
+                    )
+                    st.dataframe(_rmst_display[['group', 'n', 'RMST (95% CI)']].rename(
+                        columns={'group': 'Group', 'n': 'N'}
+                    ), hide_index=True, use_container_width=True)
+                    
+                    # Pairwise Differences
+                    _pw = _rmst_r.get('pairwise', [])
+                    if _rmst_r.get('difference'):
+                        # 2-group: single metric (backward compat)
+                        d = _rmst_r['difference']
+                        _p_fmt = format_p_value(d['p_value'], narrator_style_name, context="table")
+                        _sig = "✅" if d['p_value'] < 0.05 else ""
+                        st.metric(
+                            f"RMST Difference ({d['group_a']} − {d['group_b']})",
+                            f"{d['diff']:.2f}",
+                            delta=f"95% CI: {d['lower']:.2f} to {d['upper']:.2f}, {_p_fmt} {_sig}"
+                        )
+                    elif _pw:
+                        # >2 groups: pairwise table with reference selector
+                        st.write("### Pairwise RMST Differences")
+                        
+                        # Get unique groups from pairwise results
+                        _rmst_all_grps = sorted(set(
+                            [p['group_a'] for p in _pw] + [p['group_b'] for p in _pw]
+                        ))
+                        _rmst_ref_opts = ["All pairwise"] + _rmst_all_grps
+                        _rmst_ref = st.selectbox(
+                            "Reference group (denominator)", _rmst_ref_opts,
+                            key="rmst_pw_ref",
+                            help="Select a reference group to show comparisons as 'Other − Reference'. Or choose 'All pairwise' to see every combination."
+                        )
+                        
+                        _pw_data = []
+                        for d in _pw:
+                            ga, gb = d['group_a'], d['group_b']
+                            diff, lo, hi = d['diff'], d['lower'], d['upper']
+                            
+                            if _rmst_ref == "All pairwise":
+                                # Show all pairs as-is
+                                _pw_data.append({
+                                    'Comparison': f"{ga} vs {gb}",
+                                    'Δ RMST': f"{diff:.2f}",
+                                    '95% CI': f"{lo:.2f} to {hi:.2f}",
+                                    'p-value': format_p_value(d['p_value'], narrator_style_name, context="table"),
+                                    'p_raw': d['p_value']
+                                })
+                            elif _rmst_ref == gb:
+                                # Reference is already group_b → show as: group_a − reference
+                                _pw_data.append({
+                                    'Comparison': f"{ga} vs {gb}",
+                                    'Δ RMST': f"{diff:.2f}",
+                                    '95% CI': f"{lo:.2f} to {hi:.2f}",
+                                    'p-value': format_p_value(d['p_value'], narrator_style_name, context="table"),
+                                    'p_raw': d['p_value']
+                                })
+                            elif _rmst_ref == ga:
+                                # Reference is group_a → flip: group_b − reference
+                                _pw_data.append({
+                                    'Comparison': f"{gb} vs {ga}",
+                                    'Δ RMST': f"{-diff:.2f}",
+                                    '95% CI': f"{-hi:.2f} to {-lo:.2f}",
+                                    'p-value': format_p_value(d['p_value'], narrator_style_name, context="table"),
+                                    'p_raw': d['p_value']
+                                })
+                        
+                        if _pw_data:
+                            _pw_df = pd.DataFrame(_pw_data)
+                            _rmst_adjust = st.selectbox(
+                                "Multiple-comparison adjustment (RMST)",
+                                ["Benjamini-Hochberg", "Bonferroni", "None"],
+                                key="rmst_pw_adjust",
+                                help="Adjust across the pairwise RMST comparisons shown.",
+                            )
+                            _p_raw_vals = _pw_df['p_raw'].values
+                            _p_adj_vals = statistics.adjust_pvalues(_p_raw_vals, _rmst_adjust)
+                            _pw_df['p (adjusted)'] = [
+                                format_p_value(p, narrator_style_name, context="table") if pd.notna(p) else "—"
+                                for p in _p_adj_vals
+                            ]
+                            _pw_display_cols = ['Comparison', 'Δ RMST', '95% CI', 'p-value', 'p (adjusted)']
+                            _hl_vals = _p_adj_vals if _rmst_adjust != "None" else _p_raw_vals
+
+                            def _hl_rmst(row):
+                                p = _hl_vals[row.name]
+                                if pd.notna(p) and p < 0.05:
+                                    return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
+                                return [''] * len(row)
+
+                            st.dataframe(
+                                _pw_df[_pw_display_cols].style.apply(_hl_rmst, axis=1),
+                                hide_index=True, use_container_width=True
+                            )
+                            st.caption("⚠️ Unadjusted for multiple comparisons — disclose when reporting."
+                                       if _rmst_adjust == "None"
+                                       else f"'p (adjusted)': **{_rmst_adjust}** across {len(_pw_df)} comparisons.")
+                    
+                    # Visualization: shaded area under KM curves
+                    st.write("### RMST Visualization")
+                    _fig_rmst, _ax_rmst = plt.subplots(figsize=(8, 5))
+                    _rmst_colors = all_themes.get(selected_theme, ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
+                    
+                    for i, grp in enumerate(groups):
+                        gdf = df_clean[df_clean[group_col] == grp]
+                        kmf = KaplanMeierFitter()
+                        kmf.fit(gdf[time_col], gdf[event_col])
+                        timeline = np.linspace(0, _rmst_r['tau'], 500)
+                        sf = kmf.predict(timeline)
+                        _c = _rmst_colors[i % len(_rmst_colors)]
+                        _ax_rmst.plot(timeline, sf.values, color=_c, linewidth=2, label=f"{grp}")
+                        _ax_rmst.fill_between(timeline, 0, sf.values, alpha=0.15, color=_c)
+                    
+                    _ax_rmst.axvline(x=_rmst_r['tau'], color='grey', linestyle='--', alpha=0.7, label=f"τ = {_rmst_r['tau']:.0f}")
+                    _ax_rmst.set_xlabel("Time")
+                    _ax_rmst.set_ylabel("Survival Probability")
+                    _ax_rmst.set_title(f"RMST (τ = {_rmst_r['tau']:.0f}): Shaded Area = RMST", fontweight='bold')
+                    _ax_rmst.legend(loc='lower left')
+                    _ax_rmst.set_xlim(0, _rmst_r['tau'] * 1.05)
+                    _ax_rmst.set_ylim(0, 1.05)
+                    _ax_rmst.grid(True, alpha=0.3)
+                    _fig_rmst.tight_layout()
+                    st.pyplot(_fig_rmst)
+                    
+                    # Download
+                    _rmst_d1, _rmst_d2 = st.columns(2)
+                    with _rmst_d1:
+                        st.download_button("💾 RMST Plot (600 DPI)",
+                                           plotting.save_plot_to_buffer(_fig_rmst, dpi=600),
+                                           "rmst_plot_600dpi.png", "image/png", key="dl_rmst_png")
+                    with _rmst_d2:
+                        st.download_button("📄 RMST Plot (PDF)",
+                                           plotting.save_plot_to_buffer(_fig_rmst, fmt="pdf"),
+                                           "rmst_plot.pdf", "application/pdf", key="dl_rmst_pdf")
+                    plt.close(_fig_rmst)
+
                 # --- AI NARRATOR (Univariable) ---
                 st.divider()
                 st.subheader("🤖 AI Result Narrator")
                 if st.button("Generate Summary Text (Univariable)"):
-                    # 1. Methods
-                    cox_method_text = st.session_state.get('uv_cox_method', 'Standard Cox Proportional Hazards regression models')
-                    
-                    summary = "**Methods**\n"
-                    summary += f"Survival estimates were calculated using the Kaplan-Meier method. Comparisons between groups were performed using the Log-rank test. Univariable associations were assessed using {cox_method_text}.\n\n"
-                    
-                    # 2. Results
-                    summary += "**Results**\n"
-                    
-                    # Log-rank
-                    sig_word = "significantly" if result.p_value < 0.05 else "not significantly"
-                    summary += f"The Kaplan-Meier survival analysis comparing groups defined by **{group_col}** ({', '.join([str(g) for g in groups])}) revealed that {group_col} was **{sig_word} associated with survival** (Log-rank test p={result.p_value:.4f}). "
-                    
-                    # Cox PH (if available)
-                    if 'uv_cox_summary' in st.session_state:
-                        summary += "In the univariable Cox regression:\n"
-                        cox_df = st.session_state['uv_cox_summary']
-                        for idx, row in cox_df.iterrows():
-                             hr = row['Hazard Ratio (HR)']
-                             p = row['p-value']
-                             ci_low = row['Lower 95% CI']
-                             ci_high = row['Upper 95% CI']
-                             summary += f"* **{idx}**: HR={hr:.2f} (95% CI {ci_low:.2f}-{ci_high:.2f}, p={p:.4f})\n"
-                    
-                    # 3. Median details
-                    med_details = []
-                    for dataItem in median_data:
-                        med_details.append(f"{dataItem['Group']} (Median: {dataItem['Median Survival']}, 95% CI: {dataItem['95% CI (Median)']})")
-                    
-                    summary += "\nMedian survival times were: " + "; ".join(med_details) + "."
-                    
-                    st.success("Summary Generated:")
-                    st.text_area("Copy this text:", value=summary, height=200)
+                    cox_method_text = st.session_state.get('uv_cox_method', 'Cox Proportional Hazards regression')
+                    cox_df = st.session_state.get('uv_cox_summary', None)
+
+                    summary = narrator.generate_univariable_narrative(
+                        group_col=group_col,
+                        groups=groups,
+                        logrank_p=result.p_value,
+                        cox_summary=cox_df,
+                        median_data=median_data,
+                        point_estimates=est_data,
+                        target_time=target_time,
+                        cox_method=cox_method_text,
+                        style_name=narrator_style_name,
+                        detail_level=narrator_detail_level,
+                        event_name=narrator_event_name,
+                        n_patients=len(df_clean),
+                        n_events=int(df_clean[event_col].sum()),
+                        landmark_time=landmark_time if landmark_time > 0 else None,
+                        median_followup=statistics.median_followup(df_clean[time_col], df_clean[event_col]),
+                    )
+                    st.success("Summary Generated (click the copy icon to copy):")
+                    st.session_state['last_km_narrative'] = summary
+                    st.code(summary, language=None)
 
             else:
                 # Single group
@@ -1113,8 +2212,28 @@ if df is not None:
                     plot_colors = [color] if color else None
                     plot_labels = ["All Patients"]
                     # from lifelines.plotting import add_at_risk_counts (REMOVED due to bug)
-                    add_at_risk_counts([kmf_all], ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels)
-            
+                    add_at_risk_counts([kmf_all], ax=ax, y_shift=table_height, colors=plot_colors, labels=plot_labels, show_censored_counts=show_censored_in_table, bold=risk_table_bold, show_title=risk_table_title, fontsize=risk_table_fontsize, label_pad=risk_table_label_pad)
+
+                # Auto-annotations (median / X-year survival)
+                if show_median_main or show_x_year_main:
+                    _ann_colors = [color] if color else None
+                    add_survival_annotations([kmf_all], ax=ax, colors=_ann_colors, labels=["All Patients"],
+                                             show_median=show_median_main, show_x_year=show_x_year_main,
+                                             x_year_time=x_year_time_main)
+
+                # Estimate labels
+                if est_label_mode_main != "Off":
+                    _est_mode = 'median' if 'Median' in est_label_mode_main else 'timepoint'
+                    _ann_colors_est = [color] if color else None
+                    add_estimate_labels([kmf_all], ax=ax, colors=_ann_colors_est, labels=["All Patients"],
+                                        mode=_est_mode, timepoint=est_label_time_main,
+                                        param_name=est_label_param_main,
+                                        placement=est_label_placement_main,
+                                        fontsize=est_label_fontsize_main,
+                                        text_color=est_label_textcolor_main,
+                                        bold=est_label_bold_main,
+                                        label_gap=est_label_gap_main)
+
                 # Apply Custom Label
                 ax.set_title(main_title, fontsize=title_fontsize, weight=title_fontweight)
                 ax.set_xlabel(x_label, fontsize=axes_fontsize)
@@ -1123,24 +2242,39 @@ if df is not None:
                 ax.tick_params(axis='both', which='major', labelsize=axes_fontsize)
                 
                 if show_legend_main:
-                     ax.legend(fontsize=legend_fontsize, loc=(leg_x_main, leg_y_main), frameon=show_legend_box_main)
+                    if legend_style_main == "Top bar":
+                        if ax.get_legend():
+                            ax.get_legend().remove()
+                        handles, labels = ax.get_legend_handles_labels()
+                        if handles:
+                            fig.subplots_adjust(top=0.88)
+                            fig.legend(handles, labels, loc='upper center',
+                                       bbox_to_anchor=(0.5, topbar_y_main), ncol=len(handles),
+                                       fontsize=legend_fontsize, frameon=False,
+                                       handlelength=2.0, columnspacing=1.5)
+                    else:
+                        ax.legend(fontsize=legend_fontsize, loc=(leg_x_main, leg_y_main), frameon=show_legend_box_main)
                 else:
                      if ax.get_legend():
                          ax.get_legend().remove()
-                
+
                 if show_p_val_plot and p_value_text:
                      bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box_main else None
-                     ax.text(pval_x_main, pval_y_main, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
-                
+                     ax.text(pval_x_main, pval_y_main, p_value_text, transform=ax.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize_main)
+
                 # OLD Free Text Block Removed (Replaced by Multi-Annotation Loop Above)
-                
+
                 st.pyplot(fig)
+
+                # Save to session_state for Report & Composite
+                st.session_state['report_fig_km'] = fig
+                st.session_state['composite_km_title'] = main_title
 
                 # DOWNLOAD BUTTON
                 buf = io.BytesIO()
                 fig.savefig(buf, format="png", dpi=300, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
                 buf.seek(0)
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
                 with col1:
                     st.download_button(
                         label="💾 Download Plot (300 DPI)",
@@ -1168,6 +2302,17 @@ if df is not None:
                         file_name="survival_plot.pdf",
                         mime="application/pdf"
                     )
+                with col4:
+                    _pin_label = f"KM: {main_title}"
+                    if st.button("📌 Pin to Session", key="pin_km_single", help="Save this analysis to the session bank."):
+                        _used = _pin_analysis(
+                            'KM', _pin_label, fig=fig, title=main_title,
+                            narrative=st.session_state.get('last_km_narrative'),
+                            meta={'endpoint': narrator_event_name, 'group_col': 'All Patients',
+                                  'time_col': time_col, 'event_col': event_col,
+                                  'n_patients': len(df_clean)},
+                        )
+                        st.success(f"📌 Pinned: **{_used}**")
 
 
         with tab2:
@@ -1177,7 +2322,20 @@ if df is not None:
             # 1. Select Covariates
             # Exclude Time and Event columns from options
             covariate_options = [c for c in columns if c not in [time_col, event_col]]
-            covariates = st.multiselect("Select Covariates for Analysis", covariate_options)
+            # Only use restored defaults on first load (not circular self-reference)
+            if "_mv_covariates_initialized" not in st.session_state:
+                _restored_covariates = st.session_state.get("_saved_covariates", [])
+                _default_covariates = [c for c in _restored_covariates if c in covariate_options]
+                st.session_state["_mv_covariates_initialized"] = True
+            else:
+                _default_covariates = None  # Let widget manage its own state after init
+            
+            if _default_covariates is not None:
+                covariates = st.multiselect("Select Covariates for Analysis", covariate_options, default=_default_covariates, key="mv_covariates_select")
+            else:
+                covariates = st.multiselect("Select Covariates for Analysis", covariate_options, key="mv_covariates_select")
+            # Persist for session save
+            st.session_state["_saved_covariates"] = covariates
             
             if covariates:
                 # --- STRUCTURAL REDUNDANCY CHECK (Gap 2) ---
@@ -1200,6 +2358,61 @@ if df is not None:
 
                 st.info(f"Target: **{time_col}** (Time), **{event_col}** (Event)")
                 
+                # --- TIME-DEPENDENT COVARIATE (Optional) ---
+                _td_enabled = st.checkbox(
+                    "⏱️ Include a Time-Dependent Covariate",
+                    value=False,
+                    help="Use this when a covariate changes during follow-up (e.g., transplant). "
+                         "This avoids immortal time bias by splitting each patient's record at "
+                         "the time the covariate changes."
+                )
+                
+                _td_var_name = None
+                _td_time_col = None
+                _td_status_col = None
+                
+                if _td_enabled:
+                    with st.container(border=True):
+                        st.markdown("##### ⏱️ Time-Dependent Covariate Configuration")
+                        st.caption(
+                            "**Why?** Including transplant as a baseline variable (yes/no) causes "
+                            "**immortal time bias** — patients must survive long enough to receive it. "
+                            "The counting-process approach splits each patient's timeline at the event point, "
+                            "so the covariate is 0 before and 1 after the event. "
+                            "This is equivalent to R's `survival::tmerge()` / `survival::coxph()` with `(start, stop)` format."
+                        )
+                        _tdc1, _tdc2, _tdc3 = st.columns(3)
+                        with _tdc1:
+                            _td_var_name = st.text_input(
+                                "Covariate Name",
+                                value="Transplant",
+                                help="Name for the time-dependent variable in the model output (e.g., Transplant, Second_Line_Therapy)",
+                                key="td_var_name"
+                            )
+                        with _tdc2:
+                            _td_time_col = st.selectbox(
+                                "Time of Event Column",
+                                columns,
+                                index=columns.index("Transplant_Time") if "Transplant_Time" in columns else 0,
+                                help="Column with the time when the covariate changed (e.g., days to transplant). Use NA/missing for patients who never had this event.",
+                                key="td_time_col"
+                            )
+                        with _tdc3:
+                            _td_status_col = st.selectbox(
+                                "Event Status Column (1=event occurred)",
+                                columns,
+                                index=columns.index("Transplant_Status") if "Transplant_Status" in columns else 0,
+                                help="Column indicating whether the event occurred (1) or not (0).",
+                                key="td_status_col"
+                            )
+                        
+                        # Preview the data transformation
+                        if _td_time_col and _td_status_col:
+                            _n_td_events = int(df_clean[_td_status_col].dropna().sum()) if _td_status_col in df_clean.columns else 0
+                            _n_total = len(df_clean)
+                            st.info(f"**{_n_td_events}** / {_n_total} patients had the time-dependent event. "
+                                    f"Data will be split into counting-process format (≈ {_n_total + _n_td_events} rows).")
+
                 # Check for NaNs in selected variables
                 mv_cols = [time_col, event_col] + covariates
                 mv_df = df_clean[mv_cols].dropna()
@@ -1213,9 +2426,9 @@ if df is not None:
                 else:
                     # --- Reference Group Selection for Categorical Variables ---
                     categorical_refs = {}
-                    
-                    # 1. Identify Categorical Columns
-                    cat_cols = [c for c in covariates if pd.api.types.is_object_dtype(mv_df[c]) or pd.api.types.is_categorical_dtype(mv_df[c])]
+
+                    # 1. Identify Categorical Columns (including numeric with few unique values)
+                    cat_cols = _detect_categorical(mv_df, covariates)
                     
                     if cat_cols:
                         st.markdown("##### Reference Group Selection")
@@ -1230,6 +2443,7 @@ if df is not None:
                     # --- STATISTICAL GUARDRAILS (Pre-Analysis) ---
                     st.divider()
                     st.markdown("#### 🛡️ Statistical Guardrails")
+                    st.caption("These checks help identify potential issues before running the model. [What is EPV?] Events Per Variable (EPV) is the ratio of observed events to model parameters. EPV < 10 indicates the model may be overfit.")
                     
                     # 1. Run Checks
                     epv_res = statistics.check_epv(mv_df, event_col, covariates)
@@ -1305,6 +2519,7 @@ if df is not None:
                                  sns.heatmap(corr_mat, annot=True, fmt=".2f", cmap="coolwarm", center=0, ax=ax_corr, cbar=True)
                                  ax_corr.set_title("Correlation Matrix (Dummy Vars)")
                                  st.pyplot(fig_corr)
+                                 plt.close(fig_corr)
                              else:
                                  st.info("Not enough variation to plot correlations.")
                         
@@ -1377,17 +2592,8 @@ if df is not None:
                                      from sklearn.model_selection import KFold
                                      
                                      # Prepare Data (Silent Mode)
-                                     tune_df = mv_df.copy()
-                                     # Encoder logic duplicate (quick & dirty for tuner)
-                                     tune_encoded = tune_df.drop(columns=cat_cols)
-                                     for col in cat_cols:
-                                         ref = categorical_refs.get(col)
-                                         dummies = pd.get_dummies(tune_df[col], prefix=col)
-                                         ref_col_name = f"{col}_{ref}"
-                                         if ref_col_name in dummies.columns: dummies = dummies.drop(columns=[ref_col_name])
-                                         tune_encoded = pd.concat([tune_encoded, dummies], axis=1)
-                                     
-                                     tune_encoded.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in tune_encoded.columns]
+                                     tune_encoded, _ = statistics.encode_with_reference(mv_df, cat_cols, categorical_refs)
+                                     tune_encoded.columns = [statistics.sanitize_name(c) for c in tune_encoded.columns]
                                      
                                      # Search Space (Refined to R glmnet defaults approx)
                                      # 0.0001 to 10.0 (50 points)
@@ -1411,7 +2617,7 @@ if df is not None:
                                                  # Higher (closer to 0) is better.
                                                  ll_score = cph_tune.score(val_data, scoring_method="log_likelihood")
                                                  fold_scores.append(ll_score)
-                                             except:
+                                             except Exception:
                                                  pass # Skip failed folds
                                          
                                          # Logic: Only accept if at least 3/5 folds succeeded
@@ -1503,35 +2709,169 @@ if df is not None:
                         
                     if st.session_state.get('mv_analysis_active', False):
                         try:
-                            # Encore Categorical Variables MANUALLY to handle Reference Group
-                            mv_data_encoded = mv_df.copy()
-                            
-                            # Drop original categorical columns from encoding base, we will add dummies
-                            mv_data_encoded = mv_data_encoded.drop(columns=cat_cols)
-                            
-                            for col in cat_cols:
-                                ref = categorical_refs.get(col)
-                                # Get Dummies
-                                dummies = pd.get_dummies(mv_df[col], prefix=col)
-                                
-                                # Drop the reference column
-                                ref_col_name = f"{col}_{ref}"
-                                if ref_col_name in dummies.columns:
-                                    dummies = dummies.drop(columns=[ref_col_name])
-                                    
-                                # Concatenate
-                                mv_data_encoded = pd.concat([mv_data_encoded, dummies], axis=1)
-                            
+                            # Encode categorical variables, dropping each chosen reference level.
+                            mv_data_encoded, _ = statistics.encode_with_reference(mv_df, cat_cols, categorical_refs)
+
                             # Sanitize Column Names for Lifelines/Stats (remove spaces/special chars)
-                            mv_data_encoded.columns = [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in mv_data_encoded.columns]
+                            mv_data_encoded.columns = [statistics.sanitize_name(c) for c in mv_data_encoded.columns]
+                            
+                            # --- TIME-DEPENDENT COVARIATE: Expand to counting-process format ---
+                            _td_entry_col = None  # Will be set if TD is active
+                            
+                            if _td_enabled and _td_var_name and _td_time_col and _td_status_col:
+                                st.info(f"⏱️ Expanding data to counting-process format for **{_td_var_name}**...")
+                                
+                                # Retrieve TD columns from the ORIGINAL (pre-encoded) data
+                                # We need the index alignment from mv_df
+                                _td_time_raw = df_clean.loc[mv_df.index, _td_time_col].copy()
+                                _td_stat_values = pd.to_numeric(df_clean.loc[mv_df.index, _td_status_col], errors='coerce')
+                                
+                                # Detect if TD time column is a date or numeric
+                                _td_time_values = pd.to_numeric(_td_time_raw, errors='coerce')
+                                _td_numeric_pct = _td_time_values.notna().mean()
+                                
+                                if _td_numeric_pct < 0.1:
+                                    # Likely a date column — try to parse as datetime
+                                    try:
+                                        _td_dates = pd.to_datetime(_td_time_raw, errors='coerce')
+                                        _td_dates_valid = _td_dates.notna().mean()
+                                        
+                                        if _td_dates_valid > 0.5:
+                                            # Find an anchor date column (diagnosis date, enrollment, etc.)
+                                            _date_candidates = [c for c in df_clean.columns if any(
+                                                kw in c.lower() for kw in ['diagnosis', 'dx_date', 'enrollment', 'registration', 'date_of_diagnosis', 'date_diagnosis']
+                                            )]
+                                            
+                                            _anchor_col = None
+                                            for _cand in _date_candidates:
+                                                _cand_dates = pd.to_datetime(df_clean.loc[mv_df.index, _cand], errors='coerce')
+                                                if _cand_dates.notna().mean() > 0.5:
+                                                    _anchor_col = _cand
+                                                    break
+                                            
+                                            if _anchor_col:
+                                                _anchor_dates = pd.to_datetime(df_clean.loc[mv_df.index, _anchor_col], errors='coerce')
+                                                # Determine time unit from survival column name
+                                                _time_unit = 'months'
+                                                if 'day' in time_col.lower():
+                                                    _time_unit = 'days'
+                                                elif 'year' in time_col.lower():
+                                                    _time_unit = 'years'
+                                                
+                                                _diff_days = (_td_dates - _anchor_dates).dt.total_seconds() / 86400
+                                                if _time_unit == 'months':
+                                                    _td_time_values = _diff_days / 30.4375
+                                                elif _time_unit == 'years':
+                                                    _td_time_values = _diff_days / 365.25
+                                                else:
+                                                    _td_time_values = _diff_days
+                                                
+                                                st.caption(f"📅 Converted '{_td_time_col}' from dates to {_time_unit} "
+                                                          f"(relative to '{_anchor_col}').")
+                                            else:
+                                                st.warning(f"⚠️ '{_td_time_col}' appears to be a date column but no diagnosis/enrollment "
+                                                          f"date column was found to compute the time difference. "
+                                                          f"Please ensure this column contains **numeric time** in the same "
+                                                          f"unit as '{time_col}' (e.g., months from diagnosis).")
+                                    except Exception:
+                                        pass
+                                
+                                # Sanitize the TD variable name
+                                _td_var_safe = statistics.sanitize_name(_td_var_name)
+                                
+                                # Sanitized time/event column names
+                                _san_time = statistics.sanitize_name(time_col)
+                                _san_event = statistics.sanitize_name(event_col)
+                                
+                                rows_expanded = []
+                                _n_split = 0
+                                for idx in mv_data_encoded.index:
+                                    row = mv_data_encoded.loc[idx].to_dict()
+                                    end_time = row[_san_time]
+                                    event = row[_san_event]
+                                    
+                                    td_occurred = _td_stat_values.loc[idx]
+                                    td_time = _td_time_values.loc[idx]
+                                    
+                                    if pd.notna(td_occurred) and td_occurred == 1 and pd.notna(td_time) and pd.notna(end_time) and td_time < end_time and td_time > 0:
+                                        # SPLIT: Two rows
+                                        # Row 1: (0, td_time) — before event, TD=0, no outcome event
+                                        row1 = row.copy()
+                                        row1['_start'] = 0
+                                        row1[_san_time] = td_time  # stop = td_time
+                                        row1[_san_event] = 0       # no event yet
+                                        row1[_td_var_safe] = 0
+                                        rows_expanded.append(row1)
+                                        
+                                        # Row 2: (td_time, end_time) — after event, TD=1, original event
+                                        row2 = row.copy()
+                                        row2['_start'] = td_time
+                                        row2[_san_time] = end_time  # stop = original end
+                                        row2[_san_event] = event    # original event status
+                                        row2[_td_var_safe] = 1
+                                        rows_expanded.append(row2)
+                                        _n_split += 1
+                                    else:
+                                        # NO SPLIT: Single row, TD=0
+                                        row['_start'] = 0
+                                        row[_td_var_safe] = 0
+                                        rows_expanded.append(row)
+                                
+                                mv_data_encoded = pd.DataFrame(rows_expanded)
+                                _td_entry_col = '_start'
+                                
+                                # Ensure all model columns are numeric after dict→DataFrame round-trip
+                                for _col in mv_data_encoded.columns:
+                                    if _col not in ['_start']:
+                                        mv_data_encoded[_col] = pd.to_numeric(mv_data_encoded[_col], errors='coerce')
+                                
+                                if _n_split == 0:
+                                    st.error(
+                                        f"🛑 **The time-dependent covariate '{_td_var_name}' could not be placed on the "
+                                        f"survival timeline — 0 patients were split, so the covariate is constant (all 0) "
+                                        f"and the Cox model cannot converge (this is the cause of the 'delta contains nan' error).**"
+                                    )
+                                    st.markdown(
+                                        f"The **Time of Event Column** must hold the event time as a **number on the same scale "
+                                        f"as `{time_col}`** — i.e. *months from the same time-zero as the survival clock* "
+                                        f"(typically months from diagnosis/registration to the event). You selected "
+                                        f"**`{_td_time_col}`**, which contains **calendar dates**, not months-from-baseline, "
+                                        f"so they can't be lined up against `{time_col}`.\n\n"
+                                        f"**How to fix:** add a numeric column such as `Months_to_transplant` = "
+                                        f"(transplant date − diagnosis/registration date) in months, and select **that** as the "
+                                        f"Time of Event Column. Patients who never had the event are left blank — they are simply "
+                                        f"never split and keep the covariate at 0, which is correct.\n\n"
+                                        f"_Note: missing dates for non-transplanted patients are expected and not the problem; "
+                                        f"the issue is that even transplanted patients have no numeric event time to split on._"
+                                    )
+                                    st.stop()
+
+                                st.success(f"✅ Data expanded: {len(mv_data_encoded)} rows "
+                                           f"(from {len(mv_df)} patients, {_n_split} split). "
+                                           f"Time-dependent covariate: **{_td_var_safe}**")
+                                
+                                with st.expander("Preview Counting-Process Data (first 10 rows)"):
+                                    _preview_cols = ['_start', _san_time, _san_event, _td_var_safe]
+                                    _other_cols = [c for c in mv_data_encoded.columns if c not in _preview_cols]
+                                    st.dataframe(mv_data_encoded[_preview_cols + _other_cols[:3]].head(10))
                             
                             # Fit Model
                             # Use session state values to ensure consistency even after button click
                             final_penalizer = st.session_state.penalizer_val if use_penalizer else 0.0
                             final_l1 = st.session_state.l1_ratio_val if use_penalizer else 0.0
                             
+                            # Drop rows with NaN in any column used for fitting
+                            _n_before_drop = len(mv_data_encoded)
+                            mv_data_encoded = mv_data_encoded.dropna()
+                            _n_after_drop = len(mv_data_encoded)
+                            if _n_before_drop > _n_after_drop:
+                                st.caption(f"ℹ️ Dropped {_n_before_drop - _n_after_drop} rows with missing values.")
+                            
                             cph_mv = CoxPHFitter(penalizer=final_penalizer, l1_ratio=final_l1)
-                            cph_mv.fit(mv_data_encoded, duration_col=time_col, event_col=event_col)
+                            if _td_entry_col:
+                                cph_mv.fit(mv_data_encoded, duration_col=_san_time, event_col=_san_event, entry_col=_td_entry_col)
+                            else:
+                                cph_mv.fit(mv_data_encoded, duration_col=time_col, event_col=event_col)
                             
                             # 3. Separation Check (Post-Analysis) -> Warning Only (Penalized handles it often)
                             if not use_penalizer:
@@ -1539,7 +2879,36 @@ if df is not None:
                                 if sep_warnings:
                                     for w in sep_warnings:
                                         st.error(f"🛑 **Critical Statistical Issue**: {w}")
-                            
+
+                            # 4. Proportional Hazards Assumption Test (Schoenfeld Residuals)
+                            try:
+                                from lifelines.statistics import proportional_hazard_test
+                                ph_result_mv = proportional_hazard_test(cph_mv, mv_data_encoded, time_transform='rank')
+                                ph_summary_mv = ph_result_mv.summary
+                                any_violation_mv = (ph_summary_mv['p'] < 0.05).any()
+
+                                _ph_label_mv = "⚠️ Proportional Hazards Assumption Test" if any_violation_mv else "Proportional Hazards Assumption Test"
+                                with st.expander(_ph_label_mv, expanded=any_violation_mv):
+                                    ph_display_mv = ph_summary_mv[['test_statistic', 'p']].copy()
+                                    ph_display_mv.columns = ['Chi-squared', 'p-value']
+                                    ph_display_mv['Result'] = ph_display_mv['p-value'].apply(
+                                        lambda p: "⚠️ Violated (p<0.05)" if p < 0.05 else "OK"
+                                    )
+                                    st.dataframe(ph_display_mv.style.format({'Chi-squared': '{:.3f}', 'p-value': '{:.4f}'}))
+
+                                    if any_violation_mv:
+                                        violated_mv = ph_summary_mv[ph_summary_mv['p'] < 0.05].index.get_level_values(0).tolist()
+                                        st.warning(
+                                            f"**PH assumption violated for: {', '.join(violated_mv)}.** "
+                                            "The hazard ratio for these variables may not be constant over time. "
+                                            "Consider: time-varying covariates, stratified Cox model, or restricted mean survival time (RMST)."
+                                        )
+                                    else:
+                                        st.success("PH assumption satisfied for all covariates (Schoenfeld residuals test, p>0.05).")
+                                    st.caption("Test: Schoenfeld residuals with rank time transform")
+                            except Exception:
+                                pass  # Silently skip if PH test fails (e.g., too few events)
+
                             # Results Table
                             summary_mv = cph_mv.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']]
                             summary_mv.columns = ['Hazard Ratio (HR)', 'Lower 95%', 'Upper 95%', 'p-value']
@@ -1548,130 +2917,109 @@ if df is not None:
                             if use_penalizer:
                                 st.caption(f"Model: Penalized Cox (Lambda={final_penalizer:.4f}, L1 Ratio={final_l1})")
                                 
-                            # Identify unstable rows for highlighting
+                            # Format p-value column per journal style for display
+                            _display_mv = summary_mv.copy()
+                            _display_mv['p-value'] = _display_mv['p-value'].apply(lambda p: format_p_value(p, narrator_style_name, context="table"))
                             def highlight_unstable(row):
-                                # Helper to get original coef/se from model object based on index name
                                 try:
-                                    # row.name is the variable name
-                                    # Check original params in model
                                     coef = cph_mv.params_[row.name]
                                     se = cph_mv.standard_errors_[row.name]
-                                    
                                     if abs(coef) > 10 or se > 5:
                                         return ['background-color: rgba(255, 0, 0, 0.1)'] * len(row)
-                                except:
+                                except Exception:
                                     pass
+                                orig_p = summary_mv.loc[row.name, 'p-value'] if row.name in summary_mv.index else 1.0
+                                if orig_p < 0.05:
+                                    return ['background-color: rgba(0, 180, 0, 0.1)'] * len(row)
                                 return [''] * len(row)
 
-                            st.dataframe(summary_mv.style.format("{:.3f}").apply(highlight_unstable, axis=1))
+                            st.dataframe(_display_mv.style.format(
+                                {c: "{:.3f}" for c in _display_mv.columns if c != 'p-value'}
+                            ).apply(highlight_unstable, axis=1))
                             
-                            # Add legend if needed
+                            # Add legend
+                            legend_parts = []
                             if any((abs(cph_mv.params_) > 10) | (cph_mv.standard_errors_ > 5)):
-                                st.caption("🟥 **Red Background**: Indicates unstable estimates (Extreme Coef > 10 or SE > 5). Results likely unreliable due to separation.")
+                                legend_parts.append("🟥 Red = unstable estimates (coef>10 or SE>5)")
+                            if any(summary_mv['p-value'] < 0.05):
+                                legend_parts.append("🟩 Green = statistically significant (p<0.05)")
+                            if legend_parts:
+                                st.caption(" | ".join(legend_parts))
                             
                             # Save to Session State specifically for Narrator or Persistence
                             st.session_state['mv_summary_df'] = summary_mv
 
                             # Forest Plot
                             st.write("### Forest Plot")
-                            
-                            # Prepare Data for Plot
-                            plot_data = summary_mv.copy()
-                            plot_data = plot_data.sort_index(ascending=False) # Top to bottom on plot
-                            
-                            # Dynamic height
-                            fig_forest, ax_forest = plt.subplots(figsize=(10, max(4, len(plot_data) * 0.5 + 1)))
-                            
+
                             # Theme Color
                             forest_color = '#1f77b4'
                             if selected_theme in all_themes and len(all_themes[selected_theme]) > 0:
                                  forest_color = all_themes[selected_theme][0]
-                            elif selected_theme == "Custom":
-                                 pass # Use default blue or allow custom override? Basic blue is fine.
+
+                            # CI separator from journal style
+                            _ci_sep = narrator.JOURNAL_STYLES.get(narrator_style_name, {}).get('ci_sep', '-')
                             
-                            y_pos = np.arange(len(plot_data))
-                            
-                            # Plot Points and Error Bars
-                            x_errs = [
-                                plot_data['Hazard Ratio (HR)'] - plot_data['Lower 95%'],  # Updated col names
-                                plot_data['Upper 95%'] - plot_data['Hazard Ratio (HR)']
-                            ]
-                            
-                            ax_forest.errorbar(plot_data['Hazard Ratio (HR)'], y_pos, xerr=x_errs, 
-                                               fmt='o', color=forest_color, ecolor='black', capsize=5, markersize=8)
-                            
-                            # Reference Line
-                            ax_forest.axvline(x=1, color='red', linestyle='--', linewidth=1)
-                            
-                            # Labels
-                            ax_forest.set_yticks(y_pos)
-                            ax_forest.set_yticklabels(plot_data.index, fontsize=10, fontweight='bold')
-                            ax_forest.set_xlabel("Hazard Ratio (95% CI)")
-                            ax_forest.set_title("Multivariable Cox Regression Results")
-                            
-                            # Grid
-                            ax_forest.grid(True, axis='x', linestyle=':', alpha=0.6)
-                            
-                            # Clean Spines
-                            ax_forest.spines['top'].set_visible(False)
-                            ax_forest.spines['right'].set_visible(False)
-                            ax_forest.spines['left'].set_visible(False)
-                            
+                            fig_forest = plotting.create_forest_plot(
+                                summary_mv,
+                                theme_color=forest_color,
+                                title="Multivariable Cox Regression Results",
+                                p_formatter=lambda p: format_p_value(p, narrator_style_name, context="plot"),
+                                ci_sep=_ci_sep,
+                            )
                             st.pyplot(fig_forest)
                             
                             # Save to session_state for Report
                             st.session_state['report_fig_forest'] = fig_forest
                             
                             # Download
-                            buf_forest = io.BytesIO()
-                            fig_forest.savefig(buf_forest, format="png", dpi=300, bbox_inches='tight')
-                            buf_forest.seek(0)
-                            
                             col1, col2, col3 = st.columns(3)
                             with col1:
-                                st.download_button("💾 Download Forest Plot (300 DPI)", buf_forest, "forest_plot_300dpi.png", "image/png")
+                                st.download_button("💾 Download Forest Plot (300 DPI)", plotting.save_plot_to_buffer(fig_forest, dpi=300), "forest_plot_300dpi.png", "image/png")
                             with col2:
-                                buf_forest_hi = io.BytesIO()
-                                fig_forest.savefig(buf_forest_hi, format="png", dpi=600, bbox_inches='tight')
-                                buf_forest_hi.seek(0)
-                                st.download_button("💾 Download High-Res Forest Plot (600 DPI)", buf_forest_hi, "forest_plot_600dpi.png", "image/png")
-
+                                st.download_button("💾 Download High-Res Forest Plot (600 DPI)", plotting.save_plot_to_buffer(fig_forest, dpi=600), "forest_plot_600dpi.png", "image/png")
                             with col3:
-                                buf_forest_pdf = io.BytesIO()
-                                fig_forest.savefig(buf_forest_pdf, format="pdf", bbox_inches='tight')
-                                buf_forest_pdf.seek(0)
-                                st.download_button("📄 Download Forest Plot (PDF)", buf_forest_pdf, "forest_plot.pdf", "application/pdf")
-                                
-                                # --- AI NARRATOR (Multivariable) ---
-                                st.divider()
-                                st.write("### 🤖 AI Result Narrator")
-                                
-                                # Use session state DF if available (handles button consistency if needed)
-                                mv_df_for_narrator = st.session_state.get('mv_summary_df', summary_mv)
-                                
-                                if st.button("Generate Summary Text (Multivariable)"):
-                                    if use_penalizer and penalizer_value > 0:
-                                        penalty_type = "Ridge" if l1_ratio == 0 else "Lasso" if l1_ratio == 1 else "Elastic Net"
-                                        mv_summary = f"Multivariable analysis was performed using **Penalized Cox Regression ({penalty_type})** to handle multicollinearity and prevent overfitting (Lambda={penalizer_value:.4f}, L1 Ratio={l1_ratio}). Coefficients were estimated using the maximum penalized partial likelihood.\n\n"
-                                    else:
-                                        mv_summary = "Multivariable analysis was performed using the standard Cox Proportional Hazards regression model to assess independent predictors of survival.\n\n"
-                                    
-                                    mv_summary += "In the adjusted model, the following associations were observed:\n\n"
-                                    
-                                    # Iterate over rows
-                                    for idx, row in mv_df_for_narrator.iterrows():
-                                        hr = row['Hazard Ratio (HR)']
-                                        p = row['p-value']
-                                        ci_low = row['Lower 95%'] # Updated key
-                                        ci_high = row['Upper 95%'] # Updated key
-                                        
-                                        sig_txt = "significantly associated" if p < 0.05 else "not significantly associated"
-                                        
-                                        mv_summary += f"* **{idx}**: {sig_txt} with the event (HR={hr:.2f}, 95% CI {ci_low:.2f}-{ci_high:.2f}, p={p:.4f}).\n"
-                                        
-                                    st.success("Summary Generated:")
-                                    st.text_area("Copy this text:", value=mv_summary, height=200)
-                            
+                                st.download_button("📄 Download Forest Plot (PDF)", plotting.save_plot_to_buffer(fig_forest, fmt="pdf"), "forest_plot.pdf", "application/pdf")
+
+                            if st.button("📌 Pin to Session", key="pin_mv_cox",
+                                         help="Save this multivariable Cox model to the session bank."):
+                                _mv_tbl = st.session_state.get('mv_summary_df', None)
+                                _used = _pin_analysis(
+                                    'Cox', f"Multivariable Cox: {narrator_event_name}", fig=fig_forest,
+                                    title="Multivariable Cox", tables={'Adjusted HRs': _mv_tbl},
+                                    narrative=st.session_state.get('last_mv_narrative'),
+                                    meta={'endpoint': narrator_event_name, 'group_col': 'multivariable',
+                                          'n_patients': len(mv_df) if 'mv_df' in globals() else None})
+                                st.success(f"📌 Pinned: **{_used}**")
+
+                            # --- AI NARRATOR (Multivariable) ---
+                            st.divider()
+                            st.write("### 🤖 AI Result Narrator")
+
+                            mv_df_for_narrator = st.session_state.get('mv_summary_df', summary_mv)
+
+                            if st.button("Generate Summary Text (Multivariable)"):
+                                n_patients = len(mv_df) if 'mv_df' in globals() else None
+                                n_events = int(mv_df[event_col].sum()) if 'mv_df' in globals() else None
+
+                                mv_narrative = narrator.generate_multivariable_narrative(
+                                    summary_df=mv_df_for_narrator,
+                                    use_penalizer=use_penalizer,
+                                    penalizer_value=st.session_state.get('penalizer_val', 0.0),
+                                    l1_ratio=st.session_state.get('l1_ratio_val', 0.0),
+                                    n_patients=n_patients,
+                                    n_events=n_events,
+                                    style_name=narrator_style_name,
+                                    detail_level=narrator_detail_level,
+                                    event_name=narrator_event_name,
+                                    landmark_time=landmark_time if landmark_time > 0 else None,
+                                    median_followup=(statistics.median_followup(mv_df[time_col], mv_df[event_col])
+                                                     if 'mv_df' in globals() else None),
+                                )
+                                st.success("Summary Generated (click the copy icon to copy):")
+                                st.session_state['last_mv_narrative'] = mv_narrative
+                                st.code(mv_narrative, language=None)
+
                         except Exception as e:
                             st.error(f"Error running model: {e}")
                             st.info("Ensure you are not including variables that perfectly predict the outcome (separation).")
@@ -1682,7 +3030,76 @@ if df is not None:
             else:
                 st.info("Select at least one covariate variable (e.g., Age, Gender, Mutations) to begin.")
 
-        with tab_risk:
+            # ============================================================
+            # SUBGROUP ANALYSIS (FOREST PLOT WITH INTERACTION TESTS)
+            # ============================================================
+            st.divider()
+            st.subheader("🌲 Subgroup Analysis (Forest Plot)")
+            st.write("Estimate a binary treatment/exposure effect **within** subgroups, with an interaction test per subgroup — the standard trial/retrospective forest plot.")
+
+            _sg_opts = [c for c in columns if c not in [time_col, event_col]]
+            _sg_c1, _sg_c2 = st.columns(2)
+            with _sg_c1:
+                _sg_tx = st.selectbox("Treatment / exposure (binary)", _sg_opts, key="sg_tx",
+                                      help="Must have exactly two levels (e.g., MRD+/MRD-, treated/untreated).")
+            with _sg_c2:
+                _sg_ref_opts = sorted(df_clean[_sg_tx].dropna().unique()) if _sg_tx else []
+                _sg_ref = st.selectbox("Reference level", [str(v) for v in _sg_ref_opts], key="sg_ref") if _sg_ref_opts else None
+            _sg_vars = st.multiselect("Subgroup variables (categorical)",
+                                      [c for c in _sg_opts if c != _sg_tx], key="sg_vars")
+
+            if st.button("Build Subgroup Forest", key="run_subgroup"):
+                if not _sg_vars:
+                    st.error("Select at least one subgroup variable.")
+                else:
+                    _sg_ref_val = None
+                    for v in _sg_ref_opts:
+                        if str(v) == _sg_ref:
+                            _sg_ref_val = v
+                    _sg_tbl, _sg_meta = statistics.subgroup_hazard_ratios(
+                        df_clean, time_col, event_col, _sg_tx, _sg_vars, treatment_ref=_sg_ref_val)
+                    if _sg_tbl is None:
+                        st.error(f"Subgroup analysis failed: {_sg_meta}")
+                    else:
+                        st.caption(f"Hazard ratio: **{_sg_meta['comparison']}** vs **{_sg_meta['reference']}** "
+                                   "(HR < 1 favours the comparison group). Interaction P tests whether the "
+                                   "effect differs across a subgroup's levels; a small value warns against "
+                                   "over-interpreting individual subgroups.")
+                        # Forest plot
+                        _sg_plot = _sg_tbl.dropna(subset=['HR']).reset_index(drop=True)
+                        if len(_sg_plot):
+                            _fig_sg, _ax_sg = plt.subplots(figsize=(7, 0.5 * len(_sg_plot) + 1.5))
+                            _ylabels, _yi = [], []
+                            for i, r in _sg_plot.iterrows():
+                                y = len(_sg_plot) - i
+                                _yi.append(y)
+                                lbl = "Overall" if r['Subgroup'] == 'Overall' else f"  {r['Subgroup']}={r['Level']}"
+                                _ylabels.append(lbl)
+                                _ax_sg.plot([r['Lower'], r['Upper']], [y, y], color='#0072B5', lw=1.5)
+                                _ax_sg.plot(r['HR'], y, 's', color='#0072B5', ms=6)
+                            _ax_sg.axvline(1.0, color='grey', ls='--', lw=1)
+                            _ax_sg.set_yticks(_yi); _ax_sg.set_yticklabels(_ylabels)
+                            _ax_sg.set_xscale('log')
+                            _ax_sg.set_xlabel("Hazard Ratio (log scale)")
+                            _ax_sg.set_title(f"{_sg_meta['comparison']} vs {_sg_meta['reference']}")
+                            st.pyplot(_fig_sg)
+                            plt.close(_fig_sg)
+                        # Table
+                        _sg_disp = _sg_tbl.copy()
+                        for _c in ('HR', 'Lower', 'Upper'):
+                            _sg_disp[_c] = _sg_disp[_c].apply(lambda v: f"{v:.2f}" if pd.notna(v) else "")
+                        for _c in ('p-value', 'Interaction P'):
+                            _sg_disp[_c] = _sg_disp[_c].apply(
+                                lambda v: format_p_value(v, narrator_style_name, context="table") if pd.notna(v) else "")
+                        for _c in ('n', 'Events'):
+                            _sg_disp[_c] = _sg_disp[_c].apply(lambda v: str(int(v)) if pd.notna(v) else "")
+                        st.dataframe(_sg_disp, hide_index=True, use_container_width=True)
+                        st.download_button("💾 Download Subgroup Table (CSV)",
+                                           _sg_tbl.to_csv(index=False).encode('utf-8'),
+                                           "subgroup_forest.csv", "text/csv", key="dl_subgroup")
+
+        if tab_risk is not None:
+          with tab_risk:
             st.subheader("Risk System Based on HR")
             st.write("Stratify patients into Risk Groups based on the hazard ratios from your Multivariable Model.")
 
@@ -1752,57 +3169,11 @@ if df is not None:
                     # This is the hard part if variables are categorical dummies.
                     # Heuristic: Check if column exists. if not, try standardized name.
                     
-                    # Progress Bar
-                    # Pre-calculate masks
-                    mask_high = pd.Series([False]*len(score_df), index=score_df.index)
-                    mask_low = pd.Series([False]*len(score_df), index=score_df.index)
-                    
-                    # Helper to find column
-                    def get_col_data(v_name, dframe):
-                        # 1. Direct match
-                        if v_name in dframe.columns: return dframe[v_name] == 1 # Assume binary/numeric
-                        # 2. Try reversing sanitization (unlikely to work perfectly but trying common patterns)
-                        # The app sanitizes: replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
-                        # Users usually have binary 0/1 columns for mutations.
-                        # If simple match fails, we might skip.
-                        return None
-
                     cols_found = 0
                     cols_missing = []
 
-                    for v in high_risk_vars:
-                         # We need to find this variable in the dataset
-                         # Check strict match first (Tab 2 sanitized names)
-                         # We probably need to re-run the exact same encoding logic as Tab 2 to be safe.
-                         # RE-RUN ENCODING (Safe)
-                         pass
-                    
-                    # RE-RUN ENCODING LOGIC (Copied from Tab 2 for consistency)
-                    # This ensures we have the exact same columns as the model
-                    strat_encoded = df_clean.copy()
-                    
-                    # Identify categorical cols used in Tab 2
-                    # We need 'cat_cols' from Tab 2 context. It's usually inferred from numeric checks.
-                    # We will re-infer or use global 'columns'.
-                    # For robustness, we'll try to match strictly against the indices in mv_res.
-                    
-                    # Quick encode ALL categorical columns to safe_names to match potential model vars
-                    # This is slightly expensive but necessary to match "ICC_BCR::ABL1" etc.
-                    # Actually, Tab 2 logic was specific. Let's try a simpler approach:
-                    # Just check if the Model Variable matches a Column in the current DF. 
-                    # If not, assume it was a dummy and try to find it.
-                    
-                    for v in high_risk_vars + low_risk_vars:
-                         if v not in score_df.columns:
-                             # It might be a dummy. e.g. "Gender_Male".
-                             # We won't support complex auto-matching here to avoid errors.
-                             # We'll rely on the user having prepared data OR simple binary cols.
-                             # If "ICC_BCR::ABL1" is in the index (sanitized), but "ICC BCR::ABL1" is in df.
-                             # Try sanitizing df columns map.
-                             pass
-                    
-                    # Better Strategy: Sanitize ALL DF columns temporarily to match Model
-                    clean_col_map = {c: c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg') for c in score_df.columns}
+                    # Sanitize all df columns to match the (sanitized) model variable names
+                    clean_col_map = {c: statistics.sanitize_name(c) for c in score_df.columns}
                     score_df_renamed = score_df.rename(columns=clean_col_map)
                     
                     # Smart Variable Matcher
@@ -1817,7 +3188,7 @@ if df is not None:
                         # 2. Categorical Reconstruction (e.g., v_name="ICC_BCR::ABL1", col="ICC", val="BCR::ABL1")
                         # We try to match v_name prefix to a column in dframe
                         for col in dframe.columns:
-                            clean_col = col.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                            clean_col = statistics.sanitize_name(col)
                             if v_name.startswith(clean_col + "_"):
                                 # Extracted value part
                                 val_part_sanitized = v_name[len(clean_col)+1:]
@@ -1827,7 +3198,7 @@ if df is not None:
                                 # Let's iterate unique values in original col
                                 unique_vals = dframe[col].dropna().unique()
                                 for val in unique_vals:
-                                    val_sanitized = str(val).replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                    val_sanitized = statistics.sanitize_name(str(val))
                                     # Handle specialized characters if needed (Tab 2 logic might be more complex)
                                     # But usually Tab 2 just does get_dummies with prefix.
                                     
@@ -1835,10 +3206,10 @@ if df is not None:
                                     # So we check if v_name == clean_col + "_" + val_sanitized (or similar)
                                     # Actually, get_dummies uses the original value string.
                                     # But we sanitized the *result* columns in Tab 2 line 1459:
-                                    # [c.replace(' ', '_').replace('+', 'pos').replace('-', 'neg')...]
+                                    # [statistics.sanitize_name(c)...]
                                     
                                     # So yes, we just need to replicate that chain.
-                                    candidate_name = clean_col + "_" + str(val).replace(' ', '_').replace('+', 'pos').replace('-', 'neg')
+                                    candidate_name = clean_col + "_" + statistics.sanitize_name(str(val))
                                     
                                     if v_name == candidate_name:
                                         # MATCH FOUND!
@@ -1913,10 +3284,11 @@ if df is not None:
                                 kmf.fit(score_df.loc[mask, time_col], score_df.loc[mask, event_col], label=f"{grp} (n={n})")
                                 kmf.plot_survival_function(ax=ax_risk, ci_show=False)
                         
-                        ax_risk.set_title("Risk Scote Stratification")
+                        ax_risk.set_title("Risk Score Stratification")
                         ax_risk.set_xlabel(time_col)
                         ax_risk.set_ylabel("Survival Probability")
                         st.pyplot(fig_risk)
+                        plt.close(fig_risk)
                         
                     with km_col2:
                         st.write("**Evaluation Metrics**")
@@ -2029,12 +3401,11 @@ if df is not None:
                     os_stat_col = st.selectbox("Status Column (1=Event)", columns, index=columns.index("OS_Status") if "OS_Status" in columns else 0, key="os_stat")
 
                 if st.button("Construct & Analyze"):
-                    # Data Wrangling
-                    temp_df = df[[rfs_time_col, rfs_stat_col, os_time_col, os_stat_col]].copy()
+                    # Data Wrangling — keep ALL columns so covariates are available for MV Fine-Gray
+                    _required_cols = [rfs_time_col, rfs_stat_col, os_time_col, os_stat_col]
                     if group_col != "None":
-                        temp_df[group_col] = df[group_col]
-                    
-                    temp_df = temp_df.dropna()
+                        _required_cols.append(group_col)
+                    temp_df = df.dropna(subset=_required_cols).copy()
                     
                     # Create Composite Columns
                     temp_df['Composite_Time'] = temp_df[[rfs_time_col, os_time_col]].min(axis=1)
@@ -2147,38 +3518,71 @@ if df is not None:
                                   fg_data = compute_fine_gray_weights(cif_df, cif_time_col, cif_event_col, cif_event_of_interest)
                                   
                                   # 2. Encode Group Variable (One-Hot) with Custom Reference
-                                  # To set a specific reference, we can use pd.get_dummies and drop the reference column
-                                  fg_data_encoded = pd.get_dummies(fg_data, columns=[group_col], drop_first=False) # Keep all initially
+                                  # Track columns before/after to identify ONLY the new dummy columns
+                                  # (startswith is too greedy — catches original data columns with same prefix)
+                                  _cols_before = set(fg_data.columns)
+                                  fg_data_encoded = pd.get_dummies(fg_data, columns=[group_col], drop_first=False, dtype=float)
+                                  _cols_after = set(fg_data_encoded.columns)
+                                  _new_dummy_cols = list(_cols_after - _cols_before)  # ONLY new dummies
                                   
                                   # Drop the reference group column
                                   ref_col_name = f"{group_col}_{fg_ref_group}"
                                   if ref_col_name in fg_data_encoded.columns:
                                       fg_data_encoded = fg_data_encoded.drop(columns=[ref_col_name])
+                                      _new_dummy_cols = [c for c in _new_dummy_cols if c != ref_col_name]
                                   
-                                  # Select columns: 'start', 'stop', event(status), weights, id, and the new dummy columns
-                                  # The remaining dummy columns are the comparisons vs reference
-                                  dummy_cols = [c for c in fg_data_encoded.columns if c.startswith(f"{group_col}_")]
+                                  # Use ONLY the real dummy columns (not original columns sharing the prefix)
+                                  dummy_cols = _new_dummy_cols
                                   cols_to_fit = ['start', 'stop', 'status', 'weight', 'id'] + dummy_cols
                                  
                                   # 3. Fit Fine-Gray Model (Weighted Cox)
-                                  # IMPORTANT: The weighted dataframe from compute_fine_gray_weights is in counting process format (start, stop).
-                                  # We must NOT use duration_col=cif_time_col.
-                                  cph_fg = CoxPHFitter()
-                                  cph_fg.fit(fg_data_encoded[cols_to_fit], 
-                                             duration_col='stop', entry_col='start', event_col='status', weights_col='weight', 
-                                             cluster_col='id', robust=True)
+                                  # Clean: drop rows with NaN in fitting columns
+                                  _fg_fit_data = fg_data_encoded[cols_to_fit].dropna()
                                   
-                                  # 4. Extract P-value (Gray's Test Equivalent)
-                                  # Log-Likelihood Ratio Test against null model
-                                  res_fg = cph_fg.log_likelihood_ratio_test()
-                                  # Log-Likelihood Ratio Test against null model
-                                  res_fg = cph_fg.log_likelihood_ratio_test()
+                                  import warnings as _w
+                                  with _w.catch_warnings():
+                                      _w.simplefilter("ignore")
+                                      cph_fg = CoxPHFitter()
+                                      cph_fg.fit(_fg_fit_data,
+                                                 duration_col='stop', entry_col='start', event_col='status',
+                                                 weights_col='weight', cluster_col='id', robust=True)
+                                  
+                                  # 4. Extract P-value for CIF plot — Gray's Test
+                                  # Gray's test is the proper nonparametric test for 
+                                  # comparing CIFs, equivalent to R's cmprsk::cuminc()$Tests.
+                                  # It's the competing-risks analogue of the log-rank test.
+                                  _grays = grays_test(cif_df, cif_time_col, cif_event_col, 
+                                                      group_col, cif_event_of_interest)
+                                  
                                   if show_p_val_plot_cif:
-                                      fg_p_value_text = f"Fine-Gray (LRT) p = {res_fg.p_value:.4f}"
+                                      _gray_p = _grays['p_value']
+                                      if not np.isnan(_gray_p):
+                                          _fg_p_fmt = format_p_value(_gray_p, narrator_style_name, context="plot")
+                                          fg_p_value_text = f"Gray's test {_fg_p_fmt}"
+                                      else:
+                                          _wald_p = cph_fg.summary['p'].min()
+                                          _fg_p_fmt = format_p_value(_wald_p, narrator_style_name, context="plot")
+                                          fg_p_value_text = f"Fine-Gray (Wald) {_fg_p_fmt}"
                                   
-                                  # 5. Extract HR Table
-                                  fg_summary = cph_fg.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']]
-                                  fg_summary.columns = ['Subdist HR', 'Lower 95%', 'Upper 95%', 'p-value']
+                                  # 5. Extract HR Table using the cluster-robust (sandwich) SE.
+                                  # cluster_col='id' + robust=True gives the correct Fine-Gray
+                                  # variance on the IPCW-expanded data (the naive Hessian would
+                                  # be far too small); this approximates R's crr() output.
+                                  from scipy.stats import norm as _norm
+                                  _betas = cph_fg.params_
+                                  _model_se = np.sqrt(np.diag(cph_fg.variance_matrix_.values))
+                                  _hrs = np.exp(_betas.values)
+                                  _z = _betas.values / _model_se
+                                  _p_vals = 2 * (1 - _norm.cdf(np.abs(_z)))
+                                  _lo = np.exp(_betas.values - 1.96 * _model_se)
+                                  _hi = np.exp(_betas.values + 1.96 * _model_se)
+                                  
+                                  fg_summary = pd.DataFrame({
+                                      'Subdist HR': _hrs,
+                                      'Lower 95%': _lo,
+                                      'Upper 95%': _hi,
+                                      'p-value': _p_vals,
+                                  }, index=_betas.index)
                                  
                           except Exception as e:
                              st.error(f"Fine-Gray Analysis Failed: {e}")
@@ -2187,14 +3591,15 @@ if df is not None:
                                   temp_evt = (cif_df[cif_event_col] == cif_event_of_interest).astype(int)
                                   res_cif = multivariate_logrank_test(cif_df[cif_time_col], cif_df[group_col], temp_evt)
                                   if show_p_val_plot_cif:
-                                    fg_p_value_text = f"CS-LogRank p = {res_cif.p_value:.4f}"
-                             except:
+                                    _cs_p_fmt = format_p_value(res_cif.p_value, narrator_style_name, context="plot")
+                                    fg_p_value_text = f"CS-LogRank {_cs_p_fmt}"
+                             except Exception:
                                  pass
                 
                 # Display P-value on Plot
                 if show_p_val_plot_cif and fg_p_value_text:
                      bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box_cif else None
-                     ax_cif.text(pval_x_cif, pval_y_cif, fg_p_value_text, transform=ax_cif.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
+                     ax_cif.text(pval_x_cif, pval_y_cif, fg_p_value_text, transform=ax_cif.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize_cif)
 
                 if group_col != "None" and group_col in cif_df.columns:
                     if groups_ordered:
@@ -2230,7 +3635,7 @@ if df is not None:
                         cif_labels.append(label)
                             
                         # Fit Aalen-Johansen
-                        ajf = AalenJohansenFitter(calculate_variance=True)
+                        ajf = AalenJohansenFitter(calculate_variance=True, seed=42)
                         ajf.fit(cif_df[cif_time_col][mask], cif_df[cif_event_col][mask], event_of_interest=cif_event_of_interest, label=label)
                         ajf.plot(ax=ax_cif, ci_show=show_ci, show_censors=False, color=color, linewidth=line_width) # Disable built-in to avoid error
                         cif_fitters.append(ajf)
@@ -2266,7 +3671,7 @@ if df is not None:
                      elif selected_theme == "Custom":
                          color = st.sidebar.color_picker("Color for All Patients (CIF)", "#1f77b4")
                      
-                     ajf = AalenJohansenFitter(calculate_variance=True)
+                     ajf = AalenJohansenFitter(calculate_variance=True, seed=42)
                      ajf.fit(cif_df[cif_time_col], cif_df[cif_event_col], event_of_interest=cif_event_of_interest, label="All Patients")
                      ajf.plot(ax=ax_cif, ci_show=show_ci, show_censors=False, color=color, linewidth=line_width) # Disable built-in
                      
@@ -2299,27 +3704,67 @@ if df is not None:
                 fig_cif.patch.set_facecolor(plot_bgcolor)
                 ax_cif.set_facecolor(plot_bgcolor)
                 
-                # Add Risk Table (Point-in-Time)
+                # Legend
                 if show_legend_cif:
-                     ax_cif.legend(fontsize=legend_fontsize, loc=(leg_x_cif, leg_y_cif), frameon=show_legend_box_cif)
+                    if legend_style_cif == "Top bar":
+                        if ax_cif.get_legend():
+                            ax_cif.get_legend().remove()
+                        handles, labels = ax_cif.get_legend_handles_labels()
+                        if handles:
+                            fig_cif.subplots_adjust(top=0.88)
+                            fig_cif.legend(handles, labels, loc='upper center',
+                                           bbox_to_anchor=(0.5, topbar_y_cif), ncol=len(handles),
+                                           fontsize=legend_fontsize, frameon=False,
+                                           handlelength=2.0, columnspacing=1.5)
+                    else:
+                        ax_cif.legend(fontsize=legend_fontsize, loc=(leg_x_cif, leg_y_cif), frameon=show_legend_box_cif)
                 else:
                      if ax_cif.get_legend():
                          ax_cif.get_legend().remove()
-                
+
                 if show_p_val_plot_cif and fg_p_value_text:
                      bbox_props = dict(facecolor='white', alpha=0.5, boxstyle='round') if show_p_val_box_cif else None
-                     ax_cif.text(pval_x_cif, pval_y_cif, fg_p_value_text, transform=ax_cif.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize)
+                     ax_cif.text(pval_x_cif, pval_y_cif, fg_p_value_text, transform=ax_cif.transAxes, ha='right', va='bottom', bbox=bbox_props, fontsize=p_val_fontsize_cif)
                 # Add Risk Table
                 if show_risk_table:
-                    add_at_risk_counts(cif_fitters, ax=ax_cif, y_shift=table_height, colors=cif_colors, labels=cif_labels)
-                
+                    add_at_risk_counts(cif_fitters, ax=ax_cif, y_shift=table_height, colors=cif_colors, labels=cif_labels, show_censored_counts=show_censored_in_table, bold=risk_table_bold, show_title=risk_table_title, fontsize=risk_table_fontsize, label_pad=risk_table_label_pad)
+
+                # Auto-annotations (median CIF / X-year cumulative incidence)
+                if show_median_cif or show_x_year_cif:
+                    add_survival_annotations(cif_fitters, ax=ax_cif, colors=cif_colors, labels=cif_labels,
+                                             show_median=show_median_cif, show_x_year=show_x_year_cif,
+                                             x_year_time=x_year_time_cif, is_cif=True)
+
+                # Estimate labels (CIF)
+                if est_label_mode_cif != "Off":
+                    _est_mode_cif = 'median' if 'Median' in est_label_mode_cif else 'timepoint'
+                    add_estimate_labels(cif_fitters, ax=ax_cif, colors=cif_colors, labels=cif_labels,
+                                        mode=_est_mode_cif, timepoint=est_label_time_cif,
+                                        param_name=est_label_param_cif,
+                                        placement=est_label_placement_cif,
+                                        fontsize=est_label_fontsize_cif, is_cif=True,
+                                        text_color=est_label_textcolor_cif,
+                                        bold=est_label_bold_cif,
+                                        label_gap=est_label_gap_cif)
+
                 ax_cif.set_xlabel(x_label, fontsize=axes_fontsize)
                 if cif_y_label:
                     ax_cif.set_ylabel(cif_y_label, fontsize=axes_fontsize)
                 ax_cif.tick_params(axis='both', which='major', labelsize=axes_fontsize)
                 
                 if show_legend_cif:
-                     ax_cif.legend(fontsize=legend_fontsize, loc=(leg_x_cif, leg_y_cif), frameon=show_legend_box_cif)
+                    if legend_style_cif == "Top bar":
+                        if ax_cif.get_legend():
+                            ax_cif.get_legend().remove()
+                        handles, labels = ax_cif.get_legend_handles_labels()
+                        if handles:
+                            fig_cif.subplots_adjust(top=0.88)
+                            fig_cif.legend(handles, labels, loc='upper center',
+                                           bbox_to_anchor=(0.5, topbar_y_cif), ncol=len(handles),
+                                           fontsize=legend_fontsize, frameon=False,
+                                           handlelength=2.0, columnspacing=1.5)
+                    else:
+                        ax_cif.legend(fontsize=legend_fontsize, loc=(leg_x_cif, leg_y_cif), frameon=show_legend_box_cif)
                 else:
                      if ax_cif.get_legend():
                          ax_cif.get_legend().remove()
@@ -2332,13 +3777,17 @@ if df is not None:
 
 
                 st.pyplot(fig_cif)
-                
+
+                # Save to session_state for Composite
+                st.session_state['report_fig_cif'] = fig_cif
+                st.session_state['composite_cif_title'] = cif_title
+
                 # Download
                 buf_cif = io.BytesIO()
                 fig_cif.savefig(buf_cif, format="png", dpi=300, bbox_inches='tight', facecolor=fig_cif.get_facecolor(), edgecolor='none')
                 buf_cif.seek(0)
                 
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
                 with col1:
                     st.download_button("💾 Download CIF Plot (300 DPI)", buf_cif, "cif_plot_300dpi.png", "image/png")
                 with col2:
@@ -2346,24 +3795,139 @@ if df is not None:
                     fig_cif.savefig(buf_cif_hi, format="png", dpi=600, bbox_inches='tight', facecolor=fig_cif.get_facecolor(), edgecolor='none')
                     buf_cif_hi.seek(0)
                     st.download_button("💾 Download High-Res CIF Plot (600 DPI)", buf_cif_hi, "cif_plot_600dpi.png", "image/png")
-                
                 with col3:
                     buf_cif_pdf = io.BytesIO()
                     fig_cif.savefig(buf_cif_pdf, format="pdf", bbox_inches='tight', facecolor=fig_cif.get_facecolor(), edgecolor='none')
                     buf_cif_pdf.seek(0)
                     st.download_button("📄 Download CIF Plot (PDF)", buf_cif_pdf, "cif_plot.pdf", "application/pdf")
+                with col4:
+                    _pin_cif_label = f"CIF: {cif_title}"
+                    if st.button("📌 Pin to Session", key="pin_cif", help="Save this CIF analysis to the session bank."):
+                        _used = _pin_analysis(
+                            'CIF', _pin_cif_label, fig=fig_cif, title=cif_title,
+                            tables={'Fine-Gray (SHR)': fg_summary},
+                            narrative=st.session_state.get('last_cif_narrative'),
+                            meta={'endpoint': narrator_event_name,
+                                  'group_col': group_col if group_col != 'None' else 'All',
+                                  'time_col': time_col, 'event_col': event_col,
+                                  'n_patients': len(cif_df)},
+                        )
+                        st.success(f"📌 Pinned: **{_used}**")
                 
                 # Display Fine-Gray Table
                 if fg_summary is not None:
                     st.write("### Subdistribution Hazard Ratios (Fine-Gray)")
                     st.write("Covariate effect on the cumulative incidence of the event of interest, accounting for competing risks.")
-                    st.dataframe(fg_summary.style.format("{:.3f}"))
+                    _display_fg = fg_summary.copy()
+                    _raw_fg_p = fg_summary['p-value'].copy()  # Keep raw for highlighting
+                    if 'p-value' in _display_fg.columns:
+                        _display_fg['p-value'] = _display_fg['p-value'].apply(lambda p: format_p_value(p, narrator_style_name, context="table"))
+                    
+                    def _highlight_fg_uv(row):
+                        try:
+                            p_raw = _raw_fg_p.loc[row.name]
+                            if p_raw < 0.05:
+                                return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
+                        except Exception:
+                            pass
+                        return [''] * len(row)
+                    
+                    st.dataframe(_display_fg.style.apply(_highlight_fg_uv, axis=1).format(
+                        {c: "{:.3f}" for c in _display_fg.columns if c != 'p-value'}
+                    ))
+                    st.caption(f"Reference Group: **{fg_ref_group}** | Cluster-robust (sandwich) SE clustered on subject id (approximates R's cmprsk::crr)")
+
+                # Pairwise Fine-Gray comparisons (+ nonparametric Gray's p per pair)
+                if group_col != "None" and group_col in cif_df.columns:
+                    unique_grps = sorted(cif_df[group_col].dropna().unique())
+                    if len(unique_grps) >= 2:
+                        st.write("### Pairwise Subdistribution HRs (Fine-Gray)")
+                        st.write(
+                            "Each pair is compared with a **separate** Fine-Gray model — the "
+                            "subdistribution HR and its Wald *p* (1 d.f. per test → higher power "
+                            "for small groups). The **Gray's *p*** column is the nonparametric "
+                            "Gray's test for the same pair, and matches the value shown on the CIF plot."
+                        )
+                        
+                        # Use same reference as the global model (fg_ref_group already selected above)
+                        _pw_ref = fg_ref_group if 'fg_ref_group' in globals() else None
+                        
+                        with st.spinner("Computing pairwise Fine-Gray comparisons..."):
+                            pw_fg = pairwise_fine_gray(
+                                cif_df, cif_time_col, cif_event_col, group_col,
+                                event_of_interest=cif_event_of_interest,
+                                reference_group=_pw_ref
+                            )
+                        
+                        if pw_fg is not None and not pw_fg.empty:
+                            _display_pw = pw_fg.copy()
+
+                            # Multiple-comparison adjustment (only meaningful for >2 groups / >1 test)
+                            _pw_fg_adjust = "None"
+                            if 'p-value' in _display_pw.columns and _display_pw['p-value'].notna().sum() > 1:
+                                _pw_fg_adjust = st.selectbox(
+                                    "Multiple-comparison adjustment (pairwise Fine-Gray)",
+                                    ["Benjamini-Hochberg", "Bonferroni", "None"],
+                                    key="pw_fg_adjust",
+                                    help="Adjust across the multiple pairwise subdistribution tests.",
+                                )
+                                _display_pw['p (adjusted)'] = statistics.adjust_pvalues(
+                                    _display_pw['p-value'].values, _pw_fg_adjust)
+
+                            # Keep raw p for highlighting before formatting
+                            _raw_p = _display_pw['p-value'].copy() if 'p-value' in _display_pw.columns else None
+
+                            # Format p-value columns (Fine-Gray Wald, adjusted, and Gray's)
+                            for _pc in ('p-value', 'p (adjusted)', "Gray's p"):
+                                if _pc in _display_pw.columns:
+                                    _display_pw[_pc] = _display_pw[_pc].apply(
+                                        lambda p: format_p_value(p, narrator_style_name, context="table") if not pd.isna(p) else "—"
+                                    )
+
+                            # Drop Note column if all empty
+                            if 'Note' in _display_pw.columns:
+                                if _display_pw['Note'].isna().all():
+                                    _display_pw = _display_pw.drop(columns=['Note'])
+
+                            # Style: highlight significant rows (by adjusted p when available)
+                            _hl_p = statistics.adjust_pvalues(pw_fg['p-value'].values, _pw_fg_adjust) \
+                                if 'p-value' in pw_fg.columns else None
+                            def _highlight_pw(row):
+                                idx = row.name
+                                p = _hl_p[idx] if _hl_p is not None and idx < len(_hl_p) else 1.0
+                                if not pd.isna(p) and p < 0.05:
+                                    return ['background-color: rgba(0, 180, 0, 0.1)'] * len(row)
+                                return [''] * len(row)
+
+                            num_cols = [c for c in _display_pw.columns if c not in ('Reference', 'Comparison', 'p-value', 'p (adjusted)', "Gray's p", 'Note')]
+                            st.dataframe(
+                                _display_pw.style.format(
+                                    {c: "{:.3f}" for c in num_cols}
+                                ).apply(_highlight_pw, axis=1)
+                            )
+                            _ref_label = _pw_ref if _pw_ref else "first group (alphabetical)"
+                            _adj_note = "unadjusted" if _pw_fg_adjust == "None" else f"{_pw_fg_adjust}-adjusted"
+                            st.caption(
+                                f"🟩 Green: significant ({_adj_note} p<0.05) | "
+                                f"Reference: **{_ref_label}** | "
+                                f"HR>1 means the Comparison group has higher cumulative incidence than Reference."
+                            )
+                            
+                            # Download
+                            csv_pw_fg = pw_fg.to_csv(index=False).encode('utf-8')
+                            st.download_button(
+                                label="💾 Download Pairwise Fine-Gray Table",
+                                data=csv_pw_fg,
+                                file_name="pairwise_fine_gray.csv",
+                                mime="text/csv",
+                                key="download_pairwise_fg",
+                            )
                 
                 # Point-in-Time Cumulative Incidence Estimates
                 st.subheader("Point-in-Time Cumulative Incidence")
                 st.write("Calculate cumulative incidence probability at a specific time.")
             
-                cif_target_time = st.number_input("Enter Time Point (e.g., 24 months)", min_value=0.0, value=24.0, step=6.0, key="cif_time_input")
+                cif_target_time = st.number_input("Enter Time Point", min_value=0.0, value=24.0, step=6.0, key="cif_time_input")
             
                 cif_est_data = []
                 for ajf, label in zip(cif_fitters, cif_labels):
@@ -2389,7 +3953,7 @@ if df is not None:
                         # Extract CI (Lower, Upper)
                         lower = ci_df_interp.loc[cif_target_time].iloc[0]
                         upper = ci_df_interp.loc[cif_target_time].iloc[1]
-                     except:
+                     except Exception:
                         cip_val = 0
                         lower = 0
                         upper = 0
@@ -2457,7 +4021,7 @@ if df is not None:
                               ci_str = "(NR - NR)"
                          else:
                               ci_str = f"({time_lower_str} - {time_upper_str})"
-                    except:
+                    except Exception:
                          ci_str = "(NR - NR)"
 
                     cif_median_data.append({
@@ -2477,49 +4041,1098 @@ if df is not None:
                     mime="text/csv"
                 )
 
-                # --- AI NARRATOR (CIF) ---
+
+                # ================================================================
+                # MULTIVARIABLE FINE-GRAY (SUBDISTRIBUTION HAZARDS) REGRESSION
+                # ================================================================
+                st.divider()
+                st.subheader("Multivariable Fine-Gray Regression")
+                st.write("Assess **independent** prognostic factors for cumulative incidence using the **subdistribution hazard model** (Fine & Gray, 1999).")
+                st.caption("This is the multivariable extension of the univariable SHR table above. It reports **adjusted subdistribution hazard ratios (aSHR)**, the standard for competing-risks multivariable analysis in hematology/oncology journals (BLOOD, JCO).")
+
+                if cif_df is not None and cif_time_col is not None and cif_event_col is not None and cif_event_of_interest is not None:
+                    # Select covariates (exclude time, event, and structural columns)
+                    _fg_mv_exclude = {cif_time_col, cif_event_col}
+                    if cif_mode != "Single 'Status' Column (with multiple codes)":
+                        # Also exclude the raw columns used to construct the composite endpoint.
+                        # These may or may not be defined depending on the CIF mode, so look
+                        # them up by name without eval/dir.
+                        for _excl_var in ['rfs_time_col', 'rfs_stat_col', 'os_time_col', 'os_stat_col']:
+                            _excl_val = globals().get(_excl_var)
+                            if _excl_val is not None:
+                                _fg_mv_exclude.add(_excl_val)
+                        _fg_mv_exclude.update({'Composite_Time', 'Composite_Status', 'start', 'stop', 'status', 'weight', 'cens_event'})
+                    
+                    _fg_mv_options = [c for c in cif_df.columns if c not in _fg_mv_exclude and c != 'id']
+
+                    fg_mv_covariates = st.multiselect(
+                        "Select Covariates for Multivariable Fine-Gray",
+                        _fg_mv_options,
+                        key="fg_mv_covariates_select",
+                        help="Select variables to include in the multivariable model (e.g., Age, ELN Risk, MRD status, mutations)."
+                    )
+
+                    if fg_mv_covariates:
+                        # --- Build analysis dataframe ---
+                        _fg_mv_cols = [cif_time_col, cif_event_col] + fg_mv_covariates
+                        if group_col != "None" and group_col in cif_df.columns and group_col not in fg_mv_covariates:
+                            pass  # Group col already excluded from covariates or will be added separately
+                        
+                        _fg_mv_df = cif_df[_fg_mv_cols].dropna()
+                        _fg_mv_dropped = len(cif_df) - len(_fg_mv_df)
+                        
+                        if _fg_mv_dropped > 0:
+                            st.warning(f"⚠️ {_fg_mv_dropped} rows dropped due to missing values in selected covariates. Analysis based on {len(_fg_mv_df)} rows.")
+                        
+                        if len(_fg_mv_df) < 10:
+                            st.error("Not enough data points for multivariable analysis.")
+                        else:
+                            # --- Identify categorical columns (including numeric with few unique values) ---
+                            _fg_cat_cols = _detect_categorical(_fg_mv_df, fg_mv_covariates)
+                            
+                            # --- Reference Group Selection ---
+                            _fg_cat_refs = {}
+                            if _fg_cat_cols:
+                                st.markdown("##### Reference Group Selection")
+                                _ref_cols = st.columns(min(3, len(_fg_cat_cols)))
+                                for i, col in enumerate(_fg_cat_cols):
+                                    _unique_levels = sorted(_fg_mv_df[col].dropna().unique().astype(str))
+                                    with _ref_cols[i % 3]:
+                                        _ref = st.selectbox(f"Ref for {col}", _unique_levels, key=f"fg_mv_ref_{col}", index=0)
+                                        _fg_cat_refs[col] = _ref
+                            
+                            # --- STATISTICAL GUARDRAILS ---
+                            st.divider()
+                            st.markdown("#### 🛡️ Statistical Guardrails (Fine-Gray)")
+                            
+                            # EPV check (events = primary events of interest)
+                            _fg_n_events = int((_fg_mv_df[cif_event_col] == cif_event_of_interest).sum())
+                            _fg_n_params = 0
+                            for c in fg_mv_covariates:
+                                if c in _fg_cat_cols:
+                                    _fg_n_params += len(_fg_mv_df[c].dropna().unique()) - 1
+                                else:
+                                    _fg_n_params += 1
+                            _fg_epv = _fg_n_events / max(_fg_n_params, 1)
+                            
+                            if _fg_epv >= 10:
+                                st.success(f"✅ **Events Per Variable**: {_fg_epv:.1f} ({_fg_n_events} primary events / {_fg_n_params} parameters). EPV ≥ 10 — model is adequately powered.")
+                            elif _fg_epv >= 5:
+                                st.warning(f"⚠️ **Events Per Variable**: {_fg_epv:.1f} ({_fg_n_events} primary events / {_fg_n_params} parameters). EPV 5-10 — results may be unstable. Consider reducing covariates.")
+                            else:
+                                st.error(f"🛑 **Events Per Variable**: {_fg_epv:.1f} ({_fg_n_events} primary events / {_fg_n_params} parameters). EPV < 5 — model is likely overfit. Remove covariates or use penalization.")
+                            
+                            # VIF / Collinearity
+                            _fg_vif = statistics.calculate_vif(_fg_mv_df, fg_mv_covariates)
+                            _fg_high_corr = statistics.check_collinearity(_fg_mv_df, fg_mv_covariates)
+                            
+                            _fg_max_vif = 0
+                            if _fg_vif is not None and not _fg_vif.empty:
+                                _fg_max_vif = _fg_vif['VIF'].max()
+                            
+                            if _fg_high_corr:
+                                st.warning("⚠️ **Multicollinearity Detected**: High correlation (>0.7) between: " +
+                                           ", ".join([f"{v1} & {v2} (r={val:.2f})" for v1, v2, val in _fg_high_corr]))
+                            elif _fg_max_vif > 5.0:
+                                st.warning(f"⚠️ **Multicollinearity Detected**: Max VIF is {_fg_max_vif:.2f} (> 5.0).")
+                            else:
+                                st.success("✅ No multicollinearity detected (Pairwise Correlation & VIF).")
+                            
+                            with st.expander("🔍 Show VIF Details"):
+                                if _fg_vif is not None:
+                                    st.dataframe(_fg_vif.style.format({"VIF": "{:.2f}"}), hide_index=True)
+                                else:
+                                    st.info("Could not calculate VIF.")
+                            
+                            # --- RUN MODEL ---
+                            if st.button("Run Multivariable Fine-Gray", type="primary", key="run_fg_mv"):
+                                st.session_state['fg_mv_active'] = True
+                            
+                            if st.session_state.get('fg_mv_active', False):
+                                try:
+                                    with st.spinner("Building IPCW weights & fitting multivariable Fine-Gray model..."):
+                                        # 1. Compute Fine-Gray weights
+                                        _fg_mv_weighted = compute_fine_gray_weights(
+                                            _fg_mv_df, cif_time_col, cif_event_col, cif_event_of_interest
+                                        )
+                                        
+                                        # 2. Encode categorical variables (drop each reference level)
+                                        _fg_mv_encoded, _fg_mv_dummy_cols = statistics.encode_with_reference(
+                                            _fg_mv_weighted, _fg_cat_cols, _fg_cat_refs)
+
+                                        # Numeric covariate columns (not categorical, not structural)
+                                        _fg_mv_numeric_cols = [c for c in fg_mv_covariates if c not in _fg_cat_cols and c in _fg_mv_encoded.columns]
+                                        
+                                        # All covariate columns for the model
+                                        _fg_mv_model_covs = _fg_mv_numeric_cols + _fg_mv_dummy_cols
+                                        
+                                        # Sanitize column names
+                                        _col_rename = {}
+                                        for c in _fg_mv_encoded.columns:
+                                            _clean = statistics.sanitize_name(c)
+                                            if _clean != c:
+                                                _col_rename[c] = _clean
+                                        _fg_mv_encoded = _fg_mv_encoded.rename(columns=_col_rename)
+                                        _fg_mv_model_covs = [_col_rename.get(c, c) for c in _fg_mv_model_covs]
+                                        
+                                        # Columns to fit
+                                        _fg_mv_fit_cols = ['start', 'stop', 'status', 'weight', 'id'] + _fg_mv_model_covs
+                                        _fg_mv_fit_data = _fg_mv_encoded[_fg_mv_fit_cols].copy()
+                                        
+                                        # Ensure numeric types
+                                        for c in _fg_mv_model_covs:
+                                            _fg_mv_fit_data[c] = pd.to_numeric(_fg_mv_fit_data[c], errors='coerce')
+                                        _fg_mv_fit_data = _fg_mv_fit_data.dropna()
+
+                                        # Guard: a clear message beats an opaque pandas/lifelines error
+                                        # (e.g. "no types given") when encoding leaves nothing to fit.
+                                        if not _fg_mv_model_covs:
+                                            st.error("No usable covariates after encoding. Check that each selected "
+                                                     "categorical covariate has at least two levels (one becomes the reference).")
+                                            st.stop()
+                                        if len(_fg_mv_fit_data) < 5:
+                                            st.error(f"Too few complete rows ({len(_fg_mv_fit_data)}) after removing missing "
+                                                     "covariate values. Select covariates with fewer missing entries.")
+                                            st.stop()
+
+                                        # 3. Fit Weighted Cox (Fine-Gray MV). cluster_col + robust=True
+                                        # yields the correct cluster-robust (sandwich) Fine-Gray variance
+                                        # on the IPCW-expanded data.
+                                        import warnings as _w
+                                        with _w.catch_warnings():
+                                            _w.simplefilter("ignore")
+                                            _cph_fg_mv = CoxPHFitter()
+                                            _cph_fg_mv.fit(
+                                                _fg_mv_fit_data,
+                                                duration_col='stop', entry_col='start',
+                                                event_col='status', weights_col='weight',
+                                                cluster_col='id', robust=True
+                                            )
+
+                                        # 4. Extract SHR table using the cluster-robust (sandwich) SE
+                                        from scipy.stats import norm as _norm
+                                        _betas_mv = _cph_fg_mv.params_
+                                        _se_mv = np.sqrt(np.diag(_cph_fg_mv.variance_matrix_.values))
+                                        _hrs_mv = np.exp(_betas_mv.values)
+                                        _z_mv = _betas_mv.values / _se_mv
+                                        _p_mv = 2 * (1 - _norm.cdf(np.abs(_z_mv)))
+                                        _lo_mv = np.exp(_betas_mv.values - 1.96 * _se_mv)
+                                        _hi_mv = np.exp(_betas_mv.values + 1.96 * _se_mv)
+                                        
+                                        _fg_mv_summary = pd.DataFrame({
+                                            'Variable': _betas_mv.index,
+                                            'aSHR': _hrs_mv,
+                                            'Lower 95%': _lo_mv,
+                                            'Upper 95%': _hi_mv,
+                                            'p-value': _p_mv,
+                                        })
+                                        _fg_mv_summary = _fg_mv_summary.reset_index(drop=True)
+                                        
+                                        # Store in session state
+                                        st.session_state['fg_mv_summary'] = _fg_mv_summary
+                                        st.session_state['fg_mv_cph'] = _cph_fg_mv
+                                    
+                                    # --- RESULTS DISPLAY ---
+                                    st.write("### Multivariable Fine-Gray Results")
+                                    st.caption(f"Model: IPCW-weighted Cox | Primary Event: {cif_event_of_interest} | n = {len(_fg_mv_df)} | Events = {_fg_n_events}")
+                                    
+                                    # Format table for display
+                                    _fg_mv_display = _fg_mv_summary.copy()
+                                    _fg_mv_display['p-value'] = _fg_mv_display['p-value'].apply(
+                                        lambda p: format_p_value(p, narrator_style_name, context="table")
+                                    )
+                                    _fg_mv_display['aSHR (95% CI)'] = _fg_mv_display.apply(
+                                        lambda r: f"{r['aSHR']:.2f} ({r['Lower 95%']:.2f}–{r['Upper 95%']:.2f})", axis=1
+                                    )
+                                    
+                                    # Highlight significant rows
+                                    def _highlight_fg(row):
+                                        try:
+                                            p_raw = _fg_mv_summary.loc[_fg_mv_summary['Variable'] == row['Variable'], 'p-value'].values[0]
+                                            if p_raw < 0.05:
+                                                return ['background-color: rgba(0, 255, 0, 0.08)'] * len(row)
+                                            elif p_raw < 0.1:
+                                                return ['background-color: rgba(255, 255, 0, 0.08)'] * len(row)
+                                        except Exception:
+                                            pass
+                                        return [''] * len(row)
+                                    
+                                    _fg_mv_show = _fg_mv_display[['Variable', 'aSHR (95% CI)', 'p-value']].copy()
+                                    st.dataframe(_fg_mv_show.style.apply(_highlight_fg, axis=1), hide_index=True, use_container_width=True)
+                                    
+                                    # Full numeric table in expander
+                                    with st.expander("View Full Numeric Table"):
+                                        st.dataframe(_fg_mv_summary.style.format({
+                                            'aSHR': '{:.3f}', 'Lower 95%': '{:.3f}',
+                                            'Upper 95%': '{:.3f}', 'p-value': '{:.4f}'
+                                        }), hide_index=True)
+                                    
+                                    # --- FOREST PLOT ---
+                                    st.write("### Forest Plot (Adjusted SHR)")
+                                    
+                                    # Theme Color (same as Cox PH forest)
+                                    _fg_forest_color = '#1f77b4'
+                                    if selected_theme in all_themes and len(all_themes[selected_theme]) > 0:
+                                        _fg_forest_color = all_themes[selected_theme][0]
+                                    
+                                    # CI separator from journal style
+                                    _fg_ci_sep = narrator.JOURNAL_STYLES.get(narrator_style_name, {}).get('ci_sep', '-')
+                                    
+                                    _fig_forest_fg = plotting.create_forest_plot(
+                                        _fg_mv_summary,
+                                        theme_color=_fg_forest_color,
+                                        title="Multivariable Fine-Gray Regression",
+                                        xlabel="Adjusted Subdistribution Hazard Ratio (aSHR)",
+                                        p_formatter=lambda p: format_p_value(p, narrator_style_name, context="plot"),
+                                        ci_sep=_fg_ci_sep,
+                                        hr_col='aSHR',
+                                        lower_col='Lower 95%',
+                                        upper_col='Upper 95%',
+                                        p_col='p-value',
+                                        use_index_labels=False,
+                                    )
+                                    st.pyplot(_fig_forest_fg)
+                                    
+                                    # Download buttons
+                                    _fc1, _fc2, _fc3 = st.columns(3)
+                                    with _fc1:
+                                        _buf_fg_csv = _fg_mv_summary.to_csv(index=False).encode('utf-8')
+                                        st.download_button("💾 Download SHR Table (CSV)", _buf_fg_csv,
+                                                           "multivariable_fine_gray.csv", "text/csv", key="dl_fg_mv_csv")
+                                    with _fc2:
+                                        st.download_button("💾 Forest Plot (600 DPI)",
+                                                           plotting.save_plot_to_buffer(_fig_forest_fg, dpi=600),
+                                                           "fg_mv_forest_600dpi.png", "image/png", key="dl_fg_mv_forest")
+                                    with _fc3:
+                                        st.download_button("📄 Forest Plot (PDF)",
+                                                           plotting.save_plot_to_buffer(_fig_forest_fg, fmt="pdf"),
+                                                           "fg_mv_forest.pdf", "application/pdf", key="dl_fg_mv_pdf")
+
+                                    if st.button("📌 Pin to Session", key="pin_fg_mv",
+                                                 help="Save this multivariable Fine-Gray model to the session bank."):
+                                        _used = _pin_analysis(
+                                            'FineGray', f"Multivariable Fine-Gray: {cif_event_of_interest}",
+                                            fig=_fig_forest_fg, title="Multivariable Fine-Gray",
+                                            tables={'Adjusted SHRs': _fg_mv_summary},
+                                            meta={'event_of_interest': cif_event_of_interest, 'group_col': 'multivariable',
+                                                  'n_patients': len(_fg_mv_df) if '_fg_mv_df' in globals() else None})
+                                        st.success(f"📌 Pinned: **{_used}**")
+
+                                    plt.close(_fig_forest_fg)
+                                    
+                                except Exception as e:
+                                    st.error(f"Multivariable Fine-Gray Analysis Failed: {e}")
+                                    st.caption("Common causes: too few events, singular matrix, or covariates with zero variance in the weighted dataset.")
+                else:
+                    st.info("ℹ️ Configure the cumulative incidence analysis above first (time, event, event of interest).")
+
+                # ================================================================
+                # CAUSE-SPECIFIC COX REGRESSION (with optional TD covariate)
+                # ================================================================
+                st.divider()
+                st.subheader("Cause-Specific Cox Regression")
+                st.write("Fit a **standard Cox PH model** where the competing event is treated as **censored**. "
+                         "This gives you cause-specific hazard ratios (csHR).")
+                st.caption(
+                    "Use this when you want to assess the **direct biological effect** of a covariate on the event of interest, "
+                    "or when you need a **time-dependent covariate** (e.g., transplant) in a competing risks setting. "
+                    "While Fine-Gray gives the effect on cumulative incidence (population-level), "
+                    "cause-specific Cox gives the effect on the **instantaneous hazard** (individual-level). "
+                    "Reviewers often request both for completeness."
+                )
+
+                if cif_df is not None and cif_time_col is not None and cif_event_col is not None and cif_event_of_interest is not None:
+                    # Build cause-specific dataset: recode competing events as censored
+                    _cs_df = cif_df.copy()
+                    _cs_event_col_name = f"_cs_event_{cif_event_of_interest}"
+                    _cs_df[_cs_event_col_name] = (_cs_df[cif_event_col] == cif_event_of_interest).astype(int)
+                    
+                    _n_cs_events = int(_cs_df[_cs_event_col_name].sum())
+                    _n_cs_competing = int((_cs_df[cif_event_col] == 2).sum()) if 2 in _cs_df[cif_event_col].values else 0
+                    st.info(f"**{_n_cs_events}** primary events | **{_n_cs_competing}** competing events (recoded as censored) | **{len(_cs_df)}** total patients")
+                    
+                    # Covariates (exclude structural columns)
+                    _cs_exclude = {cif_time_col, cif_event_col, _cs_event_col_name, 'Composite_Time', 'Composite_Status',
+                                   'start', 'stop', 'status', 'weight', 'cens_event', 'id'}
+                    if cif_mode != "Single 'Status' Column (with multiple codes)":
+                        for _ev in ['rfs_time_col', 'rfs_stat_col', 'os_time_col', 'os_stat_col']:
+                            _ev_val = globals().get(_ev)
+                            if _ev_val is not None:
+                                _cs_exclude.add(_ev_val)
+                    
+                    _cs_cov_options = [c for c in _cs_df.columns if c not in _cs_exclude]
+                    
+                    _cs_covariates = st.multiselect(
+                        "Select Covariates for Cause-Specific Cox",
+                        _cs_cov_options,
+                        key="cs_cox_covariates",
+                        help="Select variables to include in the cause-specific Cox model."
+                    )
+                    
+                    # --- TD Covariate Option ---
+                    _cs_td_enabled = st.checkbox(
+                        "⏱️ Include a Time-Dependent Covariate",
+                        value=False,
+                        key="cs_td_enabled",
+                        help="E.g., transplant — avoids immortal time bias."
+                    )
+                    
+                    _cs_td_var_name = None
+                    _cs_td_time_col = None
+                    _cs_td_status_col = None
+                    
+                    if _cs_td_enabled:
+                        with st.container(border=True):
+                            st.markdown("##### ⏱️ Time-Dependent Covariate")
+                            st.caption(
+                                "The counting-process approach splits each patient's timeline at the event point. "
+                                "Equivalent to R's `survival::tmerge()` + `coxph(Surv(start, stop, event) ~ ...)`."
+                            )
+                            _cstd1, _cstd2, _cstd3 = st.columns(3)
+                            with _cstd1:
+                                _cs_td_var_name = st.text_input("Covariate Name", value="Transplant", key="cs_td_var")
+                            with _cstd2:
+                                _cs_td_time_col = st.selectbox(
+                                    "Time of Event Column", columns,
+                                    index=columns.index("Transplant_Time") if "Transplant_Time" in columns else 0,
+                                    key="cs_td_time"
+                                )
+                            with _cstd3:
+                                _cs_td_status_col = st.selectbox(
+                                    "Event Status Column (1=occurred)", columns,
+                                    index=columns.index("Transplant_Status") if "Transplant_Status" in columns else 0,
+                                    key="cs_td_stat"
+                                )
+                    
+                    if _cs_covariates or _cs_td_enabled:
+                        # Reference groups for categorical covariates
+                        _cs_cat_cols = _detect_categorical(_cs_df, _cs_covariates)
+                        _cs_refs = {}
+                        if _cs_cat_cols:
+                            st.markdown("##### Reference Group Selection")
+                            _ref_cols = st.columns(min(3, len(_cs_cat_cols)))
+                            for i, col in enumerate(_cs_cat_cols):
+                                with _ref_cols[i % 3]:
+                                    _levels = sorted(_cs_df[col].dropna().unique().astype(str))
+                                    _cs_refs[col] = st.selectbox(f"Ref for {col}", _levels, key=f"cs_ref_{col}", index=0)
+                        
+                        if st.button("Run Cause-Specific Cox", key="run_cs_cox"):
+                            try:
+                                # Prepare data
+                                _cs_fit_cols = [cif_time_col, _cs_event_col_name] + _cs_covariates
+                                _cs_fit_df = _cs_df[_cs_fit_cols].dropna().copy()
+                                
+                                # Encode categoricals (drop each reference level)
+                                _cs_fit_df, _ = statistics.encode_with_reference(_cs_fit_df, _cs_cat_cols, _cs_refs)
+
+                                # Sanitize column names
+                                _cs_fit_df.columns = [statistics.sanitize_name(c) for c in _cs_fit_df.columns]
+                                _san_cs_time = statistics.sanitize_name(cif_time_col)
+                                _san_cs_event = statistics.sanitize_name(_cs_event_col_name)
+                                
+                                # --- TD Covariate Expansion ---
+                                _cs_entry_col = None
+                                if _cs_td_enabled and _cs_td_var_name and _cs_td_time_col and _cs_td_status_col:
+                                    _cs_td_var_safe = statistics.sanitize_name(_cs_td_var_name)
+                                    _cs_td_time_vals = df_clean.loc[_cs_fit_df.index, _cs_td_time_col] if _cs_td_time_col in df_clean.columns else None
+                                    _cs_td_stat_vals = df_clean.loc[_cs_fit_df.index, _cs_td_status_col] if _cs_td_status_col in df_clean.columns else None
+                                    
+                                    if _cs_td_time_vals is not None and _cs_td_stat_vals is not None:
+                                        rows_exp = []
+                                        for idx in _cs_fit_df.index:
+                                            row = _cs_fit_df.loc[idx].to_dict()
+                                            end_t = row[_san_cs_time]
+                                            ev = row[_san_cs_event]
+                                            td_occ = _cs_td_stat_vals.loc[idx] if idx in _cs_td_stat_vals.index else 0
+                                            td_t = _cs_td_time_vals.loc[idx] if idx in _cs_td_time_vals.index else np.nan
+                                            
+                                            if pd.notna(td_occ) and td_occ == 1 and pd.notna(td_t) and 0 < td_t < end_t:
+                                                row1 = row.copy()
+                                                row1['_start'] = 0; row1[_san_cs_time] = td_t; row1[_san_cs_event] = 0; row1[_cs_td_var_safe] = 0
+                                                rows_exp.append(row1)
+                                                row2 = row.copy()
+                                                row2['_start'] = td_t; row2[_san_cs_time] = end_t; row2[_san_cs_event] = ev; row2[_cs_td_var_safe] = 1
+                                                rows_exp.append(row2)
+                                            else:
+                                                row['_start'] = 0; row[_cs_td_var_safe] = 0
+                                                rows_exp.append(row)
+                                        
+                                        _cs_fit_df = pd.DataFrame(rows_exp)
+                                        _cs_entry_col = '_start'
+                                        st.success(f"✅ Data expanded to {len(_cs_fit_df)} rows for TD covariate **{_cs_td_var_safe}**")
+                                
+                                # Fit model
+                                _cs_cph = CoxPHFitter()
+                                if _cs_entry_col:
+                                    _cs_cph.fit(_cs_fit_df, duration_col=_san_cs_time, event_col=_san_cs_event, entry_col=_cs_entry_col)
+                                else:
+                                    _cs_cph.fit(_cs_fit_df, duration_col=_san_cs_time, event_col=_san_cs_event)
+                                
+                                # Extract results
+                                _cs_summary = _cs_cph.summary[['exp(coef)', 'exp(coef) lower 95%', 'exp(coef) upper 95%', 'p']].copy()
+                                _cs_summary.columns = ['Cause-Specific HR', 'Lower 95%', 'Upper 95%', 'p-value']
+                                
+                                st.write("### Cause-Specific Hazard Ratios")
+                                _cs_display = _cs_summary.copy()
+                                _cs_raw_p = _cs_summary['p-value'].copy()
+                                _cs_display['p-value'] = _cs_display['p-value'].apply(lambda p: format_p_value(p, narrator_style_name, context="table"))
+                                
+                                def _highlight_cs(row):
+                                    try:
+                                        p = _cs_raw_p.loc[row.name]
+                                        if p < 0.05:
+                                            return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
+                                    except: pass
+                                    return [''] * len(row)
+                                
+                                st.dataframe(_cs_display.style.apply(_highlight_cs, axis=1).format(
+                                    {c: "{:.3f}" for c in _cs_display.columns if c != 'p-value'}
+                                ))
+                                st.caption("Competing events treated as censored. csHR reflects the **direct hazard** of the event of interest.")
+                                
+                                # Forest plot
+                                st.write("### Forest Plot (Cause-Specific HR)")
+                                _cs_forest_color = '#1f77b4'
+                                if selected_theme in all_themes and len(all_themes[selected_theme]) > 0:
+                                    _cs_forest_color = all_themes[selected_theme][0]
+                                _cs_ci_sep = narrator.JOURNAL_STYLES.get(narrator_style_name, {}).get('ci_sep', '-')
+                                
+                                _fig_cs_forest = plotting.create_forest_plot(
+                                    _cs_summary,
+                                    theme_color=_cs_forest_color,
+                                    title="Cause-Specific Cox Regression",
+                                    xlabel="Cause-Specific Hazard Ratio (csHR)",
+                                    p_formatter=lambda p: format_p_value(p, narrator_style_name, context="plot"),
+                                    ci_sep=_cs_ci_sep,
+                                    hr_col='Cause-Specific HR',
+                                )
+                                st.pyplot(_fig_cs_forest)
+                                
+                                # Downloads
+                                _csd1, _csd2, _csd3 = st.columns(3)
+                                with _csd1:
+                                    st.download_button("💾 csHR Table (CSV)",
+                                                       _cs_summary.to_csv().encode('utf-8'),
+                                                       "cause_specific_cox.csv", "text/csv", key="dl_cs_csv")
+                                with _csd2:
+                                    st.download_button("💾 Forest Plot (600 DPI)",
+                                                       plotting.save_plot_to_buffer(_fig_cs_forest, dpi=600),
+                                                       "cs_forest_600dpi.png", "image/png", key="dl_cs_forest")
+                                with _csd3:
+                                    st.download_button("📄 Forest Plot (PDF)",
+                                                       plotting.save_plot_to_buffer(_fig_cs_forest, fmt="pdf"),
+                                                       "cs_forest.pdf", "application/pdf", key="dl_cs_pdf")
+                                
+                                plt.close(_fig_cs_forest)
+                                
+                                # Save for narrator
+                                st.session_state['cs_cox_summary'] = _cs_summary
+                                
+                            except Exception as e:
+                                st.error(f"Cause-Specific Cox Failed: {e}")
+                                st.caption("Common causes: too few events, collinear variables, or missing TD covariate data.")
+                else:
+                    st.info("ℹ️ Configure the cumulative incidence analysis above first.")
+
+                # ================================================================
+                # C-Index for Competing Risks (Cause-Specific)
+                # ================================================================
+                st.divider()
+                st.subheader("📊 C-Index for Cumulative Incidence (Cause-Specific)")
+                st.caption(
+                    "Harrell's C-index for competing risks uses the **cause-specific approach**: "
+                    "competing events are treated as censored, and a standard Cox PH model is fitted. "
+                    "This measures how well the model discriminates who will experience the event of interest. "
+                    "Ref: Wolbers et al., *Statistics in Medicine* 2014. "
+                    "Equivalent to R's `concordance(coxph(Surv(time, cs_event) ~ covariates))`."
+                )
+                
+                if cif_df is not None and cif_time_col is not None and cif_event_col is not None and cif_event_of_interest is not None:
+                    _cs_columns = [c for c in cif_df.columns if c not in [cif_time_col, cif_event_col, 'id', 'Composite_Time', 'Composite_Status']]
+                    
+                    _cs_c1, _cs_c2 = st.columns(2)
+                    with _cs_c1:
+                        st.write("#### Model A (Base)")
+                        _cs_vars_a = st.multiselect("Covariates A", _cs_columns, key="cs_cindex_a")
+                    with _cs_c2:
+                        st.write("#### Model B (+Biomarker)")
+                        _cs_vars_b = st.multiselect("Covariates B", _cs_columns, key="cs_cindex_b")
+                    
+                    if st.button("Compare C-Index (CIR)", key="calc_cs_cindex"):
+                        if not _cs_vars_a or not _cs_vars_b:
+                            st.error("Please define at least Model A and Model B.")
+                        else:
+                            try:
+                                with st.spinner("Bootstrapping C-Indices for CIR (n=50)..."):
+                                    # Create cause-specific binary event: 1 if event of interest, 0 otherwise
+                                    _cs_df = cif_df.copy()
+                                    _cs_df['_cs_event'] = (_cs_df[cif_event_col] == cif_event_of_interest).astype(int)
+                                    
+                                    # Use the bootstrap C-index function with cause-specific event
+                                    _cs_res_a = statistics.get_c_index_bootstrap(
+                                        _cs_df, cif_time_col, '_cs_event', _cs_vars_a, "Model A",
+                                        n_boot=50, penalizer=0.0, l1_ratio=0.0
+                                    )
+                                    _cs_res_b = statistics.get_c_index_bootstrap(
+                                        _cs_df, cif_time_col, '_cs_event', _cs_vars_b, "Model B",
+                                        n_boot=50, penalizer=0.0, l1_ratio=0.0
+                                    )
+                                
+                                # LRT for nested models
+                                _cs_lrt = []
+                                try:
+                                    from scipy.stats import chi2 as _chi2_dist
+                                    _cs_all_vars = list(set(_cs_vars_a + _cs_vars_b))
+                                    _cs_lrt_df = _cs_df[[cif_time_col, '_cs_event'] + _cs_all_vars].dropna()
+                                    _cs_lrt_enc = pd.get_dummies(_cs_lrt_df, drop_first=True)
+                                    _cs_lrt_enc.columns = [statistics.sanitize_name(c) for c in _cs_lrt_enc.columns]
+                                    
+                                    _san_a = [statistics.sanitize_name(c) for c in _cs_vars_a]
+                                    _san_b = [statistics.sanitize_name(c) for c in _cs_vars_b]
+                                    _ca = [c for c in _cs_lrt_enc.columns if c not in [cif_time_col, '_cs_event'] and any(c.startswith(v) for v in _san_a)]
+                                    _cb = [c for c in _cs_lrt_enc.columns if c not in [cif_time_col, '_cs_event'] and any(c.startswith(v) for v in _san_b)]
+                                    
+                                    _cph_la = CoxPHFitter(); _cph_la.fit(_cs_lrt_enc[[cif_time_col, '_cs_event'] + _ca], duration_col=cif_time_col, event_col='_cs_event')
+                                    _cph_lb = CoxPHFitter(); _cph_lb.fit(_cs_lrt_enc[[cif_time_col, '_cs_event'] + _cb], duration_col=cif_time_col, event_col='_cs_event')
+                                    
+                                    _ddf = len(_cb) - len(_ca)
+                                    if _ddf > 0:
+                                        _lrt_s = -2 * (_cph_la.log_likelihood_ - _cph_lb.log_likelihood_)
+                                        _lrt_p = 1 - _chi2_dist.cdf(max(0, _lrt_s), df=_ddf)
+                                        _cs_lrt.append({
+                                            'Comparison': 'Model B vs A',
+                                            'χ² statistic': f"{_lrt_s:.3f}",
+                                            'df': _ddf,
+                                            'p-value': format_p_value(_lrt_p, narrator_style_name, context="table"),
+                                            'p_raw': _lrt_p,
+                                            'Interpretation': 'Significant improvement' if _lrt_p < 0.05 else 'No significant improvement'
+                                        })
+                                except Exception as _le:
+                                    st.caption(f"LRT note: {_le}")
+                                
+                                st.session_state['cs_cindex_results'] = {
+                                    'res_a': _cs_res_a, 'res_b': _cs_res_b,
+                                    'lrt': _cs_lrt
+                                }
+                            except Exception as e:
+                                st.error(f"C-Index computation failed: {e}")
+                    
+                    if 'cs_cindex_results' in st.session_state:
+                        _csr = st.session_state['cs_cindex_results']
+                        _res_list = [r for r in [_csr['res_a'], _csr['res_b']] if r is not None]
+                        
+                        if _res_list:
+                            st.write("### Cause-Specific C-Index Comparison")
+                            _res_df = pd.DataFrame(_res_list)
+                            _res_df["95% CI"] = _res_df.apply(lambda x: f"{x['Lower']:.3f} – {x['Upper']:.3f}", axis=1)
+                            st.table(_res_df.set_index("Label")[["C-Index", "95% CI", "Vars"]].style.format({"C-Index": "{:.3f}"}))
+                            
+                            if len(_res_list) == 2:
+                                _delta = _res_list[1]["C-Index"] - _res_list[0]["C-Index"]
+                                st.metric("Δ C-Index (Model B − Model A)", f"{_delta:+.3f}", delta_color="normal")
+                            
+                            # LRT
+                            if _csr.get('lrt'):
+                                st.write("### Likelihood Ratio Test")
+                                _lrt_df = pd.DataFrame(_csr['lrt'])
+                                
+                                def _hl_cs(row):
+                                    try:
+                                        if row.get('p_raw', 1) < 0.05:
+                                            return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
+                                    except: pass
+                                    return [''] * len(row)
+                                
+                                st.dataframe(
+                                    _lrt_df[['Comparison', 'χ² statistic', 'df', 'p-value', 'Interpretation']].style.apply(_hl_cs, axis=1),
+                                    hide_index=True, use_container_width=True
+                                )
+                else:
+                    st.info("ℹ️ Configure the cumulative incidence analysis above first.")
+
+                # ================================================================
+                # RMTL (Restricted Mean Time Lost)
+                # ================================================================
+                st.divider()
+                st.subheader("📐 Restricted Mean Time Lost (RMTL)")
+                st.caption(
+                    "RMTL(τ) = area under the CIF from 0 to τ. "
+                    "Interpretable as the **average time lost** to the event within [0, τ]. "
+                    "The RMTL difference quantifies absolute differences in cumulative event burden "
+                    "between groups, properly accounting for competing risks. "
+                    "Ref: Andersen PK, *Statistics in Medicine* 2013; Zhao et al. 2016."
+                )
+                
+                if cif_df is not None and cif_time_col is not None and cif_event_col is not None and cif_event_of_interest is not None:
+                    _cif_groups = sorted(cif_df[group_col].dropna().unique()) if group_col != "None" and group_col in cif_df.columns else ["All"]
+                    
+                    if len(_cif_groups) > 1:
+                        # Smart default τ
+                        _cif_max_times = [cif_df[cif_df[group_col] == g][cif_time_col].max() for g in _cif_groups]
+                        _rmtl_tau_max_safe = float(min(_cif_max_times)) if _cif_max_times else 60.0
+                        _rmtl_tau_default = round(_rmtl_tau_max_safe * 0.8, 1)
+                        
+                        _rmtl_c1, _rmtl_c2 = st.columns([1, 2])
+                        with _rmtl_c1:
+                            _rmtl_tau = st.number_input(
+                                "Restriction Time (τ) for RMTL",
+                                min_value=0.1,
+                                value=_rmtl_tau_default,
+                                step=1.0,
+                                key="rmtl_tau",
+                                help=f"Max safe τ = {_rmtl_tau_max_safe:.1f}. Set to match your data's time unit."
+                            )
+                        
+                        if st.button("Calculate RMTL", key="calc_rmtl"):
+                            with st.spinner("Bootstrapping RMTL (n=500)..."):
+                                _rmtl_result = statistics.compute_rmtl(
+                                    cif_df, cif_time_col, cif_event_col, group_col,
+                                    cif_event_of_interest, _rmtl_tau
+                                )
+                            st.session_state['rmtl_result'] = _rmtl_result
+                        
+                        if 'rmtl_result' in st.session_state:
+                            _rmtl_r = st.session_state['rmtl_result']
+                            
+                            # Results table
+                            st.write(f"### RMTL at τ = {_rmtl_r['tau']:.1f}")
+                            _rmtl_table = pd.DataFrame(_rmtl_r['group_results'])
+                            _rmtl_display = _rmtl_table.copy()
+                            _rmtl_display['RMTL (95% CI)'] = _rmtl_display.apply(
+                                lambda r: f"{r['rmtl']:.2f} ({r['lower']:.2f}–{r['upper']:.2f})", axis=1
+                            )
+                            st.dataframe(_rmtl_display[['group', 'n', 'RMTL (95% CI)']].rename(
+                                columns={'group': 'Group', 'n': 'N'}
+                            ), hide_index=True, use_container_width=True)
+                            
+                            # Pairwise Differences
+                            _pw_rmtl = _rmtl_r.get('pairwise', [])
+                            if _rmtl_r.get('difference'):
+                                # 2-group: single metric
+                                d = _rmtl_r['difference']
+                                _p_fmt = format_p_value(d['p_value'], narrator_style_name, context="table")
+                                _sig = "✅" if d['p_value'] < 0.05 else ""
+                                st.metric(
+                                    f"RMTL Difference ({d['group_a']} − {d['group_b']})",
+                                    f"{d['diff']:.2f}",
+                                    delta=f"95% CI: {d['lower']:.2f} to {d['upper']:.2f}, {_p_fmt} {_sig}"
+                                )
+                            elif _pw_rmtl:
+                                # >2 groups: pairwise table with reference selector
+                                st.write("### Pairwise RMTL Differences")
+                                
+                                _rmtl_all_grps = sorted(set(
+                                    [p['group_a'] for p in _pw_rmtl] + [p['group_b'] for p in _pw_rmtl]
+                                ))
+                                _rmtl_ref_opts = ["All pairwise"] + _rmtl_all_grps
+                                _rmtl_ref = st.selectbox(
+                                    "Reference group (denominator)", _rmtl_ref_opts,
+                                    key="rmtl_pw_ref",
+                                    help="Select a reference group to show comparisons as 'Other − Reference'. Or choose 'All pairwise' to see every combination."
+                                )
+                                
+                                _pw_rmtl_data = []
+                                for d in _pw_rmtl:
+                                    ga, gb = d['group_a'], d['group_b']
+                                    diff, lo, hi = d['diff'], d['lower'], d['upper']
+                                    
+                                    if _rmtl_ref == "All pairwise":
+                                        _pw_rmtl_data.append({
+                                            'Comparison': f"{ga} vs {gb}",
+                                            'Δ RMTL': f"{diff:.2f}",
+                                            '95% CI': f"{lo:.2f} to {hi:.2f}",
+                                            'p-value': format_p_value(d['p_value'], narrator_style_name, context="table"),
+                                            'p_raw': d['p_value']
+                                        })
+                                    elif _rmtl_ref == gb:
+                                        _pw_rmtl_data.append({
+                                            'Comparison': f"{ga} vs {gb}",
+                                            'Δ RMTL': f"{diff:.2f}",
+                                            '95% CI': f"{lo:.2f} to {hi:.2f}",
+                                            'p-value': format_p_value(d['p_value'], narrator_style_name, context="table"),
+                                            'p_raw': d['p_value']
+                                        })
+                                    elif _rmtl_ref == ga:
+                                        _pw_rmtl_data.append({
+                                            'Comparison': f"{gb} vs {ga}",
+                                            'Δ RMTL': f"{-diff:.2f}",
+                                            '95% CI': f"{-hi:.2f} to {-lo:.2f}",
+                                            'p-value': format_p_value(d['p_value'], narrator_style_name, context="table"),
+                                            'p_raw': d['p_value']
+                                        })
+                                
+                                if _pw_rmtl_data:
+                                    _pw_rmtl_df = pd.DataFrame(_pw_rmtl_data)
+                                    _rmtl_adjust = st.selectbox(
+                                        "Multiple-comparison adjustment (RMTL)",
+                                        ["Benjamini-Hochberg", "Bonferroni", "None"],
+                                        key="rmtl_pw_adjust",
+                                        help="Adjust across the pairwise RMTL comparisons shown.",
+                                    )
+                                    _p_raw_rmtl = _pw_rmtl_df['p_raw'].values
+                                    _p_adj_rmtl = statistics.adjust_pvalues(_p_raw_rmtl, _rmtl_adjust)
+                                    _pw_rmtl_df['p (adjusted)'] = [
+                                        format_p_value(p, narrator_style_name, context="table") if pd.notna(p) else "—"
+                                        for p in _p_adj_rmtl
+                                    ]
+                                    _pw_rmtl_display = ['Comparison', 'Δ RMTL', '95% CI', 'p-value', 'p (adjusted)']
+                                    _hl_rmtl_vals = _p_adj_rmtl if _rmtl_adjust != "None" else _p_raw_rmtl
+
+                                    def _hl_rmtl_pw(row):
+                                        p = _hl_rmtl_vals[row.name]
+                                        if pd.notna(p) and p < 0.05:
+                                            return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
+                                        return [''] * len(row)
+
+                                    st.dataframe(
+                                        _pw_rmtl_df[_pw_rmtl_display].style.apply(_hl_rmtl_pw, axis=1),
+                                        hide_index=True, use_container_width=True
+                                    )
+                                    st.caption("⚠️ Unadjusted for multiple comparisons — disclose when reporting."
+                                               if _rmtl_adjust == "None"
+                                               else f"'p (adjusted)': **{_rmtl_adjust}** across {len(_pw_rmtl_df)} comparisons.")
+                            
+                            # Visualization: shaded area under CIF curves
+                            st.write("### RMTL Visualization")
+                            from lifelines import AalenJohansenFitter
+                            _fig_rmtl, _ax_rmtl = plt.subplots(figsize=(8, 5))
+                            _rmtl_colors = all_themes.get(selected_theme, ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'])
+                            
+                            for i, grp in enumerate(_cif_groups):
+                                gdf = cif_df[cif_df[group_col] == grp]
+                                aj = AalenJohansenFitter(calculate_variance=False, seed=42)
+                                aj.fit(gdf[cif_time_col], gdf[cif_event_col], event_of_interest=cif_event_of_interest)
+                                timeline = np.linspace(0, _rmtl_r['tau'], 500)
+                                cif_vals = aj.predict(timeline)
+                                _c = _rmtl_colors[i % len(_rmtl_colors)]
+                                _ax_rmtl.plot(timeline, cif_vals.values, color=_c, linewidth=2, label=f"{grp}")
+                                _ax_rmtl.fill_between(timeline, 0, cif_vals.values, alpha=0.15, color=_c)
+                            
+                            _ax_rmtl.axvline(x=_rmtl_r['tau'], color='grey', linestyle='--', alpha=0.7, label=f"τ = {_rmtl_r['tau']:.0f}")
+                            _ax_rmtl.set_xlabel("Time")
+                            _ax_rmtl.set_ylabel("Cumulative Incidence")
+                            _ax_rmtl.set_title(f"RMTL (τ = {_rmtl_r['tau']:.0f}): Shaded Area = Time Lost to Event", fontweight='bold')
+                            _ax_rmtl.legend(loc='upper left')
+                            _ax_rmtl.set_xlim(0, _rmtl_r['tau'] * 1.05)
+                            _ax_rmtl.set_ylim(0, min(1.0, max([r['rmtl'] / _rmtl_r['tau'] * 3 for r in _rmtl_r['group_results']]) + 0.1))
+                            _ax_rmtl.grid(True, alpha=0.3)
+                            _fig_rmtl.tight_layout()
+                            st.pyplot(_fig_rmtl)
+                            
+                            # Download
+                            _rmtl_d1, _rmtl_d2 = st.columns(2)
+                            with _rmtl_d1:
+                                st.download_button("💾 RMTL Plot (600 DPI)",
+                                                   plotting.save_plot_to_buffer(_fig_rmtl, dpi=600),
+                                                   "rmtl_plot_600dpi.png", "image/png", key="dl_rmtl_png")
+                            with _rmtl_d2:
+                                st.download_button("📄 RMTL Plot (PDF)",
+                                                   plotting.save_plot_to_buffer(_fig_rmtl, fmt="pdf"),
+                                                   "rmtl_plot.pdf", "application/pdf", key="dl_rmtl_pdf")
+
+                            if st.button("📌 Pin to Session", key="pin_rmtl",
+                                         help="Save this RMTL analysis to the session bank."):
+                                _used = _pin_analysis(
+                                    'RMTL', f"RMTL (τ={_rmtl_r['tau']:.0f})", fig=_fig_rmtl,
+                                    title="Restricted Mean Time Lost",
+                                    tables={'RMTL by group': _rmtl_table},
+                                    meta={'group_col': group_col if group_col != 'None' else 'All',
+                                          'tau': round(float(_rmtl_r['tau']), 1)})
+                                st.success(f"📌 Pinned: **{_used}**")
+                            plt.close(_fig_rmtl)
+                    else:
+                        st.info("ℹ️ RMTL requires a grouping variable with ≥2 groups.")
+                else:
+                    st.info("ℹ️ Configure the cumulative incidence analysis above first.")
+
+                # --- AI NARRATOR (CIF) — placed after MV Fine-Gray so it captures all results ---
                 st.divider()
                 st.write("### 🤖 AI Result Narrator (Competing Risks)")
+                _col_ev1, _col_ev2 = st.columns(2)
+                with _col_ev1:
+                    _cif_event_name = st.text_input("Event of interest (for narrative)", value="relapse",
+                                                     key="cif_event_name",
+                                                     help="e.g. relapse, NRM, disease progression")
+                with _col_ev2:
+                    _cif_competing_name = st.text_input("Competing event (for narrative)", value="death without relapse",
+                                                         key="cif_competing_name",
+                                                         help="e.g. death without relapse, non-relapse mortality")
                 if st.button("Generate Summary Text (CIF)"):
-                     
-                     cif_summary = "Cumulative Incidence Functions (CIF) were estimated using the Aalen-Johansen method to account for competing risks. Comparisons were performed using the Fine-Gray subdistribution hazard model (Log-Likelihood Ratio Test).\n\n"
-                     cif_summary += "In the competing risks analysis:\n\n"
-                     
-                     # 1. Median Time Stats
-                     if cif_median_data:
-                         med_phrases = []
-                         for item in cif_median_data:
-                             med_phrases.append(f"{item['Group']} had a median time to incidence of {item['Median Time to Incidence']} (95% CI: {item['95% CI (Median)']})")
-                         cif_summary += "* **Median Time to Incidence**: " + "; ".join(med_phrases) + ".\n"
-                     
-                     # 2. Point in Time Stats
-                     if cif_est_data:
-                         cif_summary += f"* **Cumulative Incidence at {cif_target_time}**: "
-                         pit_phrases = []
-                         col_name_pit = f"Cumulative Incidence at {cif_target_time}"
-                         for item in cif_est_data:
-                             val = item.get(col_name_pit, "N/A")
-                             ci = item.get("95% CI", "")
-                             pit_phrases.append(f"{item['Group']} {val} (95% CI {ci})")
-                         cif_summary += "; ".join(pit_phrases) + ".\n"
-                     
-                     # 3. Fine-Gray Results
-                     if fg_summary is not None:
-                         cif_summary += "\n**Fine-Gray Regression Results** (accounting for competing risks):\n"
-                         for idx, row in fg_summary.iterrows():
-                             # Columns were renamed to ['Subdist HR', 'Lower 95%', 'Upper 95%', 'p-value']
-                             hr = row['Subdist HR']
-                             p = row['p-value']
-                             low = row['Lower 95%']
-                             high = row['Upper 95%']
-                             sig_txt = "significantly associated" if p < 0.05 else "not significantly associated"
-                             cif_summary += f"* **{idx}**: {sig_txt} with the cumulative incidence of the event (SHR={hr:.2f}, 95% CI {low:.2f}-{high:.2f}, p={p:.4f}).\n"
-                     
-                     st.success("Summary Generated:")
-                     st.text_area("Copy this text:", value=cif_summary, height=200)
+                     # Compute event counts for narrative context
+                     _cif_n_patients = len(cif_df) if cif_df is not None else None
+                     _cif_n_primary = int((cif_df[cif_event_col] == cif_event_of_interest).sum()) if cif_df is not None else None
+                     _cif_n_competing = int((cif_df[cif_event_col] == 2).sum()) if cif_df is not None else None
+
+                     cif_narrative = narrator.generate_cif_narrative(
+                         cif_median_data=cif_median_data if 'cif_median_data' in globals() else None,
+                         cif_est_data=cif_est_data if 'cif_est_data' in globals() else None,
+                         cif_target_time=cif_target_time if 'cif_target_time' in globals() else None,
+                         fg_summary=fg_summary if 'fg_summary' in globals() else None,
+                         fg_mv_summary=st.session_state.get('fg_mv_summary', None),
+                         style_name=narrator_style_name,
+                         detail_level=narrator_detail_level,
+                         event_of_interest=_cif_event_name,
+                         competing_event=_cif_competing_name,
+                         n_patients=_cif_n_patients,
+                         n_primary_events=_cif_n_primary,
+                         n_competing_events=_cif_n_competing,
+                         landmark_time=landmark_time if landmark_time > 0 else None,
+                         median_followup=(statistics.median_followup(
+                             cif_df[cif_time_col], (cif_df[cif_event_col] != 0).astype(int))
+                             if cif_df is not None else None),
+                     )
+                     st.success("Summary Generated (click the copy icon to copy):")
+                     st.session_state['last_cif_narrative'] = cif_narrative
+                     st.code(cif_narrative, language=None)
+
+    # --- COMPOSITE FIGURE TAB ---
+    if 'tab_composite' in locals():
+        with tab_composite:
+            st.header("Session & Composite")
+            st.write("Your **session gallery** — every analysis you pin accumulates here (KM, CIF, Cox, Fine-Gray, RMTL, Table 1), "
+                     "survives saving/sharing, and can be arranged into a **publication-ready composite panel figure** (Figure 1A, 1B, 1C).")
+
+            # Collect available plots from BOTH current session AND analysis bank
+            # Values are tagged ('png', base64) for banked entries or ('fig', figure)
+            # for the live current-session plots; _build_composite handles both.
+            _available_plots = {}
+
+            # 1. Pinned analyses from the bank (accumulated across endpoint changes).
+            #    Only entries that actually carry a figure can be composited.
+            for i, entry in enumerate(st.session_state.get('analysis_bank', [])):
+                if not entry.get('png'):
+                    continue
+                _key = f"📌 {entry['label']}"
+                if _key in _available_plots:
+                    _key = f"{_key} ({i+1})"
+                _available_plots[_key] = ('png', entry['png'])
+
+            # 2. Current (unpinned) plots from the active analysis
+            if 'report_fig_km' in st.session_state:
+                _km_title = st.session_state.get('composite_km_title', 'Kaplan-Meier')
+                _available_plots[f"KM (current): {_km_title}"] = ('fig', st.session_state['report_fig_km'])
+            if 'report_fig_cif' in st.session_state:
+                _cif_title = st.session_state.get('composite_cif_title', 'Cumulative Incidence')
+                _available_plots[f"CIF (current): {_cif_title}"] = ('fig', st.session_state['report_fig_cif'])
+            if 'report_fig_forest' in st.session_state:
+                _available_plots["Forest Plot (current)"] = ('fig', st.session_state['report_fig_forest'])
+
+            # ============================================================
+            # SESSION GALLERY — every pinned analysis, in order
+            # ============================================================
+            _bank = st.session_state.get('analysis_bank', [])
+            st.subheader(f"📚 Session Analyses ({len(_bank)})")
+            if not _bank:
+                st.info("No analyses pinned yet. Use **📌 Pin to Session** in the Kaplan-Meier, "
+                        "Competing Risks, Cox Regression, or Correlations (Table 1) tabs to build a "
+                        "session you can **save, resume, and share** — pinned analyses travel with the "
+                        "saved-session file.")
+            else:
+                st.caption("Reorder, rename, review, or remove analyses below. Everything here is stored "
+                           "in the saved session and is visible to anyone you share the file with.")
+                for i, entry in enumerate(_bank):
+                    with st.container(border=True):
+                        _gc1, _gc2 = st.columns([1, 3])
+                        with _gc1:
+                            if entry.get('png'):
+                                st.image(session_bank.png_b64_to_bytes(entry['png']), width=210)
+                            else:
+                                st.markdown(f"#### 📄 {entry.get('type', 'Analysis')}")
+                        with _gc2:
+                            st.markdown(f"**{i+1}. {entry['label']}** · _{entry.get('type', '')}_")
+                            _m = entry.get('meta', {})
+                            _bits = [f"{k} = {_m[k]}" for k in ('endpoint', 'group_col', 'n_patients')
+                                     if _m.get(k) not in (None, '')]
+                            if _m.get('pinned_at'):
+                                _bits.append(_m['pinned_at'])
+                            if _bits:
+                                st.caption(" | ".join(str(b) for b in _bits))
+
+                            _b1, _b2, _b3 = st.columns([1, 1, 1])
+                            with _b1:
+                                if st.button("⬆ Up", key=f"bank_up_{i}", disabled=(i == 0), use_container_width=True):
+                                    _bank[i - 1], _bank[i] = _bank[i], _bank[i - 1]
+                                    st.rerun()
+                            with _b2:
+                                if st.button("⬇ Down", key=f"bank_down_{i}", disabled=(i == len(_bank) - 1), use_container_width=True):
+                                    _bank[i + 1], _bank[i] = _bank[i], _bank[i + 1]
+                                    st.rerun()
+                            with _b3:
+                                if st.button("🗑 Remove", key=f"del_bank_{i}", use_container_width=True):
+                                    st.session_state.analysis_bank.pop(i)
+                                    st.rerun()
+
+                            _new_label = st.text_input("Rename", value=entry['label'],
+                                                       key=f"bank_rename_{i}", label_visibility="collapsed")
+                            if _new_label and _new_label != entry['label']:
+                                entry['label'] = _new_label
+
+                            _etables = list(session_bank.entry_tables(entry))
+                            if _etables or entry.get('narrative'):
+                                with st.expander("Tables & AI narrative"):
+                                    for _tname, _tdf in _etables:
+                                        st.markdown(f"**{_tname}**")
+                                        st.dataframe(_tdf, use_container_width=True)
+                                    if entry.get('narrative'):
+                                        st.markdown("**AI narrative**")
+                                        st.code(entry['narrative'], language=None)
+
+                if st.button("🗑️ Clear all pinned analyses", key="clear_bank"):
+                    st.session_state.analysis_bank = []
+                    st.rerun()
+
+            st.divider()
+            st.subheader("🖼️ Composite Panel Figure")
+
+            if len(_available_plots) < 2:
+                st.info("📌 **Pin at least 2 analyses** to create a composite figure. Use the 📌 Pin to Session button in the KM or CIF tabs after generating each analysis. Currently available: " + (", ".join(_available_plots.keys()) if _available_plots else "none"))
+            else:
+                _plot_keys = list(_available_plots.keys())
+                selected_panels = st.multiselect(
+                    "Select plots to include (2-4 panels)",
+                    _plot_keys,
+                    default=_plot_keys[:min(3, len(_plot_keys))],
+                    max_selections=4,
+                    help="Select 2-4 plots to arrange as panels A, B, C, D"
+                )
+
+                if len(selected_panels) >= 2:
+                    _layout_options = {
+                        2: ["Side by side (1x2)", "Stacked (2x1)"],
+                        3: ["Row (1x3)", "Top 1 + Bottom 2 (T-shape)", "Stacked (3x1)"],
+                        4: ["Grid (2x2)", "Row (1x4)", "Stacked (4x1)"],
+                    }
+                    n = len(selected_panels)
+                    layout = st.radio("Layout", _layout_options[n], horizontal=True)
+
+                    panel_labels = st.checkbox("Show panel labels (A, B, C, D)", value=True)
+                    comp_fontsize = st.number_input("Panel label size", min_value=12, max_value=36, value=18)
+                    
+                    # Panel spacing controls
+                    st.markdown("**Panel Spacing**")
+                    _sp_col1, _sp_col2 = st.columns(2)
+                    with _sp_col1:
+                        comp_hspace = st.slider("Vertical gap", 0.0, 0.5, 0.05, 0.01,
+                                                help="Space between rows of panels. 0 = touching, 0.5 = very wide gap.")
+                    with _sp_col2:
+                        comp_wspace = st.slider("Horizontal gap", 0.0, 0.5, 0.02, 0.01,
+                                                help="Space between columns of panels. 0 = touching, 0.5 = very wide gap.")
+                    comp_pad = st.slider("Outer margin", 0.0, 3.0, 0.5, 0.1,
+                                         help="Padding around the entire figure edge.")
+
+                    if st.button("Generate Composite Figure", type="primary"):
+
+                        def _build_composite(source_dpi):
+                            """Build composite figure from source panels (live figures or stored PNGs)."""
+                            _panel_imgs = []
+                            for key in selected_panels:
+                                _kind, _val = _available_plots[key]
+                                if _kind == 'png':
+                                    # Banked panel: decode the stored PNG bytes directly.
+                                    _panel_imgs.append(plt.imread(io.BytesIO(session_bank.png_b64_to_bytes(_val))))
+                                else:
+                                    _buf = io.BytesIO()
+                                    _val.savefig(_buf, format='png', dpi=source_dpi, bbox_inches='tight',
+                                                 facecolor=_val.get_facecolor(), edgecolor='none')
+                                    _buf.seek(0)
+                                    _panel_imgs.append(plt.imread(_buf))
+
+                            is_t = (n == 3 and "T-shape" in layout)
+
+                            if is_t:
+                                _fig, _axes = plt.subplots(2, 2, figsize=(20, 12))
+                                _axes[0, 0].imshow(_panel_imgs[0]); _axes[0, 0].axis('off')
+                                _axes[0, 1].axis('off'); _axes[0, 1].set_visible(False)
+                                _fig.delaxes(_axes[0, 0]); _fig.delaxes(_axes[0, 1])
+                                _ax_top = _fig.add_subplot(2, 1, 1)
+                                _ax_top.imshow(_panel_imgs[0]); _ax_top.axis('off')
+                                if panel_labels:
+                                    _ax_top.text(0.02, 0.98, 'A', transform=_ax_top.transAxes,
+                                                fontsize=comp_fontsize, weight='bold', va='top')
+                                _axes[1, 0].imshow(_panel_imgs[1]); _axes[1, 0].axis('off')
+                                if panel_labels:
+                                    _axes[1, 0].text(0.02, 0.98, 'B', transform=_axes[1, 0].transAxes,
+                                                    fontsize=comp_fontsize, weight='bold', va='top')
+                                _axes[1, 1].imshow(_panel_imgs[2]); _axes[1, 1].axis('off')
+                                if panel_labels:
+                                    _axes[1, 1].text(0.02, 0.98, 'C', transform=_axes[1, 1].transAxes,
+                                                    fontsize=comp_fontsize, weight='bold', va='top')
+                            else:
+                                # Determine grid
+                                if n == 2:
+                                    _nr, _nc = (1, 2) if "1x2" in layout else (2, 1)
+                                elif n == 4:
+                                    if "2x2" in layout: _nr, _nc = 2, 2
+                                    elif "1x4" in layout: _nr, _nc = 1, 4
+                                    else: _nr, _nc = 4, 1
+                                else:
+                                    if "1x3" in layout: _nr, _nc = 1, 3
+                                    elif "T-shape" in layout: _nr, _nc = 2, 2
+                                    else: _nr, _nc = 3, 1
+
+                                _fig, _axes = plt.subplots(_nr, _nc, figsize=(10 * _nc, 6 * _nr))
+                                if n == 1:
+                                    _axes = [_axes]
+                                elif _nr == 1 or _nc == 1:
+                                    _axes = _axes.flatten()
+                                else:
+                                    _axes = _axes.flatten()
+
+                                _labels = ['A', 'B', 'C', 'D']
+                                for idx, (key, img) in enumerate(zip(selected_panels, _panel_imgs)):
+                                    _axes[idx].imshow(img)
+                                    _axes[idx].axis('off')
+                                    if panel_labels:
+                                        _axes[idx].text(0.02, 0.98, _labels[idx], transform=_axes[idx].transAxes,
+                                                       fontsize=comp_fontsize, weight='bold', va='top')
+                                # Hide extra axes in grid layouts (e.g., 2x2 with 3 panels)
+                                if hasattr(_axes, '__len__'):
+                                    for idx in range(n, len(_axes)):
+                                        _axes[idx].set_visible(False)
+
+                            _fig.patch.set_facecolor(plot_bgcolor)
+                            _fig.subplots_adjust(wspace=comp_wspace, hspace=comp_hspace)
+                            _fig.tight_layout(pad=comp_pad)
+                            return _fig
+
+                        # Build preview at 300 DPI
+                        fig_comp = _build_composite(300)
+                        st.pyplot(fig_comp)
+
+                        # Download buttons
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            buf_comp = io.BytesIO()
+                            fig_comp.savefig(buf_comp, format="png", dpi=300, bbox_inches='tight',
+                                             facecolor=fig_comp.get_facecolor(), edgecolor='none')
+                            buf_comp.seek(0)
+                            st.download_button("💾 Download (300 DPI)", buf_comp, "composite_figure_300dpi.png", "image/png")
+                        with col2:
+                            # TRUE 600 DPI: rebuild from 600 DPI source renders
+                            with st.spinner("Building 600 DPI..."):
+                                fig_comp_hi = _build_composite(600)
+                                buf_comp_hi = io.BytesIO()
+                                fig_comp_hi.savefig(buf_comp_hi, format="png", dpi=600, bbox_inches='tight',
+                                                    facecolor=fig_comp_hi.get_facecolor(), edgecolor='none')
+                                buf_comp_hi.seek(0)
+                                plt.close(fig_comp_hi)
+                            st.download_button("💾 Download TRUE 600 DPI", buf_comp_hi, "composite_figure_600dpi.png", "image/png")
+                        with col3:
+                            # PDF also from 600 DPI sources
+                            fig_comp_pdf = _build_composite(600)
+                            buf_comp_pdf = io.BytesIO()
+                            fig_comp_pdf.savefig(buf_comp_pdf, format="pdf", bbox_inches='tight',
+                                                 facecolor=fig_comp_pdf.get_facecolor(), edgecolor='none')
+                            buf_comp_pdf.seek(0)
+                            plt.close(fig_comp_pdf)
+                            st.download_button("📄 Download (PDF)", buf_comp_pdf, "composite_figure.pdf", "application/pdf")
+
+                        plt.close(fig_comp)
+                else:
+                    st.warning("Select at least 2 plots to create a composite figure.")
 
     # --- TAB 4: BIOMARKER DISCOVERY ---
-    if 'tab4' in locals() and df_clean is not None:
+    if 'tab4' in locals() and tab4 is not None and df_clean is not None:
          with tab4:
              st.header("Biomarker Cutoff Optimization")
              st.write("Evaluate valid continuous variables (e.g., Gene Expression, Lab Values) and find the optimal cutoff for survival stratification.")
@@ -2552,7 +5165,7 @@ if df is not None:
                          p_val = summ['p']
                          
                          st.metric("Hazard Ratio (Continuous)", f"{hr:.3f}", delta=None)
-                         st.metric("P-value (Wald Test)", f"{p_val:.4f}", delta_color="inverse" if p_val < 0.05 else "normal")
+                         st.metric("P-value (Wald Test)", format_p_value(p_val, narrator_style_name, context="table"), delta_color="inverse" if p_val < 0.05 else "normal")
                          
                          if p_val < 0.05:
                              st.success(f"**{bio_col}** is significantly associated with outcome as a continuous variable.")
@@ -2653,8 +5266,8 @@ if df is not None:
                                      if group_roc.sum() > 0 and (len(group_roc) - group_roc.sum()) > 0:
                                          res_roc = multivariate_logrank_test(cox_df[time_col], group_roc, cox_df[event_col])
                                          roc_p_val = res_roc.p_value
-                                 except:
-                                     pass
+                                 except Exception:
+                                     roc_p_val = np.nan
                                  
                                  st.success(f"**Optimal ROC Cutoff:** {best_thresh_roc:.2f} (AUC = {roc_auc:.3f})")
                                  
@@ -2664,10 +5277,18 @@ if df is not None:
                                      st.write(f"Specificity: {best_spec:.2f}")
                                  with col_roc_stats2:
                                       if not np.isnan(roc_p_val):
-                                          st.metric("Survival Separation P-value", f"{roc_p_val:.5f}", help="P-value from Log-Rank test using this cutoff.")
+                                          st.metric("Survival Separation P-value", format_p_value(roc_p_val, narrator_style_name, context="table"), help="P-value from Log-Rank test using this cutoff.")
                                       else:
                                           st.write("P-value: N/A")
-                                 
+
+                                 st.warning(
+                                     "⚠️ **Optimism warning**: this cutoff was chosen from the same data used "
+                                     "to compute the separation p-value (data-driven Youden index). This inflates "
+                                     "the apparent significance and the p-value should **not** be reported as a "
+                                     "confirmatory result. Validate the cutoff on an independent cohort before use."
+                                 )
+
+
                                  # Plot ROC
                                  fig_roc, ax_roc = plt.subplots(figsize=(6, 4))
                                  ax_roc.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (AUC = {roc_auc:.2f})')
@@ -2680,12 +5301,13 @@ if df is not None:
                                  ax_roc.set_title(f'ROC Curve at t={roc_time}')
                                  ax_roc.legend(loc="lower right")
                                  st.pyplot(fig_roc)
+                                 plt.close(fig_roc)
                                  
                                  # Store for Action
                                  st.session_state.optimal_cut = {
                                      'col': bio_col,
                                      'cut': best_thresh_roc,
-                                     'p': 0.0 # Placeholder
+                                     'p': float(roc_p_val) if not np.isnan(roc_p_val) else None
                                  }
                                  
                              except Exception as e:
@@ -2734,7 +5356,16 @@ if df is not None:
                          progress_bar.empty()
                          
                          if best_cut is not None:
-                             st.success(f"**Optimal Cutoff Found:** {best_cut:.2f} (p = {best_p:.5f})")
+                             st.success(f"**Optimal Cutoff Found:** {best_cut:.2f} ({format_p_value(best_p, narrator_style_name, context='text')})")
+                             st.warning(
+                                 "**Methodological Note:** This cutoff was selected by testing multiple thresholds and choosing "
+                                 "the one with the smallest p-value. This is an **exploratory, data-driven** approach that inflates "
+                                 "the false-positive rate. The p-value shown above is **not adjusted for multiple comparisons** and "
+                                 "should not be reported as a confirmatory result. "
+                                 "For publication, consider: (1) validating this cutoff in an independent cohort, "
+                                 "(2) using a pre-specified cutoff based on clinical rationale, or "
+                                 "(3) reporting this as hypothesis-generating only."
+                             )
                              
                              # Store in session state for plotting and saving
                              st.session_state.optimal_cut = {
@@ -2753,6 +5384,7 @@ if df is not None:
                              ax_p.legend()
                              ax_p.set_title("Cutoff Optimization Landscape")
                              st.pyplot(fig_p)
+                             plt.close(fig_p)
                              
                  # 3. Action Section
                  st.divider()
@@ -2776,18 +5408,16 @@ if df is not None:
                      }
                      st.session_state.custom_cutoffs.append(new_def)
                      st.success(f"Variable **{new_var_name}** created! It is now available in the Main and CIF tabs.")
-                     if hasattr(st, "rerun"):
-                         st.rerun()
-                     else:
-                         st.experimental_rerun()
+                     st.rerun()
 
     # --- TAB 5: VARIABLE GENERATION ---
-    if 'tab5' in locals() and df_clean is not None:
+    if 'tab5' in locals() and tab5 is not None and df_clean is not None:
          with tab5:
              st.header("🧪 Variable Generation")
              st.write("Create advanced variables by combining existing columns or applying logical rules.")
              
-             tab5_meth1, tab5_meth2 = st.tabs(["Method 1: Interaction Combiner", "Method 2: Boolean Logic"])
+             tab5_meth1, tab5_meth2, tab5_meth3 = st.tabs([
+                 "Method 1: Interaction Combiner", "Method 2: Boolean Logic", "Method 3: Date Interval"])
              
              # --- METHOD 1: INTERACTION COMBINER ---
              with tab5_meth1:
@@ -2829,10 +5459,7 @@ if df is not None:
                          
                          st.session_state.custom_combinations.append(new_combo)
                          st.success(f"Interaction variable **{preview_name}** created! It is now available in the sidebar.")
-                         if hasattr(st, "rerun"):
-                             st.rerun()
-                         else:
-                             st.experimental_rerun()
+                         st.rerun()
                              
              # --- METHOD 2: BOOLEAN LOGIC ---
              with tab5_meth2:
@@ -2896,17 +5523,132 @@ if df is not None:
                          st.session_state.custom_combinations = []
                      
                      st.session_state.custom_combinations.append(bool_def)
-                     
-                     # Force reload to apply logic in the main app loop (we need to update that loop too!)
+
                      st.success(f"Logic Variable **{new_bool_name}** created!")
-                     if hasattr(st, "rerun"):
-                         st.rerun()
+                     st.rerun()
+
+             with tab5_meth3:
+                 st.subheader("Compute Time Between Two Dates")
+                 st.caption("Create a numeric duration column from two date columns — e.g. **months from diagnosis to transplant**, "
+                            "so it can be used as a time-dependent covariate's event time (on the same scale as your survival time).")
+                 _di_c1, _di_c2, _di_c3 = st.columns([2, 2, 1])
+                 with _di_c1:
+                     _di_start = st.selectbox("Start date (time zero)", cols_avail, key="di_start",
+                                              help="The baseline date, e.g. diagnosis or registration date.")
+                 with _di_c2:
+                     _di_end = st.selectbox("End date (event)", cols_avail, key="di_end",
+                                            help="The later date, e.g. date of transplant. Blank for patients without the event.")
+                 with _di_c3:
+                     _di_unit = st.selectbox("Unit", ["months", "days", "weeks", "years"], key="di_unit")
+                 _di_dayfirst = st.checkbox("Day-first dates (DD/MM/YYYY)", value=True, key="di_dayfirst",
+                                            help="Tick for DD/MM/YYYY; untick for MM/DD/YYYY. ISO dates (YYYY-MM-DD) parse either way.")
+                 _di_name = st.text_input("New column name", value=f"Months_{_di_end}"[:40].replace(" ", "_"), key="di_name")
+
+                 # Live preview
+                 if _di_start and _di_end and _di_start != _di_end:
+                     _di_vals, _di_meta = statistics.date_interval(
+                         df_clean[_di_start], df_clean[_di_end], unit=_di_unit, dayfirst=_di_dayfirst)
+                     st.info(f"Preview: **{_di_meta['n_computed']}** of {_di_meta['n']} rows produce a value "
+                             f"({_di_meta['n_start_unparsed']} unparsed start, {_di_meta['n_end_unparsed']} unparsed/blank end). "
+                             f"Median = {_di_vals.median():.1f} {_di_unit}." if _di_meta['n_computed']
+                             else "Preview: no rows produced a value — check the columns actually contain dates.")
+                     if _di_meta['n_negative'] > 0:
+                         st.warning(f"⚠️ {_di_meta['n_negative']} rows are **negative** (end date before start date). "
+                                    "Check the column order or the source data.")
+                     if _di_meta['n_computed']:
+                         st.dataframe(pd.DataFrame({
+                             _di_start: df_clean[_di_start], _di_end: df_clean[_di_end],
+                             _di_name or 'interval': _di_vals.round(2),
+                         }).dropna(subset=[_di_name or 'interval']).head(8), hide_index=True, use_container_width=True)
+                 elif _di_start == _di_end:
+                     st.warning("Choose two different columns.")
+
+                 if st.button("Add Duration Column", key="add_date_interval"):
+                     if not _di_name:
+                         st.error("Please enter a column name.")
+                     elif _di_start == _di_end:
+                         st.error("Start and end must be different columns.")
                      else:
-                         st.experimental_rerun()
-                         
+                         if 'custom_combinations' not in st.session_state:
+                             st.session_state.custom_combinations = []
+                         st.session_state.custom_combinations.append({
+                             'type': 'date_interval', 'name': _di_name,
+                             'start': _di_start, 'end': _di_end,
+                             'unit': _di_unit, 'dayfirst': _di_dayfirst,
+                         })
+                         st.success(f"Added **{_di_name}** ({_di_unit}) to the dataset. "
+                                    "You can now select it as the *Time of Event Column* for a time-dependent covariate.")
+                         st.rerun()
+
     # --- TAB 6: CORRELATIONS ---
-    if 'tab6' in locals() and df_clean is not None:
+    if 'tab6' in locals() and tab6 is not None and df_clean is not None:
          with tab6:
+             # ============================================================
+             # BASELINE CHARACTERISTICS ("TABLE 1")
+             # ============================================================
+             st.header("📋 Baseline Characteristics (Table 1)")
+             st.write("Generate a publication-ready, by-group summary of your cohort with appropriate descriptive statistics and tests.")
+
+             _t1_group_opts = ["(Overall only)"] + [c for c in df_clean.columns]
+             _t1_group = st.selectbox(
+                 "Stratify by (grouping variable)", _t1_group_opts, key="t1_group",
+                 help="Choose a column to compare groups (adds per-group columns and a p-value), or 'Overall only' for a single-column summary.",
+             )
+             _t1_group_col = None if _t1_group == "(Overall only)" else _t1_group
+
+             _t1_var_opts = [c for c in df_clean.columns if c != _t1_group_col]
+             _t1_default = [c for c in _t1_var_opts if c.lower() in
+                            ('age', 'sex', 'gender', 'eln', 'stage', 'bm_blast%', 'ngs', 'lsc', 'fcm')][:8]
+             _t1_vars = st.multiselect(
+                 "Variables to summarise", _t1_var_opts, default=_t1_default, key="t1_vars",
+                 help="Continuous variables are summarised as median [IQR]; categorical as n (%).",
+             )
+             _t1_style = st.radio(
+                 "Continuous variable summary", ["Median [IQR] (non-parametric)", "Mean (SD) (parametric)"],
+                 horizontal=True, key="t1_style",
+                 help="Median [IQR] with rank-based tests is the robust default for skewed clinical data.",
+             )
+
+             if _t1_vars:
+                 _t1_nonnormal = None
+                 _t1_cstyle = "median"
+                 if _t1_style.startswith("Mean"):
+                     _t1_nonnormal = []
+                     _t1_cstyle = "mean"
+                 try:
+                     _t1_table, _t1_meta = tableone.generate_table_one(
+                         df_clean, group_col=_t1_group_col, variables=_t1_vars,
+                         nonnormal_vars=_t1_nonnormal, continuous_style=_t1_cstyle,
+                     )
+                     st.dataframe(_t1_table, hide_index=True, use_container_width=True)
+                     if _t1_group_col:
+                         _tests = sorted(set(t for t in _t1_meta['tests'].values() if t))
+                         if _tests:
+                             st.caption("Tests used: " + ", ".join(_tests) +
+                                        ". Continuous: Mann-Whitney U / Kruskal-Wallis (or t-test / ANOVA if parametric); "
+                                        "categorical: chi-square (Fisher's exact for small 2×2). P-values are unadjusted.")
+                     _t1c1, _t1c2 = st.columns([1, 1])
+                     with _t1c1:
+                         st.download_button(
+                             "💾 Download Table 1 (CSV)",
+                             _t1_table.to_csv(index=False).encode('utf-8'),
+                             "table1_baseline.csv", "text/csv", key="dl_table1",
+                         )
+                     with _t1c2:
+                         if st.button("📌 Pin to Session", key="pin_table1"):
+                             _tl = f"Table 1 by {_t1_group_col}" if _t1_group_col else "Table 1 (overall)"
+                             _used = _pin_analysis('Table1', _tl,
+                                                   tables={'Baseline characteristics': _t1_table},
+                                                   meta={'group_col': _t1_group_col or 'overall',
+                                                         'n_patients': len(df_clean)})
+                             st.success(f"📌 Pinned: **{_used}**")
+                 except Exception as e:
+                     st.error(f"Could not build Table 1: {e}")
+             else:
+                 st.info("Select at least one variable to summarise.")
+
+             st.divider()
+
              st.header("🔥 Correlation Heatmap")
              st.write("Visualize relationships between variables. Useful for checking multicollinearity.")
              
@@ -2944,11 +5686,13 @@ if df is not None:
                  if sns is not None:
                      sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm", center=0, ax=ax_corr, square=True)
                      st.pyplot(fig_corr)
+                     plt.close(fig_corr)
                  else:
                      st.error("Error: The 'seaborn' library could not be loaded.")
                      st.warning("The system attempted to auto-install it but failed. Please try restarting the app or installing 'seaborn' manually in your environment.")
                      st.code("pip install seaborn")
 
+    if tab7 is not None:
          with tab7:
              st.subheader("🎯 Diagnostic Accuracy & Prognostic Concordance")
              
@@ -3077,7 +5821,7 @@ if df is not None:
                              from matplotlib.colors import LinearSegmentedColormap
                              base_color = all_themes[selected_theme][0]
                              cmap = LinearSegmentedColormap.from_list("custom", ["#f0f2f6", base_color])
-                         except:
+                         except Exception:
                              pass
 
                      if sns is not None:
@@ -3087,15 +5831,16 @@ if df is not None:
                          ax_cm.set_xlabel(f"Test: {res['test_var']}")
                          ax_cm.set_ylabel(f"Reference: {res['ref_var']}")
                          st.pyplot(fig_cm)
+                         plt.close(fig_cm)
                          
                      # 4. Narrator
                      st.divider()
                      st.subheader("🤖 AI Diagnostic Narrator")
                      if st.button("Generate Diagnostic Report"):
-                           narrative = narrator.generate_diagnostic_narrative(res)
-                           st.success("Report Generated:")
-                           st.text_area("Copy Text:", narrative, height=150)
-             
+                           narrative = narrator.generate_diagnostic_narrative(res, style_name=narrator_style_name, detail_level=narrator_detail_level)
+                           st.success("Report Generated (click the copy icon to copy):")
+                           st.code(narrative, language=None)
+
              elif diag_mode == "Prognostic Model Comparison (C-Index)":
                  st.write("Compare the discriminative power (C-index) of up to 3 models with 95% Confidence Intervals (Bootstrapped).")
                  
@@ -3112,21 +5857,25 @@ if df is not None:
                      st.write("#### Model C (+2) [Optional]")
                      vars_c = st.multiselect("Covariates C", [c for c in columns if c not in [time_col, event_col]], key="mod_c")
                  
+                 # Penalization Option (OUTSIDE button block so it persists)
+                 _pen_val = st.session_state.get('penalizer_val', 0.0)
+                 _l1_val = st.session_state.get('l1_ratio_val', 0.0)
+                 apply_penalty = st.checkbox(
+                     f"Apply Penalized Settings? (Lambda={_pen_val:.4f}, L1={_l1_val:.1f})",
+                     value=False,
+                     key="c_index_apply_penalty",
+                     help="Only enable this if you have explicitly configured penalization in the Cox Regression tab."
+                 )
+                 
+                 penalizer = _pen_val if apply_penalty else 0.0
+                 l1_ratio = _l1_val if apply_penalty else 0.0
+                 
                  if st.button("Compare Models"):
                       if not vars_a or not vars_b:
                           st.error("Please define at least Model A and Model B.")
                       else:
                           try:
                               res_list = []
-                              
-
-                              
-
-                              # Determine Penalties
-                              apply_penalty = st.checkbox(f"Apply Penalized Settings from Tab 2? (Lambda={st.session_state.get('penalizer_val', 0.1):.3f}, L1={st.session_state.get('l1_ratio_val', 0.0):.1f})", value=True)
-                              
-                              penalizer = st.session_state.get('penalizer_val', 0.1) if apply_penalty else 0.0
-                              l1_ratio = st.session_state.get('l1_ratio_val', 0.0) if apply_penalty else 0.0
                               
                               with st.spinner("Bootstrapping C-Indices (n=50)..."):
                                   res_a = statistics.get_c_index_bootstrap(df_clean, time_col, event_col, vars_a, "Model A", penalizer=penalizer, l1_ratio=l1_ratio)
@@ -3135,9 +5884,72 @@ if df is not None:
                                   
                               res_list = [r for r in [res_a, res_b, res_c] if r is not None]
                               
+                              # --- Likelihood Ratio Test for Nested Models ---
+                              lrt_results = []
+                              try:
+                                  from scipy.stats import chi2
+                                  
+                                  # Prepare common data (all models need same rows)
+                                  _all_vars = list(set(vars_a + vars_b + (vars_c if vars_c else [])))
+                                  _lrt_df = df_clean[[time_col, event_col] + _all_vars].dropna()
+                                  _lrt_enc = pd.get_dummies(_lrt_df, drop_first=True)
+                                  _lrt_enc.columns = [statistics.sanitize_name(c) for c in _lrt_enc.columns]
+                                  
+                                  # Fit Models A and B on same data
+                                  _san_vars_a = [statistics.sanitize_name(c) for c in vars_a]
+                                  _san_vars_b = [statistics.sanitize_name(c) for c in vars_b]
+                                  
+                                  # Get all dummy columns for each model's covariates
+                                  _cols_a = [c for c in _lrt_enc.columns if c not in [time_col, event_col] and any(c.startswith(v) for v in _san_vars_a)]
+                                  _cols_b = [c for c in _lrt_enc.columns if c not in [time_col, event_col] and any(c.startswith(v) for v in _san_vars_b)]
+                                  
+                                  _cph_a = CoxPHFitter(penalizer=penalizer, l1_ratio=l1_ratio)
+                                  _cph_a.fit(_lrt_enc[[time_col, event_col] + _cols_a], duration_col=time_col, event_col=event_col)
+                                  _ll_a = _cph_a.log_likelihood_
+                                  
+                                  _cph_b = CoxPHFitter(penalizer=penalizer, l1_ratio=l1_ratio)
+                                  _cph_b.fit(_lrt_enc[[time_col, event_col] + _cols_b], duration_col=time_col, event_col=event_col)
+                                  _ll_b = _cph_b.log_likelihood_
+                                  
+                                  # LRT: -2 * (ll_reduced - ll_full)
+                                  _df_diff_ab = len(_cols_b) - len(_cols_a)
+                                  if _df_diff_ab > 0:
+                                      _lrt_stat_ab = -2 * (_ll_a - _ll_b)
+                                      _lrt_p_ab = 1 - chi2.cdf(max(0, _lrt_stat_ab), df=_df_diff_ab)
+                                      lrt_results.append({
+                                          'Comparison': 'Model B vs A',
+                                          'χ² statistic': _lrt_stat_ab,
+                                          'df': _df_diff_ab,
+                                          'p-value': _lrt_p_ab,
+                                          'Interpretation': 'Significant improvement' if _lrt_p_ab < 0.05 else 'No significant improvement'
+                                      })
+                                  
+                                  if vars_c:
+                                      _san_vars_c = [statistics.sanitize_name(c) for c in vars_c]
+                                      _cols_c = [c for c in _lrt_enc.columns if c not in [time_col, event_col] and any(c.startswith(v) for v in _san_vars_c)]
+                                      
+                                      _cph_c = CoxPHFitter(penalizer=penalizer, l1_ratio=l1_ratio)
+                                      _cph_c.fit(_lrt_enc[[time_col, event_col] + _cols_c], duration_col=time_col, event_col=event_col)
+                                      _ll_c = _cph_c.log_likelihood_
+                                      
+                                      _df_diff_bc = len(_cols_c) - len(_cols_b)
+                                      if _df_diff_bc > 0:
+                                          _lrt_stat_bc = -2 * (_ll_b - _ll_c)
+                                          _lrt_p_bc = 1 - chi2.cdf(max(0, _lrt_stat_bc), df=_df_diff_bc)
+                                          lrt_results.append({
+                                              'Comparison': 'Model C vs B',
+                                              'χ² statistic': _lrt_stat_bc,
+                                              'df': _df_diff_bc,
+                                              'p-value': _lrt_p_bc,
+                                              'Interpretation': 'Significant improvement' if _lrt_p_bc < 0.05 else 'No significant improvement'
+                                          })
+                              except Exception as _lrt_e:
+                                  st.caption(f"LRT calculation note: {_lrt_e}")
+                              
                               # SAVE TO SESSION STATE
                               st.session_state['prog_results'] = {
                                   'res_list': res_list,
+                                  'lrt_results': lrt_results,
                                   'vars_a': vars_a, 'vars_b': vars_b, 'vars_c': vars_c
                               }
                           
@@ -3173,6 +5985,27 @@ if df is not None:
                       if r_b and r_c:
                           delta_bc = r_c["C-Index"] - r_b["C-Index"]
                           st.metric("Δ (Model C - Model B)", f"{delta_bc:+.3f}", delta_color="normal")
+                      
+                      # --- Likelihood Ratio Test Results ---
+                      lrt_results = res_p.get('lrt_results', [])
+                      if lrt_results:
+                          st.write("### 📊 Likelihood Ratio Test (Nested Model Comparison)")
+                          st.caption("The LRT formally tests whether adding variables to a nested model significantly improves fit. "
+                                     "Both models are fit on the **same rows** for a valid comparison.")
+                          lrt_df = pd.DataFrame(lrt_results)
+                          lrt_display = lrt_df.copy()
+                          lrt_display['p-value'] = lrt_display['p-value'].apply(lambda p: format_p_value(p, narrator_style_name, context="table"))
+                          lrt_display['χ² statistic'] = lrt_display['χ² statistic'].map('{:.3f}'.format)
+                          
+                          def _highlight_lrt(row):
+                              try:
+                                  _orig_p = lrt_df.loc[lrt_df['Comparison'] == row['Comparison'], 'p-value'].values[0]
+                                  if _orig_p < 0.05:
+                                      return ['background-color: rgba(0, 255, 0, 0.12)'] * len(row)
+                              except: pass
+                              return [''] * len(row)
+                          
+                          st.dataframe(lrt_display.style.apply(_highlight_lrt, axis=1), hide_index=True, use_container_width=True)
                       
                       # Plot (Forest Style)
                       fig_p, ax_p = plt.subplots(figsize=(8, 4))
@@ -3225,14 +6058,74 @@ if df is not None:
                       buf_p = io.BytesIO()
                       fig_p.savefig(buf_p, format="pdf", bbox_inches='tight')
                       st.download_button("📄 Download Forest Plot (PDF)", buf_p, "c_index_forest.pdf", "application/pdf")
-                      
+                      plt.close(fig_p)
+
                       # 4. Narrator
                       st.divider()
                       st.subheader("🤖 AI Prognostic Narrator")
                       if st.button("Generate Prognostic Report"):
-                            narrative = narrator.generate_prognostic_narrative(res_list)
-                            st.success("Report Generated:")
-                            st.text_area("Copy Text:", narrative, height=150)
+                            narrative = narrator.generate_prognostic_narrative(res_list, style_name=narrator_style_name, detail_level=narrator_detail_level)
+                            st.success("Report Generated (click the copy icon to copy):")
+                            st.code(narrative, language=None)
+
+                 # ------------------------------------------------------------
+                 # Internal validation & calibration (single Cox model)
+                 # ------------------------------------------------------------
+                 st.divider()
+                 st.markdown("#### 🎯 Internal Validation & Calibration")
+                 st.caption("Optimism-corrected discrimination (Harrell's enhanced bootstrap) plus a calibration "
+                            "plot at a chosen horizon — the discrimination-and-calibration pair reviewers expect (TRIPOD). "
+                            "Apparent performance on the training data is optimistic; the corrected value is the honest estimate.")
+                 _val_vars = st.multiselect(
+                     "Model covariates", [c for c in columns if c not in [time_col, event_col]], key="val_vars")
+                 _vc1, _vc2 = st.columns(2)
+                 with _vc1:
+                     _val_nboot = st.slider("Bootstrap resamples (optimism)", 50, 500, 200, 50, key="val_nboot")
+                 with _vc2:
+                     _tmax = float(pd.to_numeric(df_clean[time_col], errors='coerce').max())
+                     _val_horizon = st.slider("Calibration horizon (time)", 0.0, round(_tmax, 1),
+                                              round(min(_tmax * 0.5, _tmax), 1), key="val_horizon")
+                 if st.button("Run Internal Validation", key="run_val"):
+                     if not _val_vars:
+                         st.error("Select at least one covariate.")
+                     else:
+                         with st.spinner(f"Bootstrapping optimism ({_val_nboot} resamples)..."):
+                             _opt = statistics.bootstrap_optimism_c_index(
+                                 df_clean, time_col, event_col, _val_vars, n_boot=_val_nboot)
+                         if _opt is None:
+                             st.error("Could not compute the optimism-corrected C-index (too few events, or a covariate with no variation).")
+                         else:
+                             _vm1, _vm2, _vm3 = st.columns(3)
+                             _vm1.metric("Apparent C-index", f"{_opt['apparent']:.3f}")
+                             _vm2.metric("Optimism", f"{_opt['optimism']:.3f}")
+                             _vm3.metric("Optimism-corrected C-index", f"{_opt['corrected']:.3f}")
+                             st.caption(f"Harrell's enhanced bootstrap, {_opt['n_boot_used']} resamples. "
+                                        "Report the optimism-corrected C-index as the model's expected out-of-sample discrimination.")
+
+                         _cal, _cal_meta = statistics.compute_calibration(
+                             df_clean, time_col, event_col, _val_vars, _val_horizon)
+                         if _cal is None:
+                             st.warning(f"Calibration plot not available: {_cal_meta}")
+                         else:
+                             _figcal, _axcal = plt.subplots(figsize=(5, 5))
+                             _axcal.plot([0, 1], [0, 1], '--', color='grey', label='Perfect calibration')
+                             _yl = (_cal['Observed (KM)'] - _cal['Obs Lower']).clip(lower=0)
+                             _yu = (_cal['Obs Upper'] - _cal['Observed (KM)']).clip(lower=0)
+                             _axcal.errorbar(_cal['Mean Predicted'], _cal['Observed (KM)'],
+                                             yerr=[_yl, _yu], fmt='o-', capsize=3, color='#0072B5', label='Model')
+                             _axcal.set_xlabel(f"Predicted survival at t = {_val_horizon:.0f}")
+                             _axcal.set_ylabel("Observed survival (Kaplan-Meier)")
+                             _axcal.set_xlim(0, 1); _axcal.set_ylim(0, 1)
+                             _axcal.set_title("Calibration at fixed horizon")
+                             _axcal.legend(loc='lower right', fontsize=8)
+                             st.pyplot(_figcal)
+                             plt.close(_figcal)
+                             st.dataframe(
+                                 _cal.style.format({'Mean Predicted': '{:.3f}', 'Observed (KM)': '{:.3f}',
+                                                    'Obs Lower': '{:.3f}', 'Obs Upper': '{:.3f}'}),
+                                 hide_index=True, use_container_width=True)
+                             st.caption("Points on the diagonal indicate good calibration; systematic deviation "
+                                        "indicates over- or under-prediction of survival at this horizon.")
 
          with tab8:
              st.subheader("📚 Reproducibility & Citations")
@@ -3246,7 +6139,7 @@ if df is not None:
              def get_version(pkg):
                  try:
                      return importlib.metadata.version(pkg)
-                 except:
+                 except Exception:
                      return "Not Found"
              
              lib_info = [
@@ -3278,29 +6171,138 @@ if df is not None:
              *   **Kaplan-Meier Estimator**: Kaplan, E. L., & Meier, P. (1958). Nonparametric estimation from incomplete observations. *Journal of the American statistical association*, 53(282), 457-481.
              *   **Cox Proportional Hazards**: Cox, D. R. (1972). Regression models and life-tables. *Journal of the Royal Statistical Society: Series B (Methodological)*, 34(2), 187-220.
              *   **Log-Rank Test**: Mantel, N. (1966). Evaluation of survival data and two new rank order statistics arising in its consideration. *Cancer Chemotherapy Reports*, 50(3), 163-170.
-             
+             *   **Median Follow-up (reverse KM)**: Schemper, M., & Smith, T. L. (1996). A note on quantifying follow-up in studies of failure time. *Controlled Clinical Trials*, 17(4), 343-346.
+
              #### Competing Risks
-             *   **Fine-Gray Regression**: Fine, J. P., & Gray, R. J. (1999). A proportional hazards model for the subdistribution of a competing risk. *Journal of the American Statistical Association*, 94(446), 496-509.
              *   **Aalen-Johansen Estimator**: Aalen, O. O., & Johansen, S. (1978). An empirical transition matrix for non-homogeneous Markov chains based on censored observations. *Scandinavian Journal of Statistics*, 141-150.
-             
+             *   **Gray's K-sample Test**: Gray, R. J. (1988). A class of K-sample tests for comparing the cumulative incidence of a competing risk. *Annals of Statistics*, 16(3), 1141-1154.
+             *   **Fine-Gray Regression**: Fine, J. P., & Gray, R. J. (1999). A proportional hazards model for the subdistribution of a competing risk. *Journal of the American Statistical Association*, 94(446), 496-509.
+
              #### Advanced Methods
-             *   **Landmark Analysis**: Anderson, J. R., Cain, K. C., & Gelber, R. D. (1983). Analysis of survival by tumor response. *Journal of Clinical Oncology*, 1(11), 710-719.
-             
-             #### Diagnostic Accuracy
-             *   **Wilson Score Interval**: Wilson, E. B. (1927). Probable inference, the law of succession, and statistical inference. *Journal of the American Statistical Association*, 22(158), 209-212.
-             *   **Harrell's C-Index**: Harrell Jr, F. E., Lee, K. L., & Mark, D. B. (1996). Multivariable prognostic models: issues in developing models, evaluating assumptions and adequacy, and measuring and reducing errors. *Statistics in medicine*, 15(4), 361-387.
-             
-             ### 📝 How to Cite EasySurv
-             If you use this tool for your research, please cite it as:
-             > **EasySurv: An Interactive Platform for Survival Analysis (v2.0)**. Powered by Lifelines & Streamlit. Available at: [https://easysurv.streamlit.app](https://easysurv.streamlit.app)
-             """)
+              *   **Landmark Analysis**: Anderson, J. R., Cain, K. C., & Gelber, R. D. (1983). Analysis of survival by tumor response. *Journal of Clinical Oncology*, 1(11), 710-719.
+              *   **RMST**: Uno, H., Claggett, B., Tian, L., Inoue, E., Gallo, P., Miyata, T., ... & Wei, L. J. (2014). Moving beyond the hazard ratio in quantifying the between-group difference in survival analysis. *Journal of Clinical Oncology*, 32(22), 2380-2385.
+              *   **survRM2**: Uno, H., Tian, L., Cronin, A., Battioui, C., & Horiguchi, M. (2020). survRM2: Comparing Restricted Mean Survival Time. R package.
+              *   **RMTL (Competing Risks)**: Andersen, P. K. (2013). Decomposition of number of life years lost according to causes of death. *Statistics in Medicine*, 32(30), 5278-5285.
+              *   **RMTL Inference**: Zhao, L., et al. (2016). Utilizing the integrated difference of two survival functions. *Clinical Trials*, 9(5), 570-577.
+              
+              #### Diagnostic Accuracy & Prognostic Model Validation
+              *   **Wilson Score Interval**: Wilson, E. B. (1927). *JASA*, 22(158), 209-212.
+              *   **Harrell's C-Index**: Harrell Jr, F. E., et al. (1996). *Statistics in Medicine*, 15(4), 361-387.
+              *   **C-Index for Competing Risks**: Wolbers, M., et al. (2014). Concordance for prognostic models with competing risks. *Biostatistics*, 15(3), 526-539.
+              *   **Optimism correction (bootstrap)**: Harrell, F. E. (2015). *Regression Modeling Strategies*, 2nd ed. Springer. Steyerberg, E. W. (2009). *Clinical Prediction Models*. Springer.
+              *   **Reporting standard (TRIPOD)**: Collins, G. S., et al. (2015). Transparent reporting of a multivariable prediction model (TRIPOD). *Annals of Internal Medicine*, 162(1), 55-63.
+
+              #### Descriptive Statistics & Multiplicity
+              *   **Baseline table conventions**: Cohort summary as median [IQR] / n (%) with Mann-Whitney/Kruskal-Wallis and χ²/Fisher tests (cf. R `tableone`).
+              *   **False Discovery Rate**: Benjamini, Y., & Hochberg, Y. (1995). Controlling the false discovery rate. *JRSS: Series B*, 57(1), 289-300.
+
+              ---
+              
+              ### 🔬 Methodology Notes
+              
+              #### Kaplan-Meier & Cox PH
+              Kaplan-Meier survival is estimated using the product-limit estimator. Group comparisons use the **log-rank test** (Mantel, 1966). Hazard ratios (HRs) are estimated using the **Cox proportional hazards** model (Cox, 1972). The proportional hazards assumption is assessed using scaled Schoenfeld residuals.
+              
+              #### Time-Dependent Covariates
+              When a covariate changes during follow-up (e.g., transplant), including it as a baseline variable introduces **immortal time bias**. EasySurv uses the **counting-process** formulation: each patient's record is split at the time the covariate changes, creating (start, stop] intervals with the covariate coded 0 before and 1 after. The Cox model is then fit with `entry_col` for left-truncation, equivalent to R's `survival::tmerge()` + `coxph(Surv(start, stop, event) ~ ...)`.
+              
+              #### Restricted Mean Survival Time (RMST)
+              
+              RMST(τ) = ∫₀^τ S(t) dt, the area under the Kaplan-Meier curve from 0 to τ, interpretable as the average survival time within [0, τ].
+              
+              **Variance**: Uses the **analytical Greenwood-based formula** from `survRM2::rmst1()`:
+              
+              `Var(RMST) = Σ [ψᵢ² × dᵢ / (nᵢ × (nᵢ − dᵢ))]`, where `ψᵢ = ∫_{tᵢ}^τ S(u) du`.
+              
+              This is the **exact same formula** used by R's `survRM2::rmst2()`. No bootstrap is used — results are fully deterministic.
+              
+              **Difference**: `SE(Δ) = √[Var(RMST₁) + Var(RMST₂)]` from independent groups. P-value from `z = Δ/SE`, two-sided normal.
+              
+              **Pairwise comparisons**: For >2 groups, all C(k,2) pairwise differences are computed with individual analytical p-values. A reference group selector allows showing only comparisons vs. a chosen reference.
+              
+              #### Restricted Mean Time Lost (RMTL) for Competing Risks
+              
+              RMTL(τ) = ∫₀^τ F(t) dt, the area under the cause-specific CIF from 0 to τ, interpretable as the average time lost to the event of interest within [0, τ] (Andersen, 2013).
+              
+              The CIF is estimated using the **Aalen-Johansen estimator** (lifelines `AalenJohansenFitter`), equivalent to R's `cmprsk::cuminc()`.
+              
+              **Variance**: Uses **bootstrap resampling** (n=500, fixed seed=42 for reproducibility) with Wald-type CIs. This is the standard approach for CIF-based RMTL in the literature (Zhao et al., 2016), as the analytical variance for the CIF integral requires influence functions that are computationally complex. Bootstrap inference is used by many R implementations for the same reason.
+              
+              #### Cause-Specific C-Index for Competing Risks
+              
+              Harrell's C-index for competing risks uses the **cause-specific approach** (Wolbers et al., 2014): competing events are treated as censored, and a standard Cox PH model is fitted. This measures how well the model discriminates who will experience the event of interest. Equivalent to R's `concordance(coxph(Surv(time, cs_event) ~ covariates))`.
+              
+              #### Cumulative Incidence (Competing Risks)
+              
+              Cumulative incidence functions (CIF) are estimated using the **Aalen-Johansen estimator** (lifelines `AalenJohansenFitter`), which correctly accounts for competing events. This is equivalent to R's `cmprsk::cuminc()` point estimates.
+              
+              **Gray's K-sample test** (Gray, 1988) is used for group comparisons. **Fine-Gray SHRs** (Fine & Gray, 1999) are estimated via IPCW-weighted Cox in counting-process format.
+              
+              #### Baseline Characteristics (Table 1)
+              Continuous variables are summarised as **median [Q1–Q3]** (robust to the skewed distributions typical of clinical data) or optionally mean (SD); categorical variables as **n (%)**. Between-group tests are **Mann-Whitney U** (2 groups) / **Kruskal-Wallis** (>2) for continuous, and **Pearson χ²** — with **Fisher's exact** for small 2×2 tables — for categorical. P-values are unadjusted and intended as descriptive flags, not confirmatory tests.
+
+              #### Median Follow-up
+              Reported using the **reverse Kaplan-Meier** estimator (Schemper & Smith, 1996), in which censoring is treated as the event. This is the standard, unbiased way to summarise follow-up duration and is preferred over the naive median of observed times.
+
+              #### Multiple-comparison Adjustment
+              For pairwise comparisons (log-rank, Fine-Gray, RMST, RMTL) an optional **Benjamini-Hochberg (FDR)** or **Bonferroni** adjustment is offered; the implementation matches R's `p.adjust()`. Where no adjustment is applied the output is explicitly labelled *unadjusted*.
+
+              #### Internal Validation & Calibration (Prognostic Models)
+              Model discrimination on the training data (**apparent** C-index) is optimistically biased. EasySurv reports an **optimism-corrected C-index** using **Harrell's enhanced bootstrap**: for each of *B* bootstrap resamples the model is refit and the drop in C between the bootstrap sample and the original data estimates the optimism, which is subtracted from the apparent value. A **calibration plot** at a user-chosen horizon compares model-predicted survival against the Kaplan-Meier–observed survival across risk strata. Reporting **both** discrimination and calibration is required by TRIPOD; the corrected C-index is the honest estimate of out-of-sample performance.
+
+              ---
+
+              ### ⚠️ Assumptions, Caveats & Good Practice
+              *   **Proportional hazards**: Cox HRs assume the hazard ratio is constant over time. Assess with scaled Schoenfeld residuals (a global test is provided); if violated, prefer RMST or time-stratified/period-specific estimates. *EasySurv deliberately leaves the PH judgement to the analyst.*
+              *   **Data-driven cut-points**: optimal biomarker thresholds (Cutoff Finder, ROC/Youden) are selected from the same data used to test them, which **inflates significance**. Treat these as exploratory and validate on an independent cohort — the app flags this wherever it occurs.
+              *   **Multiplicity**: with many groups or many candidate variables, some "significant" findings are expected by chance. Use the adjustment options and disclose them.
+              *   **Missing data**: analyses are **complete-case** (rows with missing values in the selected variables are dropped, with the count shown). This can bias estimates if data are not missing completely at random; multiple imputation is preferable when missingness is substantial.
+              *   **Sample size / EPV**: aim for ≥10 events per variable in multivariable models. The Statistical Guardrails panel flags low EPV, collinearity (VIF), and separation.
+              *   **Reproducibility**: all stochastic procedures (Aalen-Johansen tie-handling, bootstraps) use a fixed seed, and the dependency stack is version-pinned, so results are reproducible across runs. Report the software versions listed above.
+
+              #### Implementation Equivalence with R
+              | EasySurv Component | R Equivalent | Variance Method |
+              |---|---|---|
+              | **RMST** | **`survRM2::rmst2()`** | **Analytical (Greenwood)** |
+              | **RMTL (CIF)** | **`cmprsk::cuminc()` + trapezoidal** | **Bootstrap (n=500, seed=42)** |
+              | **Cause-Specific C-Index** | **`concordance(coxph(...))`** | **Bootstrap (n=50)** |
+              | Aalen-Johansen CIF | `cmprsk::cuminc()` | — |
+              | **Gray's test** | **`cmprsk::cuminc()$Tests`** | **Exact port of cmprsk `crst.f` — matches to numerical precision** |
+              | Fine-Gray SHR | `cmprsk::crr()` | Cluster-robust sandwich (clustered on subject id) |
+              | Multivariable Fine-Gray | `cmprsk::crr()` with design matrix | Cluster-robust sandwich |
+              | Cause-Specific Cox | `survival::coxph()` | Model-based |
+              | TD Covariate | `survival::tmerge()` + `coxph()` | Model-based |
+              | Baseline table (Table 1) | `tableone::CreateTableOne()` | Mann-Whitney/Kruskal, χ²/Fisher |
+              | Optimism-corrected C | `rms::validate(..., B=)` | Harrell enhanced bootstrap |
+
+              > **Gray's test note**: EasySurv's Gray test is a direct translation of Robert Gray's
+              > Fortran `crst` routine from the `cmprsk` package, validated to agree with
+              > `cmprsk::cuminc()$Tests` to 6–7 decimal places across 2–4 groups and both event types.
+
+              > **Fine-Gray variance note**: subdistribution-hazard SEs use the **cluster-robust
+              > (sandwich) estimator clustered on subject id**, which is the correct variance for
+              > the IPCW-expanded (counting-process) dataset. The naive model-based Hessian would be
+              > anticonservative because it treats each subject's pseudo-observations as independent.
+              
+              ### 📝 How to Cite EasySurv
+              If you use this tool for your research, please cite it as:
+              > **EasySurv: An Interactive Platform for Survival Analysis (v2.2.0)**. Powered by Lifelines & Streamlit. Available at: [https://easysurv.streamlit.app](https://easysurv.streamlit.app)
+              """)
 
 else:
-    st.info("Please upload a CSV or Excel file to begin analysis.")
-    st.write("Demostration with Dummy Data:")
-    st.write("You can download the demo dataset `dummy_clinical_data.csv` from the repository:")
-    st.markdown("[📂 View Repository & Download Data](https://github.com/gauravchatnobel/Easysurv)")
-    st.caption("Right-click the link and open in a new tab to find the CSV file.")
+    st.markdown("""
+    <div class="getting-started">
+        <span class="gs-step"><b>1</b>Upload your data &mdash; or load the demo</span>
+        <span class="gs-arrow">&rarr;</span>
+        <span class="gs-step"><b>2</b>Choose your time &amp; event columns</span>
+        <span class="gs-arrow">&rarr;</span>
+        <span class="gs-step"><b>3</b>Generate plots, models &amp; a session report</span>
+    </div>
+    """, unsafe_allow_html=True)
+    st.caption(
+        "New here? Click **🚀 Load Demo Data** above to explore with a sample cohort — "
+        "or [download the demo dataset](https://github.com/gauravchatnobel/Easysurv) to see the expected format."
+    )
 
 
 

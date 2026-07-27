@@ -9,6 +9,7 @@ def load_data(file, sheet_name=0):
         else:
             return pd.read_excel(file, sheet_name=sheet_name)
     except Exception as e:
+        st.error(f"Failed to load file '{file.name}': {e}")
         return None
 
 # --- THEMES ---
@@ -24,10 +25,17 @@ journal_themes = {
 }
 
 fun_themes = {
-    "Cosmic Nihilism": ["#A6EEE6", "#F0F035", "#44281D", "#E4A71B", "#8BCF21", "#FBFBFB"],
-    "Hollywood Equine": ["#2C3E50", "#D35400", "#2980B9", "#C0392B", "#bdc3c7", "#F39C12"],
-    "Prehistoric One": ["#5D4037", "#D84315", "#388E3C", "#FBC02D", "#455A64", "#212121"],
-    "Alien Biosphere": ["#FFB7E1", "#8DE581", "#7DFAFF", "#D78E38", "#596025", "#304245"], # Scavengers Reign
+    # === Anime Auteur Themes (ordered) ===
+    "Tapestry of Life": ["#FFB7E1", "#8DE581", "#7DFAFF", "#D78E38", "#596025", "#304245"], # Scavengers Reign
+    "Existential Emptiness": ["#2C3E50", "#D35400", "#2980B9", "#C0392B", "#bdc3c7", "#F39C12"], # Bojack Horseman
+    "Alienation of Adolescence": ["#E8C97A", "#7BA7BC", "#D4A0B0", "#5B7E8C", "#F5ECD7", "#3D5A6E"], # Sonny Boy
+    "Violence of Survival": ["#5D4037", "#D84315", "#388E3C", "#FBC02D", "#455A64", "#212121"], # Primal
+    "Anatomy of a Monster": ["#4A5568", "#8B0000", "#2C5282", "#D4A76A", "#1A202C", "#A0AEC0"], # Monster
+    "Cosmic Nihilism": ["#A6EEE6", "#F0F035", "#44281D", "#E4A71B", "#8BCF21", "#FBFBFB"], # Rick & Morty
+    "Digital Dissociation": ["#00C853", "#B71C1C", "#37474F", "#78909C", "#CFD8DC", "#1B5E20"], # Mr Robot
+    
+    # === More Themes ===
+    "Fractured Timeline": ["#5C3D6E", "#E6A550", "#4DA8A0", "#C97B8B", "#7B8FA1", "#2E1F3E"], # Rotoscope dreamscape
     "Alien Flora": ["#F4EBD0", "#D66853", "#3C505D", "#7D9D9C", "#212D40", "#A8C686"],
     "Neon Acid": ["#FF00FF", "#00FF00", "#0000FF", "#FFFF00", "#00FFFF", "#FF0000"],
     "Cyber Grid": ["#2F5061", "#4291C7", "#D57FBE", "#E45D5C", "#FFAE91", "#F9DB57", "#FFFFD0"],
@@ -51,7 +59,7 @@ fun_themes = {
     "Manic Urbanism": ["#E91E63", "#D32F2F", "#607D8B", "#455A64", "#212121"], 
     "Idol's Nightmare": ["#FF69B4", "#D50000", "#1A237E", "#F0F8FF", "#880E4F", "#000000"], # Perfect Blue 
     "Nameless Terror": ["#5D4037", "#3E2723", "#B71C1C", "#263238", "#ECEFF1"], 
-    "The Great Epic": ["#FF9800", "#FFC107", "#D32F2F", "#00BCD4", "#795548"], 
+    "Great Epic": ["#FF9800", "#FFC107", "#D32F2F", "#00BCD4", "#795548"], 
     "Wizard of Loneliness": ["#E0E0E0", "#90A4AE", "#546E7A", "#A1887F", "#B0BEC5"], 
     
     # Literary Themes
